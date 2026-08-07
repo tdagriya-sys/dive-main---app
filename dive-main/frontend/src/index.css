@@ -1,0 +1,120 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Poppins:wght@400;500&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+    /* Gold accent (Groww-W style) — variable name kept as --dive-blue for reuse */
+    --dive-blue: #E3B856;
+    --dive-blue-hover: #F0CD78;
+    --dive-blue-light: #2A2413;
+    --dive-blue-dark: #F2D78C;
+    --gold-a: #F7DD93;
+    --gold-b: #E3B856;
+    --gold-c: #C8912F;
+    --app-bg: #0A0A0B;
+    --wrapper-bg: #050505;
+    --surface-card: #141416;
+    --surface-card-hover: #1C1C20;
+    --text-primary: #FAFAF7;
+    --text-secondary: #A1A1AA;
+    --text-tertiary: #6B6B72;
+    --border: #262629;
+    --border-light: #1C1C1F;
+    --green: #34D399;
+    --amber: #FBBF24;
+    --red: #F87171;
+}
+
+body {
+    margin: 0;
+    font-family: 'Manrope', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background: radial-gradient(1100px 620px at 72% -12%, #1A1509 0%, #0C0B08 42%, #050505 100%) fixed;
+    color: var(--text-primary);
+}
+
+.font-heading {
+    font-family: 'Manrope', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    letter-spacing: -0.02em;
+}
+
+@layer components {
+    .gold-btn {
+        background-image: linear-gradient(135deg, var(--gold-a) 0%, var(--gold-b) 48%, var(--gold-c) 100%) !important;
+        color: #1A1400 !important;
+        box-shadow: 0 10px 26px -10px rgba(220, 170, 60, 0.55);
+    }
+    .gold-btn:hover { filter: brightness(1.06); }
+    .text-gold-gradient {
+        background-image: linear-gradient(135deg, var(--gold-a), var(--gold-b) 55%, var(--gold-c));
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+    }
+    .gold-ring { box-shadow: 0 0 0 1px rgba(227, 184, 86, 0.25), 0 8px 30px -12px rgba(227, 184, 86, 0.3); }
+}
+
+/* Chrome/Safari force a light background + dark text on autofilled fields,
+   overriding any bg-transparent/bg-[var(--surface-card)] class the moment the
+   browser recognizes a field as filled (autofill suggestions, saved
+   passwords, or a value set programmatically). On this dark theme that meant
+   near-white text (--text-primary) landing on that same forced light
+   background — effectively invisible until the field was clicked into. The
+   huge inset box-shadow repaints the field's background in our own color
+   without touching layout, and -webkit-text-fill-color overrides the
+   browser-forced text color the same way. Long transition delay keeps it from
+   flashing light before repainting on some engines.
+   https://stackoverflow.com/questions/2781549 (the standard fix for this exact issue) */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 1000px var(--surface-card) inset !important;
+    -webkit-text-fill-color: var(--text-primary) !important;
+    caret-color: var(--text-primary);
+    transition: background-color 600000s 0s, color 600000s 0s;
+}
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+    /* Stops scroll chaining: once this container hits its top/bottom edge,
+       further scroll input must NOT bleed into the outer landing page's
+       scroll (which was flipping the phone's screen via the section
+       IntersectionObserver in App.js as a side effect). */
+    overscroll-behavior: contain;
+}
+
+@layer base {
+    :root {
+        --background: 0 0% 100%;
+        --foreground: 240 10% 3.9%;
+        --card: 0 0% 100%;
+        --card-foreground: 240 10% 3.9%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 240 10% 3.9%;
+        --primary: 219 100% 53%;
+        --primary-foreground: 0 0% 100%;
+        --secondary: 240 4.8% 95.9%;
+        --secondary-foreground: 240 5.9% 10%;
+        --muted: 240 4.8% 95.9%;
+        --muted-foreground: 240 3.8% 46.1%;
+        --accent: 219 100% 91%;
+        --accent-foreground: 219 100% 30%;
+        --destructive: 0 84.2% 60.2%;
+        --destructive-foreground: 0 0% 98%;
+        --border: 240 5.9% 90%;
+        --input: 240 5.9% 90%;
+        --ring: 219 100% 53%;
+        --radius: 0.75rem;
+    }
+}
+
+@layer base {
+    * { @apply border-border; }
+    .dive-app-surface { background: linear-gradient(180deg, #0E0E10 0%, #0A0A0B 55%, #08080A 100%); }
+    input[type="range"] { accent-color: var(--dive-blue); }
+}

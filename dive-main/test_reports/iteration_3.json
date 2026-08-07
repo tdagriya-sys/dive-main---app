@@ -1,0 +1,35 @@
+{
+  "summary": "Iteration 3 testing of DIVE demo covering backend new endpoints (og-image, share, simulations persistence), simulation persistence across reload, smarter look-through, dark+gold theme, phone frame visibility, and callouts removal. Backend: 18/18 pytest passed (incl. 4 new tests). Frontend: simulation persistence + look-through + banner + share flow verified. TWO bugs found: (1) two callout cards NOT actually removed — still in landing DOM as inline pills; (2) phone frame + bottom-nav is cut off at 1280x720 viewport.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Landing page callouts", "issue": "Callouts 'Real-time portfolio health, scored' and 'See what you\\'re really exposed to' are still present as inline pill badges in the landing page (class 'inline-flex items-center gap-2 mt-5 bg-[var(--surface-card)] rounded-full px-4 py-2 border'). Request required these to be removed. They also use text-[var(--dive-blue-dark)] which is dark-blue text on a dark background — likely low contrast readability issue.", "selector": "text=Real-time portfolio health, scored / text=See what you're really exposed to", "priority": "HIGH"},
+      {"component": "Phone frame responsive height", "issue": "At 1280x720 desktop viewport, the phone bottom-nav is cut off (nav ends at y=754px but viewport is 720px). At 1440x900 it fits fine. The phone frame uses h-[min(760px,90vh)] which at 720vh = 648, but the frame content + phone chrome overflows. Request explicitly required full visibility at both 1440x900 AND 1280x720.", "selector": "[data-testid='bottom-nav']", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Home", "issues": ["DIVE Score ring number '63' rendered in bright blue (--dive-blue) rather than the gold accent — inconsistent with the 'DARK + GOLD (Groww-W style)' theme brief. Non-blocking; possibly intentional retained accent."]},
+      {"screen": "Landing scroll pills", "issues": ["Inline pill badges use text-[var(--dive-blue-dark)] on dark surface — verify contrast ratio meets AA."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Actually remove (or gate off) the two callout pill elements 'Real-time portfolio health, scored' and 'See what you\\'re really exposed to' from /app/frontend/src/App.js landing scrollytelling markup.",
+    "Fix phone frame sizing so bottom-nav is visible at 1280x720 (e.g. h-[min(700px,88vh)] or reduce scale / adjust responsive breakpoint).",
+    "Consider changing the score ring number color to gold for theme consistency, or confirm blue is an intentional accent."
+  ],
+  "critical_code_review_comments": [
+    "Backend endpoints for simulations/og-image/share are clean; server.py is 400 lines, still under threshold.",
+    "og-image PNG rendering works and returns ~image/png as expected; response caches with Cache-Control public max-age=86400 — good.",
+    "share_page uses html.escape on user-controlled 'u' param — good XSS hygiene.",
+    "Simulations model stores updatedAt as ISO string via Field default_factory — fine, but the pydantic default_factory only runs at model instantiation, not on updates from client-sent JSON (client can override). Minor: consider setting updatedAt server-side always in save_simulations to avoid client tampering."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100%", "frontend": "70%"},
+  "test_credentials": "None required — mock OTP via autofill-otp-btn (123456)",
+  "seed_data_creation": "Test creates+clears aarav simulation via POST /api/simulations; auto-cleaned in test flow (post empty sims).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 3: Backend 18/18 pass. Verified: POST/GET /api/simulations persistence and clearing; /api/og-image returns valid PNG (>5KB, PNG magic bytes); /api/share returns HTML with og:image/og:title/twitter:image meta and includes '/api/og-image/{score}'. Frontend: after applying REIT/InvIT sim (₹38000 via slider) home shows score 76 (base 63) and home-sim-banner. After page.reload() and re-doing onboarding, banner and elevated score persist (loaded from backend for profile aarav). X-Ray look-deeper shows Embassy REIT and IndiGrid InvIT (realistic look-through). home-reset-sims clears sims and banner. Share sheet opens from insights-share-btn, copy-link works. Meera profile switch works. Two bugs found: (a) callout pills NOT removed from landing; (b) phone cut off at 1280x720. No home-score data-testid attribute exists — score is visible visually only; recommend adding for future robust tests.",
+  "rca of the issue": "Callouts bug RCA: Grep DOM shows inline-flex pill elements still present in the landing scrollytelling markup, likely in /app/frontend/src/App.js — the ‘removal’ in iteration 3 changes did not actually delete these two pill nodes. Repro: load / at 1440x900, evaluate document.body.innerText.includes('Real-time portfolio health, scored'). Phone cutoff RCA: current CSS h-[min(760px,90vh)] with content (header + score + insights + bottom-nav) exceeds 90% of 720 = 648px so bottom-nav overflows. Repro: page.set_viewport_size({width:1280,height:720}), complete onboarding, get bounding_box of [data-testid='bottom-nav']; y+height=754 > 720. Fix: reduce phone content padding/gap or clamp inner scrollable area with overflow-hidden while keeping bottom-nav sticky."
+}

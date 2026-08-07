@@ -1,0 +1,155 @@
+{
+  "theme": "Light",
+  "archetype": "1 (Organic & Earthy / Trust) + Premium Fintech customization",
+  "brand_identity": {
+    "name": "DIVE",
+    "tagline": "Dive deeper. Invest smarter.",
+    "tone": "Friendly, confident, witty. Smart friend, not a bank."
+  },
+  "color_tokens": {
+    "primary": {
+      "brand_blue": "#0F62FE",
+      "brand_blue_light": "#D0E2FF",
+      "brand_blue_dark": "#002D9C",
+      "brand_blue_hover": "#0353E9"
+    },
+    "neutrals": {
+      "background_app": "#FAFAFA",
+      "background_wrapper": "#F3F4F6",
+      "surface_card": "#FFFFFF",
+      "surface_card_hover": "#F9FAFB",
+      "text_primary": "#09090B",
+      "text_secondary": "#71717A",
+      "text_tertiary": "#A1A1AA",
+      "border": "#E4E4E7",
+      "border_light": "#F4F4F5"
+    },
+    "risk_signals": {
+      "health_green": "#10B981",
+      "health_green_bg": "#D1FAE5",
+      "warning_amber": "#F59E0B",
+      "warning_amber_bg": "#FEF3C7",
+      "danger_red": "#EF4444",
+      "danger_red_bg": "#FEE2E2"
+    },
+    "simulated_apps_skins": {
+      "equity": {
+        "accent": "#00D09C",
+        "bg": "#FFFFFF",
+        "style": "Minimalist, big bold numbers, smooth line charts."
+      },
+      "fd_banking": {
+        "accent": "#6D28D9",
+        "bg": "#FAFAFA",
+        "style": "Traditional, serif typography accents, highly structured."
+      },
+      "bonds": {
+        "accent": "#0F766E",
+        "bg": "#FFFFFF",
+        "style": "Data-heavy, dense rows, high contrast text."
+      },
+      "reit": {
+        "accent": "#D97706",
+        "bg": "#FFFBEB",
+        "style": "Card-based, architectural/property imagery placeholders."
+      },
+      "gold": {
+        "accent": "#EAB308",
+        "bg": "#18181B",
+        "style": "Dark mode premium, metallic gradients, sleek."
+      }
+    }
+  },
+  "typography": {
+    "heading_font": "Cabinet Grotesk, sans-serif",
+    "body_font": "Satoshi, sans-serif",
+    "rules": {
+      "h1": "text-4xl sm:text-5xl font-black tracking-tighter text-text_primary leading-tight",
+      "h2": "text-2xl sm:text-3xl font-bold tracking-tight text-text_primary",
+      "h3": "text-xl sm:text-2xl font-semibold tracking-tight",
+      "body": "text-base font-medium text-text_secondary leading-relaxed",
+      "small_label": "text-xs font-bold uppercase tracking-[0.2em] text-text_tertiary"
+    }
+  },
+  "layout_and_spacing": {
+    "wrapper": "flex flex-col lg:flex-row items-center justify-center min-h-screen bg-background_wrapper px-4 py-20 lg:py-0 overflow-hidden",
+    "scrollytelling_text": "lg:w-1/2 flex flex-col justify-center space-y-24 py-32 px-8 lg:px-16",
+    "phone_frame": {
+      "container": "relative w-[340px] h-[720px] rounded-[3rem] border-[8px] border-gray-900 bg-background_app shadow-[0_24px_60px_-15px_rgba(0,0,0,0.3)] overflow-hidden shrink-0",
+      "notch": "absolute top-0 inset-x-0 h-6 bg-gray-900 rounded-b-3xl w-40 mx-auto z-50",
+      "inner_scroll": "h-full w-full overflow-y-auto no-scrollbar scroll-smooth"
+    },
+    "cards": {
+      "default": "bg-surface_card rounded-2xl p-6 shadow-sm border border-border transition-all duration-300",
+      "interactive": "hover:shadow-md hover:-translate-y-1 cursor-pointer"
+    },
+    "spacing_scale": "Use p-4 to p-8 aggressively inside the phone app. Outside the phone, use py-24 to py-32 for scrollytelling steps."
+  },
+  "motion_and_animations": {
+    "general": "Smooth, spring-based micro-interactions. No sudden snaps.",
+    "dive_score_reveal": "Framer Motion SVG circle path animation, starting at 0 and filling up to the score, changing color from red to amber to green/blue.",
+    "xray_donut_melt": "Layout transition where the initial top-level category pie chart splits into smaller nested sectors using Framer Motion layoutId.",
+    "staggered_entrance": "Lists and cards fade in and slide up with a stagger delay of 0.1s.",
+    "bottom_sheet": "DIVE Bot overlay slides up from the bottom (y: '100%' to y: 0) with a bouncy spring physics config (stiffness: 300, damping: 30).",
+    "scrollytelling_sync": "As user scrolls the outer wrapper, the phone frame's content changes based on the active IntersectionObserver section."
+  },
+  "components_guidance": {
+    "buttons": {
+      "primary": "bg-brand_blue text-white rounded-full px-6 py-3 font-bold hover:bg-brand_blue_hover transition-colors shadow-lg shadow-brand_blue/20",
+      "secondary": "bg-white text-text_primary border border-border rounded-full px-6 py-3 font-semibold hover:bg-surface_card_hover transition-colors"
+    },
+    "inputs": {
+      "default": "w-full rounded-xl border border-border bg-white px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand_blue/50 transition-shadow"
+    },
+    "data_visualization": {
+      "rings": "Use pure SVG with stroke-dasharray for progress rings. Round caps.",
+      "bars": "Rounded full bars (rounded-full) for before/after comparisons in Suggestions."
+    },
+    "data_testid_rules": "All interactive elements MUST have a data-testid attribute formatted in kebab-case representing their role (e.g., 'simulate-slider', 'dive-bot-trigger')."
+  },
+  "screens": {
+    "onboarding": {
+      "description": "Splash cards, OTP form, and Account Aggregator consent.",
+      "key_elements": ["Swipeable cards", "Mock OTP input", "Consent toggles", "KYC scanning animation (connecting nodes)"]
+    },
+    "home": {
+      "description": "Main dashboard showing DIVE score and top insights.",
+      "key_elements": ["Large central DIVE Score ring", "Apparent vs Real Diversification stat blocks", "Bottom navigation bar"]
+    },
+    "x_ray": {
+      "description": "Deep dive into portfolio concentration.",
+      "key_elements": ["Donut chart", "Drill-down list (Category -> Fund -> Company -> Sector)", "Credit rating badges"]
+    },
+    "suggestions": {
+      "description": "Actionable rebalancing suggestions.",
+      "key_elements": ["Before/After bar charts", "'Simulate this change' interactive slider", "Stress-test toggle"]
+    },
+    "dive_bot_hub": {
+      "description": "Grid of other simulated apps to show DIVE's popup behavior.",
+      "key_elements": ["5 tiles with different skins", "Clicking one opens a fake UI of that app, then the DIVE Bot slides up from the bottom to warn/praise."]
+    }
+  },
+  "media_assets": {
+    "abstract_backgrounds": [
+      {
+        "url": "https://images.pexels.com/photos/6063468/pexels-photo-6063468.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Soft light blue/white bokeh, use as a subtle background for the outer scrollytelling wrapper or splash screen."
+      }
+    ],
+    "avatars": [
+      {
+        "url": "https://images.pexels.com/photos/6784744/pexels-photo-6784744.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Smiling Gen Z profile image for the Profile section."
+      }
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Install and use 'framer-motion' for all scrollytelling interactions and the DIVE Score ring/donut animations.",
+    "Install 'lucide-react' for icons.",
+    "Implement the landing page with an outer flex/grid container. The phone frame remains 'sticky' on desktop while the text sections scroll past.",
+    "Inside the phone frame, implement a standard React Router or state-based view switcher to navigate between the app screens.",
+    "Use Cabinet Grotesk for all headings. You can use standard Tailwind utility fonts for fallback, but load Cabinet Grotesk from a CDN or local asset.",
+    "For the DIVE Bot Demo Hub, create 5 distinct mocked screens (Equity, FD, Bonds, REIT, Gold). When the user opens one, show the DIVE Bot sliding up from the bottom.",
+    "Ensure all buttons, sliders, and interactive cards have `data-testid` attributes."
+  ]
+}

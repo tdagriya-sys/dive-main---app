@@ -1,0 +1,27 @@
+{
+  "summary": "First-finish smoke test of DIVE demo. Backend: all 11 required endpoints pass with correct status/shape (404 for invalid profile, preferences POST->GET persistence works). Frontend: full onboarding->home->xray->suggestions->divebot flow completes; Reliance shows in deep X-Ray view; DIVE Bot simapp+overlay render.",
+  "tested_scope": ["frontend", "backend", "integration"],
+  "passed": [
+    "GET /api/portfolio/aarav (200, 5 holdings, has sectors)",
+    "GET /api/portfolio/meera (200, 6 holdings)",
+    "GET /api/ideal-ranges (200, Conservative/Balanced/Aggressive keys)",
+    "GET /api/instruments (200), /api/instruments/reliance|ppfcf|hdfcbond (200)",
+    "GET /api/stress-tests (200)",
+    "GET /api/insights/aarav & /api/insights/meera (200)",
+    "POST /api/preferences persists; GET /api/preferences/aarav returns saved risk/return/diversification/preferred/excluded",
+    "GET /api/portfolio/xyz -> 404 (invalid profile handling)",
+    "Landing: hero-demo-btn + header-cta visible; heading 'Dive deeper. Invest smarter.' rendered; phone frame visible",
+    "Onboarding: splash-next-btn (3 steps) -> phone-input -> send-otp -> autofill-otp -> verify-otp -> consent-toggle+continue -> fetching auto-advances -> reveal shows dive-score-ring (score 58) -> reveal-continue-btn -> Home",
+    "Home screen visible with bottom-nav",
+    "X-Ray: xray-screen loads; xray-look-deeper-btn toggles to deep view showing 'Reliance'",
+    "Suggestions: 6 sugg-card-* rendered",
+    "DIVE Bot: divebot-hub-screen with 5 tiles; tapping tile opens divebot-simapp and divebot-overlay slides up"
+  ],
+  "failed": [],
+  "action_items": [
+    "Minor: DIVE score rendered as 58 for aarav (spec said ~62). Verify diveEngine computation if exact score matters for investor demo."
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "retest_needed": false,
+  "full_testing_deferred": true
+}

@@ -1,0 +1,19 @@
+{
+  "summary": "Iteration 2 regression + new-feature testing of DIVE demo (simulation persistence, richer holdings, share cards at Reveal & Insights, Manrope font). Backend 14/14 pytest passed; frontend end-to-end flow passed all critical checks.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "diveEngine.effectiveHoldings look-through of simulated allocation is 100% 'Others (diversified)' — this is intentional for demo but be aware it inflates 'realDiversification' faster than real-world would.",
+    "Landing page tooltip decorations sit outside the phone frame — testing with data-testid nav buttons works reliably. No blocker."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "None required — mock OTP via autofill-otp-btn (123456)",
+  "seed_data_creation": "None (deterministic mock data)",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Confirmed on 2026-01: (1) GET /api/portfolio/aarav returns 7 holdings incl. ETF (etf1 Nifty 50 ETF) + Insurance (ul1 ULIP), NO REIT/InvIT. (2) GET /api/portfolio/meera returns 9 holdings incl. rt1 Embassy REIT + iv1 IndiGrid InvIT. (3) Full onboarding flow requires ~600ms delay between splash-next-btn clicks (motion transitions). Reveal-continue-btn animates in at delay 1.5s so wait ~2s after reveal-screen appears. (4) Aarav base DIVE score = 63; simulating REIT/InvIT ₹60,000 raises it to 73 (+10). Reset returns to 63. Score persists across nav-home <-> nav-xray <-> nav-suggestions. home-sim-banner appears exactly when sims non-empty and disappears on home-reset-sims. (5) Meera DIVE score = 87; her X-Ray shows REIT/InvIT segment and IndiGrid text. (6) Share card sheet opens at both reveal-share-btn and insights-share-btn; share-card-visual contains the current (post-sim) score, copy-link-btn triggers toast. share-close-btn closes it. (7) Font body computed style = Manrope, ui-sans-serif, ... — no font network errors. Note: segment label 'Insurance' rendered visually as 'INSURANCE' via CSS text-transform uppercase in drill-down header — case-insensitive checks recommended for future tests. Backend pytest at /app/backend/tests/backend_test.py (14 tests) is the regression harness.",
+  "rca of the issue": "No bugs found."
+}

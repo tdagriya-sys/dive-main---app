@@ -1,0 +1,13 @@
+<svg viewBox="0 0 240 280" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F7D68C"/>
+      <stop offset="45%" stop-color="#E0A73E"/>
+      <stop offset="100%" stop-color="#A9741C"/>
+    </linearGradient>
+  </defs>
+  <rect width="240" height="280" fill="#0A0908"/>
+  <g transform="matrix(0.272597,0,0,-0.272597,19.0100,235.0000)">
+    <path d="M664 347Q664 240 619.5 161.5Q575 83 491.5 41.5Q408 0 294 0H77V697H294Q408 697 491.5 654.5Q575 612 619.5 533.0Q664 454 664 347ZM571 347Q571 477 499.5 550.0Q428 623 294 623H168V75H294Q429 75 500.0 146.5Q571 218 571 347Z" fill="url(#goldGrad)"/>
+  </g>
+</svg>
