@@ -64,7 +64,14 @@ export const STATIC_INSTRUMENTS: SeedInstrument[] = [
   { assetClass: "EQUITY", symbol: "SHREECEM", name: "Shree Cement", exchange: "NSE" },
   { assetClass: "EQUITY", symbol: "APOLLOHOSP", name: "Apollo Hospitals Enterprise", exchange: "NSE" },
 
-  // Mutual Funds — a sample of well-known schemes
+  // Mutual Funds — AMFI's live scheme master (~8,000 rows) is the real source;
+  // this fallback only kicks in when that fetch is unreachable (e.g. some cloud
+  // hosts get network-level blocked connecting to amfiindia.com — a silent TCP
+  // connection drop, not an HTTP-level block, confirmed 2026-08-08; see
+  // docs/PROTOTYPE_LIMITATIONS.md). Broadened from an original 7 names to a real,
+  // hand-curated spread across every major category and fund house, so search
+  // stays genuinely useful even with AMFI unreachable — still nowhere near the
+  // full ~8,000, but no longer "basically nothing."
   { assetClass: "MUTUAL_FUND", symbol: "PPFCF", name: "Parag Parikh Flexi Cap Fund", issuer: "PPFAS Mutual Fund" },
   { assetClass: "MUTUAL_FUND", symbol: "NIPLC", name: "Nippon India Large Cap Fund", issuer: "Nippon India Mutual Fund" },
   { assetClass: "MUTUAL_FUND", symbol: "MOSMALL250", name: "Motilal Oswal Midcap Fund", issuer: "Motilal Oswal Mutual Fund" },
@@ -72,6 +79,84 @@ export const STATIC_INSTRUMENTS: SeedInstrument[] = [
   { assetClass: "MUTUAL_FUND", symbol: "HDFCMIDCAP", name: "HDFC Mid-Cap Opportunities Fund", issuer: "HDFC Mutual Fund" },
   { assetClass: "MUTUAL_FUND", symbol: "AXISGROWTHOPP", name: "Axis Growth Opportunities Fund", issuer: "Axis Mutual Fund" },
   { assetClass: "MUTUAL_FUND", symbol: "ICICIPRUVAL", name: "ICICI Prudential Value Discovery Fund", issuer: "ICICI Prudential Mutual Fund" },
+  // Large Cap
+  { assetClass: "MUTUAL_FUND", symbol: "ICICIBLUECHIP", name: "ICICI Prudential Bluechip Fund", issuer: "ICICI Prudential Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "AXISBLUECHIP", name: "Axis Bluechip Fund", issuer: "Axis Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "MIRAELARGECAP", name: "Mirae Asset Large Cap Fund", issuer: "Mirae Asset Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "HDFCTOP100", name: "HDFC Top 100 Fund", issuer: "HDFC Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "CANARABLUECHIP", name: "Canara Robeco Bluechip Equity Fund", issuer: "Canara Robeco Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "UTIMASTERSHARE", name: "UTI Mastershare Fund", issuer: "UTI Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "KOTAKBLUECHIP", name: "Kotak Bluechip Fund", issuer: "Kotak Mutual Fund" },
+  // Flexi Cap
+  { assetClass: "MUTUAL_FUND", symbol: "HDFCFLEXICAP", name: "HDFC Flexi Cap Fund", issuer: "HDFC Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "FRANKLINFLEXICAP", name: "Franklin India Flexi Cap Fund", issuer: "Franklin Templeton Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "KOTAKFLEXICAP", name: "Kotak Flexicap Fund", issuer: "Kotak Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "UTIFLEXICAP", name: "UTI Flexi Cap Fund", issuer: "UTI Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "DSPFLEXICAP", name: "DSP Flexi Cap Fund", issuer: "DSP Mutual Fund" },
+  // Mid Cap
+  { assetClass: "MUTUAL_FUND", symbol: "KOTAKEMERGING", name: "Kotak Emerging Equity Fund", issuer: "Kotak Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "AXISMIDCAP", name: "Axis Midcap Fund", issuer: "Axis Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "DSPMIDCAP", name: "DSP Midcap Fund", issuer: "DSP Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "NIPPONGROWTH", name: "Nippon India Growth Fund", issuer: "Nippon India Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "PGIMMIDCAP", name: "PGIM India Midcap Opportunities Fund", issuer: "PGIM India Mutual Fund" },
+  // Small Cap
+  { assetClass: "MUTUAL_FUND", symbol: "NIPPONSMALLCAP", name: "Nippon India Small Cap Fund", issuer: "Nippon India Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "SBISMALLCAP", name: "SBI Small Cap Fund", issuer: "SBI Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "AXISSMALLCAP", name: "Axis Small Cap Fund", issuer: "Axis Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "KOTAKSMALLCAP", name: "Kotak Small Cap Fund", issuer: "Kotak Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "HDFCSMALLCAP", name: "HDFC Small Cap Fund", issuer: "HDFC Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "QUANTSMALLCAP", name: "Quant Small Cap Fund", issuer: "Quant Mutual Fund" },
+  // Multi Cap / Large & Mid Cap
+  { assetClass: "MUTUAL_FUND", symbol: "KOTAKMULTICAP", name: "Kotak Multicap Fund", issuer: "Kotak Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "NIPPONMULTICAP", name: "Nippon India Multi Cap Fund", issuer: "Nippon India Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "ICICIMULTICAP", name: "ICICI Prudential Multicap Fund", issuer: "ICICI Prudential Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "CANARAEMERGING", name: "Canara Robeco Emerging Equities Fund", issuer: "Canara Robeco Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "MIRAELARGEMIDCAP", name: "Mirae Asset Emerging Bluechip Fund", issuer: "Mirae Asset Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "SBILARGEMIDCAP", name: "SBI Large & Midcap Fund", issuer: "SBI Mutual Fund" },
+  // ELSS / Tax Saving
+  { assetClass: "MUTUAL_FUND", symbol: "AXISELSS", name: "Axis Long Term Equity Fund", issuer: "Axis Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "MIRAETAXSAVER", name: "Mirae Asset Tax Saver Fund", issuer: "Mirae Asset Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "SBILONGTERMEQUITY", name: "SBI Long Term Equity Fund", issuer: "SBI Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "QUANTTAXPLAN", name: "Quant Tax Plan", issuer: "Quant Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "CANARAELSS", name: "Canara Robeco Equity Tax Saver Fund", issuer: "Canara Robeco Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "DSPTAXSAVER", name: "DSP Tax Saver Fund", issuer: "DSP Mutual Fund" },
+  // Value / Contra / Focused
+  { assetClass: "MUTUAL_FUND", symbol: "SBICONTRA", name: "SBI Contra Fund", issuer: "SBI Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "KOTAKCONTRA", name: "Kotak India EQ Contra Fund", issuer: "Kotak Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "UTIVALUE", name: "UTI Value Opportunities Fund", issuer: "UTI Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "AXISFOCUSED", name: "Axis Focused Fund", issuer: "Axis Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "SBIFOCUSEDEQUITY", name: "SBI Focused Equity Fund", issuer: "SBI Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "ICICIFOCUSEDEQUITY", name: "ICICI Prudential Focused Equity Fund", issuer: "ICICI Prudential Mutual Fund" },
+  // Index Funds
+  { assetClass: "MUTUAL_FUND", symbol: "UTINIFTYINDEX", name: "UTI Nifty 50 Index Fund", issuer: "UTI Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "HDFCNIFTYINDEX", name: "HDFC Index Fund - Nifty 50 Plan", issuer: "HDFC Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "ICICINIFTYINDEX", name: "ICICI Prudential Nifty 50 Index Fund", issuer: "ICICI Prudential Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "SBINIFTYINDEX", name: "SBI Nifty Index Fund", issuer: "SBI Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "NIPPONSENSEXINDEX", name: "Nippon India Index Fund - Sensex Plan", issuer: "Nippon India Mutual Fund" },
+  // Debt / Liquid / Gilt
+  { assetClass: "MUTUAL_FUND", symbol: "ICICILIQUID", name: "ICICI Prudential Liquid Fund", issuer: "ICICI Prudential Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "SBILIQUID", name: "SBI Liquid Fund", issuer: "SBI Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "HDFCLIQUID", name: "HDFC Liquid Fund", issuer: "HDFC Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "AXISLIQUID", name: "Axis Liquid Fund", issuer: "Axis Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "ICICICORPBOND", name: "ICICI Prudential Corporate Bond Fund", issuer: "ICICI Prudential Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "HDFCCORPBOND", name: "HDFC Corporate Bond Fund", issuer: "HDFC Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "SBIMAGNUMGILT", name: "SBI Magnum Gilt Fund", issuer: "SBI Mutual Fund" },
+  // Hybrid / Balanced Advantage
+  { assetClass: "MUTUAL_FUND", symbol: "ICICIBALADVANTAGE", name: "ICICI Prudential Balanced Advantage Fund", issuer: "ICICI Prudential Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "HDFCBALADVANTAGE", name: "HDFC Balanced Advantage Fund", issuer: "HDFC Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "SBIEQUITYHYBRID", name: "SBI Equity Hybrid Fund", issuer: "SBI Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "KOTAKEQUITYHYBRID", name: "Kotak Equity Hybrid Fund", issuer: "Kotak Mutual Fund" },
+  // Sectoral / Thematic
+  { assetClass: "MUTUAL_FUND", symbol: "ICICITECH", name: "ICICI Prudential Technology Fund", issuer: "ICICI Prudential Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "SBIHEALTHCARE", name: "SBI Healthcare Opportunities Fund", issuer: "SBI Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "NIPPONPHARMA", name: "Nippon India Pharma Fund", issuer: "Nippon India Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "ICICIBANKING", name: "ICICI Prudential Banking and Financial Services Fund", issuer: "ICICI Prudential Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "ABSLDIGITAL", name: "Aditya Birla Sun Life Digital India Fund", issuer: "Aditya Birla Sun Life Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "SBICONSUMPTION", name: "SBI Consumption Opportunities Fund", issuer: "SBI Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "TATADIGITAL", name: "Tata Digital India Fund", issuer: "Tata Mutual Fund" },
+  // International / Global
+  { assetClass: "MUTUAL_FUND", symbol: "MOFNASDAQ100", name: "Motilal Oswal Nasdaq 100 Fund of Fund", issuer: "Motilal Oswal Mutual Fund" },
+  { assetClass: "MUTUAL_FUND", symbol: "FRANKLINUSOPP", name: "Franklin India Feeder - Franklin US Opportunities Fund", issuer: "Franklin Templeton Mutual Fund" },
 
   // ETFs — the full live list (incl. gold/silver ETFs, reclassified into
   // GOLD/SILVER) comes from fetchNseEtfs(); these are just the fallback

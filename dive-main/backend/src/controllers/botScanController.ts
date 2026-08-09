@@ -1,7 +1,7 @@
 import { Response } from "express";
 import { AuthedRequest } from "../middleware/auth";
 import { ApiError } from "../middleware/errorHandler";
-import { extractHoldingsWithAI, isAiExtractionConfigured, AiExtractionNotConfiguredError } from "../services/aiExtractionService";
+import { extractHoldingsWithAI, isAiExtractionConfigured, AiExtractionNotConfiguredError, AiExtractionTimeoutError } from "../services/aiExtractionService";
 
 /**
  * Analyzes every frame captured during one scan session in a single AI call —
@@ -32,6 +32,9 @@ export async function analyzeFrames(req: AuthedRequest, res: Response) {
   } catch (err) {
     if (err instanceof AiExtractionNotConfiguredError) {
       throw new ApiError(503, "AI_NOT_CONFIGURED", err.message);
+    }
+    if (err instanceof AiExtractionTimeoutError) {
+      throw new ApiError(504, "AI_TIMEOUT", err.message);
     }
     throw err;
   }

@@ -7,10 +7,9 @@ import { runInstrumentRefresh } from "./services/instrumentService";
 
 function checkProductionSafety() {
   if (env.nodeEnv !== "production") return;
-  const usingDevSecret = env.jwtAccessSecret.includes("dev-") || env.jwtRefreshSecret.includes("dev-");
-  if (usingDevSecret) {
+  if (env.jwtAccessSecretIsWeak || env.jwtRefreshSecretIsWeak) {
     throw new Error(
-      "Refusing to start with NODE_ENV=production and a default dev JWT secret. Set JWT_ACCESS_SECRET / JWT_REFRESH_SECRET to real random values."
+      "Refusing to start with NODE_ENV=production and a missing/placeholder/too-short JWT secret. Set JWT_ACCESS_SECRET / JWT_REFRESH_SECRET to real random values, at least 32 characters long (e.g. via `openssl rand -base64 48`)."
     );
   }
   if (env.useInMemoryMongo) {

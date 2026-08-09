@@ -75,6 +75,18 @@ export function adaptHolding(h) {
     source: h.source,
     needsReview: h.needsReview,
     lookthrough: [{ company: displayName, pct: 100 }],
+    // Raw, unadapted fields — kept alongside the derived ones above (rather
+    // than replacing them, to avoid touching every existing consumer of the
+    // derived shape) purely so the edit-holding flow has enough to pre-fill
+    // its form and PATCH only what actually changed. Nothing else should
+    // need these; prefer the derived fields above for display.
+    assetClass: h.assetClass,
+    instrumentId: h.instrumentId,
+    investedValue: h.investedValue,
+    currentValue: h.currentValue,
+    quantity: h.quantity,
+    purchaseDate: h.purchaseDate,
+    extraFields: h.extraFields,
   };
 }
 

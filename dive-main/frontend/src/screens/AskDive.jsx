@@ -108,10 +108,27 @@ function FitForYouCard({ selected, holdings, sims, simAmount, setSimAmount, scor
   const newScore = Math.max(0, Math.min(100, Math.round(baseScore + scaledDelta)));
   const scoreDelta = newScore - baseScore;
 
-  const baseApp = apparentDiversification(baseHoldings);
-  const newApp = apparentDiversification(baseHoldings, extra);
-  const baseReal = realDiversification(baseHoldings);
-  const newReal = realDiversification(baseHoldings, extra);
+  // Same anchor-on-canonical-plus-estimated-delta pattern as baseScore/newScore
+  // above — the lightweight client-side apparentDiversification()/
+  // realDiversification() formulas don't have the backend's full look-through
+  // model (mutual fund top-holdings, curated affinities, NSE industry
+  // affinity, etc.), so their ABSOLUTE values can disagree with the real
+  // scoreBreakdown.realDiversificationPct shown on Home/X-Ray (e.g. showing
+  // apparent and real as equal when the canonical figures aren't). Using them
+  // only for the DELTA of adding this one holding, applied on top of the real
+  // starting point, keeps the displayed "before" numbers consistent with the
+  // rest of the app while still getting an instant, correct-directioned "after".
+  const baseAppRaw = apparentDiversification(baseHoldings);
+  const newAppRaw = apparentDiversification(baseHoldings, extra);
+  const baseRealRaw = realDiversification(baseHoldings);
+  const newRealRaw = realDiversification(baseHoldings, extra);
+  const hasCanonical = !!scoreBreakdown?.hasHoldings;
+  const baseApp = hasCanonical ? scoreBreakdown.apparentDiversificationPct : baseAppRaw;
+  const baseReal = hasCanonical ? scoreBreakdown.realDiversificationPct : baseRealRaw;
+  const newApp = Math.max(0, Math.min(100, Math.round(baseApp + (newAppRaw - baseAppRaw))));
+  // Real can never exceed apparent — same invariant the backend composite
+  // itself enforces (real only ever reveals MORE hidden concentration).
+  const newReal = Math.min(newApp, Math.max(0, Math.min(100, Math.round(baseReal + (newRealRaw - baseRealRaw)))));
 
   const baseTop = topExposure(baseHoldings);
   const newTop = topExposure(baseHoldings, extra);

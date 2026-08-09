@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { motion } from "framer-motion";
-import { LogOut, ListChecks, Loader2, AlertTriangle, FileDown, Bot } from "lucide-react";
+import { LogOut, ListChecks, Loader2, AlertTriangle, FileDown, Bot, Check } from "lucide-react";
 import { useDive } from "../context/DiveContext";
 import { api } from "../lib/api";
 
@@ -9,14 +9,74 @@ const RISK = ["Conservative", "Balanced", "Aggressive"];
 const RETURN = ["Modest", "Moderate", "High"];
 const DIV = ["Low", "Medium", "High"];
 
+function errorMessageOf(err, fallback) {
+  const data = err?.response?.data;
+  return data?.message || data?.issues?.[0]?.message || fallback;
+}
+
 export default function Preferences() {
-  const { user, prefs, savePrefs, logout, setScreen, deleteAccount } = useDive();
+  const { user, prefs, savePrefs, logout, setScreen, deleteAccount, updateProfile, changePassword } = useDive();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
   const [downloadingReport, setDownloadingReport] = useState(false);
   const [reportError, setReportError] = useState("");
+  const [prefsSaveError, setPrefsSaveError] = useState("");
+
+  const [name, setName] = useState(user?.name || "");
+  const [age, setAge] = useState(user ? String(user.age) : "");
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileError, setProfileError] = useState("");
+  const [profileSaved, setProfileSaved] = useState(false);
+
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [passwordError, setPasswordError] = useState("");
+  const [passwordSuccess, setPasswordSuccess] = useState("");
+
   if (!user) return null;
+
+  const saveProfile = async () => {
+    setProfileSaving(true);
+    setProfileError("");
+    setProfileSaved(false);
+    try {
+      await updateProfile({ name, age: Number(age) });
+      setProfileSaved(true);
+    } catch (err) {
+      setProfileError(errorMessageOf(err, "Couldn't save your profile. Please try again."));
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
+  const savePassword = async (e) => {
+    e.preventDefault();
+    setPasswordSaving(true);
+    setPasswordError("");
+    setPasswordSuccess("");
+    try {
+      const message = await changePassword({ currentPassword, newPassword, confirmNewPassword });
+      setPasswordSuccess(message || "Password updated.");
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmNewPassword("");
+    } catch (err) {
+      setPasswordError(errorMessageOf(err, "Couldn't change your password. Please try again."));
+    } finally {
+      setPasswordSaving(false);
+    }
+  };
+
+  // savePrefs applies optimistically and rolls itself back on failure — the
+  // rollback is silent from the UI's perspective unless we surface it here,
+  // otherwise a failed save looks identical to a successful one.
+  const handleSavePrefs = async (next) => {
+    const ok = await savePrefs(next);
+    setPrefsSaveError(ok ? "" : "Couldn't save that change — check your connection and try again.");
+  };
 
   const downloadReport = async () => {
     setDownloadingReport(true);
@@ -50,7 +110,7 @@ export default function Preferences() {
   };
   const toggleChip = (list, key, val) => {
     const has = list.includes(val);
-    savePrefs({ ...prefs, [key]: has ? list.filter((x) => x !== val) : [...list, val] });
+    handleSavePrefs({ ...prefs, [key]: has ? list.filter((x) => x !== val) : [...list, val] });
   };
   const customized = prefs.risk !== "Balanced" || prefs.excluded.length > 0;
 
@@ -69,14 +129,35 @@ export default function Preferences() {
         </button>
       </div>
 
+      {prefsSaveError && (
+        <div className="px-6 mt-4">
+          <p className="text-xs text-[var(--red)] font-semibold" data-testid="prefs-save-error">{prefsSaveError}</p>
+        </div>
+      )}
+
+      <Section title="Personal info">
+        <label className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)] mb-2 block">Name</label>
+        <input data-testid="profile-name-input" value={name} onChange={(e) => { setName(e.target.value); setProfileSaved(false); }}
+          className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-card)] px-4 py-3 mb-4 outline-none font-semibold text-[var(--text-primary)]" />
+        <label className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)] mb-2 block">Age</label>
+        <input data-testid="profile-age-input" type="number" min="18" value={age} onChange={(e) => { setAge(e.target.value); setProfileSaved(false); }}
+          className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-card)] px-4 py-3 mb-4 outline-none font-semibold text-[var(--text-primary)]" />
+        {profileError && <p className="text-xs text-[var(--red)] font-semibold mb-3" data-testid="profile-save-error">{profileError}</p>}
+        <button data-testid="profile-save-btn" onClick={saveProfile} disabled={profileSaving || !name.trim() || !age}
+          className="w-full gold-btn rounded-full py-3.5 font-bold flex items-center justify-center gap-2 disabled:opacity-40 transition-colors">
+          {profileSaving ? <Loader2 size={16} className="animate-spin" /> : profileSaved ? <Check size={16} /> : null}
+          {profileSaving ? "Saving…" : profileSaved ? "Saved" : "Save changes"}
+        </button>
+      </Section>
+
       <Section title="Risk appetite">
-        <SegRow options={RISK} value={prefs.risk} onChange={(v) => savePrefs({ ...prefs, risk: v })} testid="risk" />
+        <SegRow options={RISK} value={prefs.risk} onChange={(v) => handleSavePrefs({ ...prefs, risk: v })} testid="risk" />
       </Section>
       <Section title="Return expectation">
-        <SegRow options={RETURN} value={prefs.returnExpectation} onChange={(v) => savePrefs({ ...prefs, returnExpectation: v })} testid="return" />
+        <SegRow options={RETURN} value={prefs.returnExpectation} onChange={(v) => handleSavePrefs({ ...prefs, returnExpectation: v })} testid="return" />
       </Section>
       <Section title="Diversification priority" hint="How hard should DIVVE push you to spread out?">
-        <SegRow options={DIV} value={prefs.diversificationPriority} onChange={(v) => savePrefs({ ...prefs, diversificationPriority: v })} testid="div" />
+        <SegRow options={DIV} value={prefs.diversificationPriority} onChange={(v) => handleSavePrefs({ ...prefs, diversificationPriority: v })} testid="div" />
       </Section>
 
       <Section title="Preferred categories">
@@ -120,6 +201,27 @@ export default function Preferences() {
           <Bot size={18} className="text-[var(--dive-blue)]" /> Simulate app pop-up
         </button>
       </div>
+
+      <Section title="Change password">
+        <form onSubmit={savePassword}>
+          <label className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)] mb-2 block">Current password</label>
+          <input data-testid="password-current-input" type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} required
+            className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-card)] px-4 py-3 mb-4 outline-none font-semibold text-[var(--text-primary)]" />
+          <label className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)] mb-2 block">New password</label>
+          <input data-testid="password-new-input" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required
+            className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-card)] px-4 py-3 mb-4 outline-none font-semibold text-[var(--text-primary)]" />
+          <label className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)] mb-2 block">Confirm new password</label>
+          <input data-testid="password-confirm-input" type="password" value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} required
+            className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-card)] px-4 py-3 mb-4 outline-none font-semibold text-[var(--text-primary)]" />
+          {passwordError && <p className="text-xs text-[var(--red)] font-semibold mb-3" data-testid="password-save-error">{passwordError}</p>}
+          {passwordSuccess && <p className="text-xs text-[var(--dive-blue)] font-semibold mb-3" data-testid="password-save-success">{passwordSuccess}</p>}
+          <button data-testid="password-save-btn" type="submit" disabled={passwordSaving}
+            className="w-full gold-btn rounded-full py-3.5 font-bold flex items-center justify-center gap-2 disabled:opacity-40 transition-colors">
+            {passwordSaving ? <Loader2 size={16} className="animate-spin" /> : null}
+            {passwordSaving ? "Updating…" : "Update password"}
+          </button>
+        </form>
+      </Section>
 
       <div className="px-6 mt-8">
         <h2 className="font-heading font-bold text-lg text-[var(--red)]">Danger zone</h2>

@@ -4,7 +4,7 @@ import { ApiError } from "../middleware/errorHandler";
 import { parseCsv } from "../services/fileParsers/csvParser";
 import { parseXlsx } from "../services/fileParsers/xlsxParser";
 import { parseJson } from "../services/fileParsers/jsonParser";
-import { extractHoldingsWithAI, isAiExtractionConfigured, AiExtractionNotConfiguredError } from "../services/aiExtractionService";
+import { extractHoldingsWithAI, isAiExtractionConfigured, AiExtractionNotConfiguredError, AiExtractionTimeoutError } from "../services/aiExtractionService";
 
 /**
  * Parses an uploaded file into candidate holdings — nothing is saved here.
@@ -58,6 +58,9 @@ export async function uploadFile(req: AuthedRequest, res: Response) {
   } catch (err) {
     if (err instanceof AiExtractionNotConfiguredError) {
       throw new ApiError(503, "AI_NOT_CONFIGURED", err.message);
+    }
+    if (err instanceof AiExtractionTimeoutError) {
+      throw new ApiError(504, "AI_TIMEOUT", err.message);
     }
     throw err;
   }

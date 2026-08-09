@@ -15,7 +15,7 @@ function emptyFd() {
 }
 
 export default function FileUpload() {
-  const { setScreen, goBack, loadHoldings } = useDive();
+  const { setScreen, goBack, loadHoldings, holdings } = useDive();
   const fileInputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const [candidates, setCandidates] = useState(null); // null = not yet uploaded
@@ -24,6 +24,12 @@ export default function FileUpload() {
   const [error, setError] = useState("");
   const [savingAll, setSavingAll] = useState(false);
   const [savedCount, setSavedCount] = useState(0);
+  const [saveFailedCount, setSaveFailedCount] = useState(0);
+  // A hung Claude response otherwise has no escape short of waiting out the
+  // full ~60-150s timeout chain (Anthropic SDK timeout x maxRetries, Nginx's
+  // proxy_read_timeout, this request's own axios timeout — see
+  // aiExtractionService.ts) — this lets the user bail out immediately instead.
+  const uploadAbortRef = useRef(null);
 
   const pickFile = () => fileInputRef.current?.click();
 
@@ -34,10 +40,23 @@ export default function FileUpload() {
     setUploading(true);
     setCandidates(null);
     setExcludedNotes("");
+    setSavedCount(0);
+    setSaveFailedCount(0);
+    const controller = new AbortController();
+    uploadAbortRef.current = controller;
     try {
       const form = new FormData();
       form.append("file", file);
-      const { data } = await api.post("/uploads", form, { headers: { "Content-Type": "multipart/form-data" } });
+      // Longer than the backend's own AI-call timeout (60s x up to 2 attempts,
+      // see aiExtractionService.ts) and Nginx's proxy_read_timeout (see
+      // docs/SERVER_DEPLOYMENT_GUIDE.md), so a real "took too long" error from
+      // the backend has a chance to arrive intact — its message is already
+      // surfaced below via err.response.data.message.
+      const { data } = await api.post("/uploads", form, {
+        headers: { "Content-Type": "multipart/form-data" },
+        timeout: 150_000,
+        signal: controller.signal,
+      });
       setMessage(data.message || "");
       setExcludedNotes(data.excludedNotes || "");
       setCandidates(
@@ -55,29 +74,53 @@ export default function FileUpload() {
           missingFields: c.missingFields || [],
           accountLabel: c.accountLabel || "",
           fd: emptyFd(),
+          saveError: null,
         }))
       );
     } catch (err) {
-      setError(err?.response?.data?.message || "Couldn't parse that file. Please try another one, or add manually.");
+      // A deliberate cancel isn't a failure — no scary error message.
+      if (err.code !== "ERR_CANCELED") {
+        setError(err?.response?.data?.message || "Couldn't parse that file. Please try another one, or add manually.");
+      }
     } finally {
       setUploading(false);
       e.target.value = "";
+      uploadAbortRef.current = null;
     }
   };
 
+  const cancelUpload = () => {
+    uploadAbortRef.current?.abort();
+  };
+
   const updateCandidate = (localId, patch) => {
-    setCandidates((prev) => prev.map((c) => (c._localId === localId ? { ...c, ...patch } : c)));
+    // Editing a row clears its saveError — the row is being fixed, so a
+    // stale "couldn't save" message from before the edit would be misleading.
+    setCandidates((prev) => prev.map((c) => (c._localId === localId ? { ...c, ...patch, saveError: null } : c)));
   };
 
   const removeCandidate = (localId) => {
     setCandidates((prev) => prev.filter((c) => c._localId !== localId));
   };
 
+  function errorMessageOf(err, fallback) {
+    const data = err?.response?.data;
+    return data?.message || data?.issues?.[0]?.message || fallback;
+  }
+
+  // Each row is saved independently and its own outcome is tracked — a
+  // failed row (bad value, an instrument the backend couldn't resolve) used
+  // to just be silently skipped, leaving the user with only an aggregate "X
+  // saved" count and no way to tell which row didn't make it or why.
+  // Successful rows are removed from the list (so re-clicking "Save
+  // selected" can't resubmit and duplicate them); failed rows stay, visibly
+  // flagged with the real error, so they can be fixed and retried.
   const saveAll = async () => {
     setSavingAll(true);
     setError("");
     const toSave = candidates.filter((c) => c.include);
     let saved = 0;
+    const errorsByLocalId = new Map();
     for (const c of toSave) {
       try {
         if (c.assetClass === "FD") {
@@ -104,16 +147,29 @@ export default function FileUpload() {
         }
         saved += 1;
       } catch (err) {
-        // keep going — the row stays in the list marked as not-yet-saved
+        errorsByLocalId.set(c._localId, errorMessageOf(err, "Couldn't save this holding — check the fields above."));
       }
     }
+    setCandidates((prev) =>
+      (prev || [])
+        .filter((c) => !c.include || errorsByLocalId.has(c._localId))
+        .map((c) => (errorsByLocalId.has(c._localId) ? { ...c, saveError: errorsByLocalId.get(c._localId) } : c))
+    );
     setSavedCount(saved);
+    setSaveFailedCount(errorsByLocalId.size);
     await loadHoldings();
     setSavingAll(false);
-    if (saved === toSave.length) {
+    if (errorsByLocalId.size === 0 && saved === toSave.length) {
       setCandidates(null);
     }
   };
+
+  // "Done" must not unconditionally jump to the score-reveal screen — with
+  // nothing saved (savedCount === 0) on a genuinely empty account
+  // (holdings.length === 0), that screen has no score to reveal and just
+  // looks like a confusing, unexplained dashboard jump. Mirrors
+  // ManualEntry.jsx's finish(), which gets this right already.
+  const finish = () => setScreen(holdings.length || savedCount ? "reveal" : "chooseMethod");
 
   return (
     <div className="flex flex-col min-h-full px-7 py-8 dive-app-surface" data-testid="file-upload-screen">
@@ -138,6 +194,7 @@ export default function FileUpload() {
             "Categorizing into asset classes…",
             "Almost done…",
           ]}
+          onCancel={cancelUpload}
         />
       ) : (
         !candidates && (
@@ -193,6 +250,11 @@ export default function FileUpload() {
                     <span className="text-[10px] font-bold text-[var(--amber)] uppercase tracking-wide">Not found in instrument list — verify name</span>
                   </div>
                 )}
+                {c.saveError && (
+                  <p className="text-[11px] font-semibold text-[var(--red)] mb-2" data-testid={`upload-candidate-error-${c._localId}`}>
+                    Couldn't save: {c.saveError}
+                  </p>
+                )}
                 <select data-testid={`upload-candidate-class-${c._localId}`} value={c.assetClass} onChange={(e) => updateCandidate(c._localId, { assetClass: e.target.value })}
                   className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-card)] text-[var(--text-primary)] px-3 py-2 text-xs font-semibold mb-2">
                   {ASSET_CLASSES.map((a) => <option key={a} value={a}>{a}</option>)}
@@ -220,9 +282,15 @@ export default function FileUpload() {
 
           <button data-testid="file-upload-save-all-btn" onClick={saveAll} disabled={savingAll}
             className="w-full mt-5 gold-btn rounded-full py-4 font-bold disabled:opacity-40 hover:bg-[var(--dive-blue-hover)] transition-colors flex items-center justify-center gap-2">
-            {savingAll ? <Loader2 size={16} className="animate-spin" /> : null} Save selected holdings
+            {savingAll ? <Loader2 size={16} className="animate-spin" /> : null} {saveFailedCount > 0 ? "Retry failed holdings" : "Save selected holdings"}
           </button>
         </>
+      )}
+
+      {saveFailedCount > 0 && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-4 bg-[var(--red)]/10 border border-[var(--red)]/20 rounded-xl px-4 py-3 text-sm font-semibold text-[var(--red)]" data-testid="file-upload-failed-banner">
+          {saveFailedCount} holding{saveFailedCount > 1 ? "s" : ""} couldn't be saved — see the reason on each row above, fix it, and tap {saveFailedCount > 1 ? '"Retry failed holdings"' : '"Retry"'} again.
+        </motion.div>
       )}
 
       {savedCount > 0 && (
@@ -231,7 +299,7 @@ export default function FileUpload() {
         </motion.div>
       )}
 
-      <button data-testid="file-upload-done-btn" onClick={() => setScreen("reveal")}
+      <button data-testid="file-upload-done-btn" onClick={finish}
         className="w-full mt-4 bg-[var(--surface-card)] border border-[var(--border)] rounded-full py-3.5 font-bold hover:bg-[var(--surface-card-hover)] transition-colors">
         Done
       </button>

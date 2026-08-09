@@ -1,5 +1,20 @@
 import axios from "axios";
 
+// REACT_APP_BACKEND_URL is baked in at build time (craco.config.js refuses
+// to produce a production build without it — see the check there), so this
+// should never actually be unset in a real build. This is a defense-in-depth
+// check only, in case a build somehow bypasses that (e.g. `react-scripts
+// build` run directly instead of `npm run build`/`craco build`) — a loud,
+// specific console error beats every API call silently going to the literal
+// URL "undefined/api" with no indication why the app is completely broken.
+if (!process.env.REACT_APP_BACKEND_URL) {
+  // eslint-disable-next-line no-console
+  console.error(
+    "[divve] REACT_APP_BACKEND_URL was not set when this build was created — every API call will fail. " +
+      "Rebuild with it set (see frontend/.env.example and docs/SERVER_DEPLOYMENT_GUIDE.md Part 8)."
+  );
+}
+
 export const API_BASE = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 // Access token is kept in memory only (never localStorage) — the refresh token
@@ -18,6 +33,16 @@ api.interceptors.request.use((config) => {
 });
 
 let refreshPromise = null;
+
+// Lets DiveContext register a callback for "the refresh token is dead, this
+// session is really over" — without this, a session that expires mid-use
+// (not just on the very first page load) just leaves every subsequent
+// request silently rejecting forever, with whatever screen the user was on
+// stuck showing stale/broken data and no path back to logging in.
+let onSessionExpired = null;
+export const setSessionExpiredHandler = (fn) => {
+  onSessionExpired = fn;
+};
 
 api.interceptors.response.use(
   (res) => res,
@@ -38,6 +63,7 @@ api.interceptors.response.use(
         return api(config);
       } catch (refreshError) {
         setAccessToken(null);
+        if (onSessionExpired) onSessionExpired();
         return Promise.reject(refreshError);
       }
     }

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { motion } from "framer-motion";
-import { ChevronLeft, Loader2, Plus } from "lucide-react";
+import { ChevronLeft, Loader2, Plus, Save } from "lucide-react";
 import { useDive } from "../context/DiveContext";
 import { api } from "../lib/api";
 import InstrumentAutocomplete from "../components/dive/InstrumentAutocomplete";
@@ -35,13 +35,31 @@ function TextField({ label, testId, ...props }) {
 }
 
 export default function ManualEntry() {
-  const { setScreen, goBack, loadHoldings, holdings } = useDive();
-  const [assetClass, setAssetClass] = useState("EQUITY");
-  const [instrument, setInstrument] = useState({ instrumentId: undefined, name: "" });
-  const [investedValue, setInvestedValue] = useState("");
-  const [currentValue, setCurrentValue] = useState("");
-  const [quantity, setQuantity] = useState("");
-  const [fd, setFd] = useState({ bank: "", principal: "", tenureMonths: "", startMonth: String(new Date().getMonth() + 1), startYear: String(new Date().getFullYear()), interestRate: "" });
+  const { setScreen, goBack, loadHoldings, updateHolding, holdings, editingHolding, setEditingHolding } = useDive();
+  const isEditing = !!editingHolding;
+  const isEditingFd = isEditing && editingHolding.assetClass === "FD";
+
+  const [assetClass, setAssetClass] = useState(editingHolding?.assetClass || "EQUITY");
+  const [instrument, setInstrument] = useState(
+    isEditing && !isEditingFd
+      ? { instrumentId: editingHolding.instrumentId, name: editingHolding.name }
+      : { instrumentId: undefined, name: "" }
+  );
+  const [investedValue, setInvestedValue] = useState(isEditing && !isEditingFd ? String(editingHolding.investedValue ?? "") : "");
+  const [currentValue, setCurrentValue] = useState(isEditing && !isEditingFd ? String(editingHolding.currentValue ?? "") : "");
+  const [quantity, setQuantity] = useState(isEditing && !isEditingFd ? String(editingHolding.quantity ?? "") : "");
+  const [fd, setFd] = useState(
+    isEditingFd
+      ? {
+          bank: editingHolding.extraFields?.bank || "",
+          principal: String(editingHolding.investedValue ?? ""),
+          tenureMonths: String(editingHolding.extraFields?.tenureMonths ?? ""),
+          startMonth: String(editingHolding.extraFields?.startMonth ?? new Date().getMonth() + 1),
+          startYear: String(editingHolding.extraFields?.startYear ?? new Date().getFullYear()),
+          interestRate: String(editingHolding.extraFields?.interestRate ?? ""),
+        }
+      : { bank: "", principal: "", tenureMonths: "", startMonth: String(new Date().getMonth() + 1), startYear: String(new Date().getFullYear()), interestRate: "" }
+  );
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedCount, setSavedCount] = useState(0);
@@ -54,13 +72,18 @@ export default function ManualEntry() {
     setFd({ bank: "", principal: "", tenureMonths: "", startMonth: String(new Date().getMonth() + 1), startYear: String(new Date().getFullYear()), interestRate: "" });
   };
 
+  const back = () => {
+    setEditingHolding(null);
+    goBack();
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     setError("");
     setSaving(true);
     try {
       if (assetClass === "FD") {
-        await api.post("/holdings/manual", {
+        const payload = {
           assetClass: "FD",
           bank: fd.bank,
           principal: Number(fd.principal),
@@ -68,17 +91,28 @@ export default function ManualEntry() {
           startMonth: Number(fd.startMonth),
           startYear: Number(fd.startYear),
           interestRate: Number(fd.interestRate),
-        });
+        };
+        if (isEditing) await updateHolding(editingHolding.id, payload);
+        else await api.post("/holdings/manual", payload);
       } else {
-        await api.post("/holdings/manual", {
+        const payload = {
           assetClass,
           instrumentId: instrument.instrumentId,
           name: instrument.name,
           investedValue: Number(investedValue),
           currentValue: currentValue ? Number(currentValue) : undefined,
           quantity: quantity ? Number(quantity) : undefined,
-        });
+        };
+        if (isEditing) await updateHolding(editingHolding.id, payload);
+        else await api.post("/holdings/manual", payload);
       }
+
+      if (isEditing) {
+        setEditingHolding(null);
+        goBack();
+        return;
+      }
+
       setSavedCount((c) => c + 1);
       resetFields();
       await loadHoldings();
@@ -95,19 +129,29 @@ export default function ManualEntry() {
   return (
     <div className="flex flex-col min-h-full px-7 py-8 dive-app-surface" data-testid="manual-entry-screen">
       <div className="flex items-center gap-3 mb-4">
-        <button data-testid="manual-entry-back-btn" onClick={goBack}><ChevronLeft size={22} /></button>
-        <h1 className="font-heading font-black text-2xl">Add manually</h1>
+        <button data-testid="manual-entry-back-btn" onClick={back}><ChevronLeft size={22} /></button>
+        <h1 className="font-heading font-black text-2xl">{isEditing ? "Edit holding" : "Add manually"}</h1>
       </div>
 
       <label className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)] mb-2 block">Investment type</label>
-      <div className="flex flex-wrap gap-2 mb-5">
-        {ASSET_CLASSES.map((c) => (
-          <button key={c.value} type="button" data-testid={`asset-class-${c.value}`} onClick={() => setAssetClass(c.value)}
-            className={`px-3 py-2 rounded-full text-xs font-bold border transition-colors ${assetClass === c.value ? "gold-btn border-[var(--dive-blue)]" : "bg-[var(--surface-card)] border-[var(--border)] text-[var(--text-secondary)]"}`}>
-            {c.label}
-          </button>
-        ))}
-      </div>
+      {isEditing ? (
+        // Asset class can't change on edit — a different asset class means a
+        // different field set entirely (see updateHolding on the backend),
+        // closer to delete-and-recreate than an edit. Shown as a fixed label
+        // instead of the picker so it's clear this isn't editable here.
+        <p className="mb-5 px-3 py-2 rounded-full text-xs font-bold border border-[var(--border)] bg-[var(--surface-card)] inline-block text-[var(--text-secondary)]">
+          {ASSET_CLASSES.find((c) => c.value === assetClass)?.label || assetClass}
+        </p>
+      ) : (
+        <div className="flex flex-wrap gap-2 mb-5">
+          {ASSET_CLASSES.map((c) => (
+            <button key={c.value} type="button" data-testid={`asset-class-${c.value}`} onClick={() => setAssetClass(c.value)}
+              className={`px-3 py-2 rounded-full text-xs font-bold border transition-colors ${assetClass === c.value ? "gold-btn border-[var(--dive-blue)]" : "bg-[var(--surface-card)] border-[var(--border)] text-[var(--text-secondary)]"}`}>
+              {c.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <form onSubmit={submit}>
         {assetClass === "FD" ? (
@@ -140,20 +184,23 @@ export default function ManualEntry() {
 
         <button data-testid="manual-entry-save-btn" type="submit" disabled={saving}
           className="w-full gold-btn rounded-full py-4 font-bold disabled:opacity-40 hover:bg-[var(--dive-blue-hover)] transition-colors flex items-center justify-center gap-2">
-          {saving ? <Loader2 size={16} className="animate-spin" /> : <Plus size={18} />} Save this holding
+          {saving ? <Loader2 size={16} className="animate-spin" /> : isEditing ? <Save size={18} /> : <Plus size={18} />}
+          {isEditing ? "Save changes" : "Save this holding"}
         </button>
       </form>
 
-      {savedCount > 0 && (
+      {!isEditing && savedCount > 0 && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-4 bg-[var(--dive-blue-light)] rounded-xl px-4 py-3 text-sm font-semibold text-[var(--dive-blue-dark)]" data-testid="manual-entry-saved-banner">
           {savedCount} holding{savedCount > 1 ? "s" : ""} saved.
         </motion.div>
       )}
 
-      <button data-testid="manual-entry-done-btn" onClick={finish}
-        className="w-full mt-4 bg-[var(--surface-card)] border border-[var(--border)] rounded-full py-3.5 font-bold hover:bg-[var(--surface-card-hover)] transition-colors">
-        Done adding investments
-      </button>
+      {!isEditing && (
+        <button data-testid="manual-entry-done-btn" onClick={finish}
+          className="w-full mt-4 bg-[var(--surface-card)] border border-[var(--border)] rounded-full py-3.5 font-bold hover:bg-[var(--surface-card-hover)] transition-colors">
+          Done adding investments
+        </button>
+      )}
     </div>
   );
 }

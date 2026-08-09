@@ -202,7 +202,42 @@ function buildContextField(totalInvestedAmount: number, age: number, heldClasses
   };
 }
 
+// The underlying price-history fetches (priceHistoryService.ts) are already
+// cached — what wasn't is the pure-CPU work on top: the correlation matrix,
+// drawdown/VaR simulation, and O(n²) look-through overlap, all recomputed
+// from scratch on every single /score/breakdown call even though nothing
+// relevant had changed since the last one. Same in-memory Map + TTL shape as
+// priceHistoryService.ts's own cache, keyed per user rather than per
+// symbol/scheme. Freshness is driven primarily by explicit invalidation
+// (invalidateDiveScoreCache, called from every holdings/profile mutation
+// path below) — the TTL here is just a safety net in case some path is ever
+// added that changes a scoring input without remembering to invalidate.
+const CACHE_TTL_MS = 5 * 60 * 1000;
+interface CacheEntry {
+  breakdown: DiveScoreBreakdown;
+  expiresAt: number;
+}
+const cache = new Map<string, CacheEntry>();
+
+// Called from every place a user's holdings or age (the two scoring inputs
+// that live outside the already-cached price-history layer) can change:
+// holdingsController's create/update/delete, aaController's AA sync, and
+// userController's profile update. Also called on account deletion, purely
+// for hygiene — a leftover entry for a deleted user is harmless (never read
+// again) but there's no reason to let it sit until its TTL expires.
+export function invalidateDiveScoreCache(userId: string): void {
+  cache.delete(userId);
+}
+
 export async function computeDiveScoreBreakdown(userId: string): Promise<DiveScoreBreakdown> {
+  const cached = cache.get(userId);
+  if (cached && cached.expiresAt > Date.now()) return cached.breakdown;
+  const breakdown = await computeDiveScoreBreakdownUncached(userId);
+  cache.set(userId, { breakdown, expiresAt: Date.now() + CACHE_TTL_MS });
+  return breakdown;
+}
+
+async function computeDiveScoreBreakdownUncached(userId: string): Promise<DiveScoreBreakdown> {
   const user = await User.findById(userId).select("age").lean();
   const age = user?.age ?? 30; // fallback for the (test-only) case a caller passes a userId with no User doc
 

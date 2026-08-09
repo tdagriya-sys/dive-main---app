@@ -84,6 +84,21 @@ let webpackConfig = {
       '@': path.resolve(__dirname, 'src'),
     },
     configure: (webpackConfig) => {
+      // CRA/craco inlines REACT_APP_* vars into the bundle at build time,
+      // not read at runtime — an unset REACT_APP_BACKEND_URL here isn't a
+      // recoverable server-config mistake the way a missing backend env var
+      // would be; it silently ships as the literal string "undefined" in
+      // every API call (see src/lib/api.js) and can only be fixed by
+      // rebuilding. Failing the build loudly here beats finding out from a
+      // broken production site. Dev server is exempt — `frontend/.env`
+      // already has a working localhost default for local development.
+      if (!isDevServer && !process.env.REACT_APP_BACKEND_URL) {
+        throw new Error(
+          "REACT_APP_BACKEND_URL is not set. Set it in frontend/.env.production " +
+            "(see frontend/.env.example) before running `npm run build` — " +
+            "see docs/SERVER_DEPLOYMENT_GUIDE.md Part 8."
+        );
+      }
 
       // Add ignored patterns to reduce watched directories
         webpackConfig.watchOptions = {

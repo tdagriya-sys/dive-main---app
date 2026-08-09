@@ -74,4 +74,4 @@ Live sources are wrapped in try/catch and fall back silently to the bundled stat
 
 - Backend listens on `PORT` (default `8000`), matching the existing `frontend/.env`'s `REACT_APP_BACKEND_URL=http://localhost:8000` — no frontend env change needed.
 - Frontend dev server stays on CRA's default `3000`; `CORS_ORIGINS` in `backend/.env` is locked to it.
-- Every external secret (Mongo URI, JWT secrets, Finvu creds, OCR/SMS/crypto-price keys) lives in `backend/.env`, mirrored as placeholders in `backend/.env.example`. Placeholder values (`REPLACE_ME`, `REPLACE_WITH_YOUR_KEY`, empty) make the corresponding service run in a dev/mock mode automatically — nothing needs a real key to run locally.
+- Every external secret (Mongo URI, JWT secrets, Finvu creds, Anthropic/email/crypto-price keys) lives in `backend/.env`, mirrored as placeholders in `backend/.env.example`. Placeholder values (`REPLACE_ME`, `REPLACE_WITH_YOUR_KEY`, empty) make the corresponding service run in a dev/mock mode automatically — nothing needs a real key to run locally.

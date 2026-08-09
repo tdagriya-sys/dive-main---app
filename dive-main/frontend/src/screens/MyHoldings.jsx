@@ -1,15 +1,20 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronLeft, Plus, Trash2, Loader2 } from "lucide-react";
+import { ChevronLeft, Plus, Pencil, Trash2, Loader2 } from "lucide-react";
 import { useDive } from "../context/DiveContext";
 import { fmtINR } from "../lib/diveEngine";
 
 const SOURCE_LABELS = { AA: "Account Aggregator", MANUAL: "Manual", BOT: "Bot Scan", FILE_UPLOAD: "File Upload" };
 
 export default function MyHoldings() {
-  const { holdings, setScreen, goBack, deleteHolding } = useDive();
+  const { holdings, setScreen, goBack, deleteHolding, setEditingHolding } = useDive();
   const [deletingId, setDeletingId] = useState(null);
   const [error, setError] = useState("");
+
+  const edit = (holding) => {
+    setEditingHolding(holding);
+    setScreen("manualEntry");
+  };
 
   const remove = async (id) => {
     setError("");
@@ -45,10 +50,16 @@ export default function MyHoldings() {
                 <p className="font-bold text-sm truncate">{h.name}</p>
                 <p className="text-sm text-[var(--text-secondary)] mt-0.5">{fmtINR(h.amount)}</p>
               </div>
-              <button data-testid={`delete-holding-${h.id}`} onClick={() => remove(h.id)} disabled={deletingId === h.id}
-                className="w-9 h-9 rounded-xl bg-[var(--red)]/10 text-[var(--red)] flex items-center justify-center shrink-0 ml-3 disabled:opacity-40">
-                {deletingId === h.id ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-              </button>
+              <div className="flex items-center gap-2 shrink-0 ml-3">
+                <button data-testid={`edit-holding-${h.id}`} onClick={() => edit(h)} disabled={deletingId === h.id}
+                  className="w-9 h-9 rounded-xl bg-[var(--surface-card-hover)] text-[var(--text-secondary)] flex items-center justify-center disabled:opacity-40">
+                  <Pencil size={16} />
+                </button>
+                <button data-testid={`delete-holding-${h.id}`} onClick={() => remove(h.id)} disabled={deletingId === h.id}
+                  className="w-9 h-9 rounded-xl bg-[var(--red)]/10 text-[var(--red)] flex items-center justify-center disabled:opacity-40">
+                  {deletingId === h.id ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                </button>
+              </div>
             </motion.div>
           ))}
         </AnimatePresence>

@@ -5,12 +5,26 @@ import { useDive } from "../context/DiveContext";
 import { ScoreRing, RangeBar, AnimatedNumber } from "../components/dive/Widgets";
 import { buildSuggestions, personalizeSuggestions, diveScore, topExposure, missingCategories, apparentDiversification, realDiversification, totalInvested, fmtINR, effectiveHoldings } from "../lib/diveEngine";
 import { contextSummaryMessage, isCategoryExpected, deferredIncreaseNote, deferredReduceNote, expectedCoreCategories } from "../lib/contextMessaging";
+import { HoldingsLoadingState, HoldingsLoadErrorState, HoldingsEmptyState } from "../components/dive/HoldingsGateStates";
 
 export default function Suggestions() {
-  const { holdings, ranges, prefs, setScreen, setAskInstrument, sims, addSim, resetSims, scoreBreakdown } = useDive();
+  const { holdings, holdingsLoading, holdingsError, loadHoldings, ranges, prefs, setScreen, setAskInstrument, sims, addSim, resetSims, scoreBreakdown } = useDive();
   const [sim, setSim] = useState(null); // {cat, amount}
   const [stress, setStress] = useState(false);
-  if (!holdings.length) return null;
+
+  // Same reasoning as Home.jsx: a bare `return null` here is indistinguishable
+  // from a crash, including for a logged-out visitor exploring the demo
+  // phone-frame (falls through to the genuinely-empty case below).
+  if (holdingsLoading) return <HoldingsLoadingState testId="suggestions-loading-state" />;
+  if (!holdings.length && holdingsError) {
+    return <HoldingsLoadErrorState onRetry={loadHoldings} testId="suggestions-load-error-state" retryTestId="suggestions-load-error-retry-btn" />;
+  }
+  if (!holdings.length) {
+    return (
+      <HoldingsEmptyState setScreen={setScreen} testId="suggestions-empty-state" ctaTestId="suggestions-empty-add-btn"
+        title="No suggestions yet" body="Add your first holding and DIVVE will tell you exactly what to add next." ctaLabel="Add investments" />
+    );
+  }
   const h = effectiveHoldings(holdings, sims);
   // The canonical Dive Score — same number Home/Score Breakdown show. What-if
   // previews below start from THIS baseline and apply a fast-estimated delta,

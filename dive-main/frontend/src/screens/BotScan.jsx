@@ -16,13 +16,14 @@ function emptyFd() {
 const ASSET_CLASSES = ["EQUITY", "MUTUAL_FUND", "ETF", "BOND", "REIT", "INVIT", "GOLD", "SILVER", "ULIP_INSURANCE", "FD", "CRYPTO"];
 
 export default function BotScan() {
-  const { setScreen, goBack, loadHoldings } = useDive();
+  const { setScreen, goBack, loadHoldings, holdings } = useDive();
   const [phase, setPhase] = useState("idle"); // idle | sharing | analyzing | review
   const [error, setError] = useState("");
   const [framesCaptured, setFramesCaptured] = useState(0);
   const [excludedNotes, setExcludedNotes] = useState("");
   const [savingAll, setSavingAll] = useState(false);
   const [savedCount, setSavedCount] = useState(0);
+  const [saveFailedCount, setSaveFailedCount] = useState(0);
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -30,6 +31,11 @@ export default function BotScan() {
   const intervalRef = useRef(null);
   const framesRef = useRef([]); // captured Blobs for this scan session, decimated to MAX_FRAMES
   const [foundList, setFoundList] = useState([]);
+  // A hung Claude response otherwise has no escape short of waiting out the
+  // full ~60-150s timeout chain (Anthropic SDK timeout x maxRetries, Nginx's
+  // proxy_read_timeout, this request's own axios timeout — see
+  // aiExtractionService.ts) — this lets the user bail out immediately instead.
+  const analyzeAbortRef = useRef(null);
 
   const stopStream = () => {
     if (intervalRef.current) clearInterval(intervalRef.current);
@@ -75,6 +81,8 @@ export default function BotScan() {
       });
       framesRef.current = [];
       setFramesCaptured(0);
+      setSavedCount(0);
+      setSaveFailedCount(0);
       setPhase("sharing");
       intervalRef.current = setInterval(captureFrame, FRAME_INTERVAL_MS);
     } catch (err) {
@@ -91,41 +99,83 @@ export default function BotScan() {
       return;
     }
     setPhase("analyzing");
+    const controller = new AbortController();
+    analyzeAbortRef.current = controller;
     try {
       const form = new FormData();
       frames.forEach((blob, i) => form.append("frames", blob, `frame-${i}.jpg`));
-      const { data } = await api.post("/botscan/analyze", form, { headers: { "Content-Type": "multipart/form-data" } });
+      // Longer than the backend's own AI-call timeout (60s x up to 2 attempts,
+      // see aiExtractionService.ts) and Nginx's proxy_read_timeout (see
+      // docs/SERVER_DEPLOYMENT_GUIDE.md), so the backend's own specific
+      // "took too long" error has a chance to arrive intact instead of this
+      // request giving up first with a generic one.
+      const { data } = await api.post("/botscan/analyze", form, {
+        headers: { "Content-Type": "multipart/form-data" },
+        timeout: 150_000,
+        signal: controller.signal,
+      });
       const list = (data.candidates || []).map((c, idx) => ({
         ...c,
         _localId: `${c.accountLabel || "account"}::${c.name}::${idx}`,
         include: !!c.verifiedInInstrumentList,
         fd: emptyFd(),
+        saveError: null,
       }));
       setFoundList(list);
       setExcludedNotes(data.excludedNotes || "");
       setPhase("review");
     } catch (e) {
+      // A deliberate cancel isn't a failure — no scary error, just quietly
+      // back to the start so the user can try again right away.
+      if (e.code === "ERR_CANCELED") {
+        setPhase("idle");
+        return;
+      }
       if (e?.response?.status === 503) {
         setError(e.response.data?.message || "AI-based scan analysis isn't configured on this server yet.");
+      } else if (e?.response?.status === 504 || e?.code === "ECONNABORTED") {
+        setError(e.response?.data?.message || "This took too long to analyze — try again with fewer captured screens.");
       } else {
         setError("Couldn't analyze the scan — please try again.");
       }
       setPhase("idle");
+    } finally {
+      analyzeAbortRef.current = null;
     }
   };
 
+  const cancelAnalysis = () => {
+    analyzeAbortRef.current?.abort();
+  };
+
   const updateCandidate = (localId, patch) => {
-    setFoundList((prev) => prev.map((c) => (c._localId === localId ? { ...c, ...patch } : c)));
+    // Editing a row clears its saveError — the row is being fixed, so a
+    // stale "couldn't save" message from before the edit would be misleading.
+    setFoundList((prev) => prev.map((c) => (c._localId === localId ? { ...c, ...patch, saveError: null } : c)));
   };
 
   const removeCandidate = (localId) => {
     setFoundList((prev) => prev.filter((c) => c._localId !== localId));
   };
 
+  function errorMessageOf(err, fallback) {
+    const data = err?.response?.data;
+    return data?.message || data?.issues?.[0]?.message || fallback;
+  }
+
+  // Each row is saved independently and its own outcome is tracked — a
+  // failed row (bad value, an instrument the backend couldn't resolve) used
+  // to just be silently skipped, leaving the user with only an aggregate "X
+  // saved" count and no way to tell which row didn't make it or why.
+  // Successful rows are removed from the list (so re-clicking "Save
+  // selected" can't resubmit and duplicate them); failed rows stay, visibly
+  // flagged with the real error, so they can be fixed and retried.
   const saveAll = async () => {
     setSavingAll(true);
+    const toSave = foundList.filter((x) => x.include);
     let saved = 0;
-    for (const c of foundList.filter((x) => x.include)) {
+    const errorsByLocalId = new Map();
+    for (const c of toSave) {
       try {
         if (c.assetClass === "FD") {
           await api.post("/holdings/manual", {
@@ -151,13 +201,26 @@ export default function BotScan() {
         }
         saved += 1;
       } catch (e) {
-        // leave unsaved rows in place — user can retry
+        errorsByLocalId.set(c._localId, errorMessageOf(e, "Couldn't save this holding — check the fields above."));
       }
     }
+    setFoundList((prev) =>
+      prev
+        .filter((c) => !c.include || errorsByLocalId.has(c._localId))
+        .map((c) => (errorsByLocalId.has(c._localId) ? { ...c, saveError: errorsByLocalId.get(c._localId) } : c))
+    );
     setSavedCount(saved);
+    setSaveFailedCount(errorsByLocalId.size);
     await loadHoldings();
     setSavingAll(false);
   };
+
+  // "Done" must not unconditionally jump to the score-reveal screen — with
+  // nothing detected and nothing saved (savedCount === 0) on a genuinely
+  // empty account (holdings.length === 0), that screen has no score to
+  // reveal and just looks like a confusing, unexplained dashboard jump.
+  // Mirrors ManualEntry.jsx's finish(), which gets this right already.
+  const finish = () => setScreen(holdings.length || savedCount ? "reveal" : "chooseMethod");
 
   return (
     <div className="flex flex-col min-h-full px-7 py-8 dive-app-surface" data-testid="bot-scan-screen">
@@ -223,23 +286,34 @@ export default function BotScan() {
             "Categorizing into asset classes…",
             "Almost done…",
           ]}
+          onCancel={cancelAnalysis}
         />
       )}
 
       {phase === "review" && (
         <>
-          <p className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)] mb-1">
-            Review detected holdings ({foundList.length})
-          </p>
-          <p className="text-xs text-[var(--text-secondary)] mb-1">
-            Rows we couldn't verify against our instrument list start unchecked — double-check the name before including them. Every field
-            below is editable, and you can remove any row entirely.
-          </p>
-          {excludedNotes && <p className="text-xs text-[var(--text-tertiary)] italic mb-3">{excludedNotes}</p>}
-          {foundList.length === 0 && (
-            <p className="text-sm text-[var(--text-secondary)] mb-4">
-              Nothing was detected — DIVVE couldn't read that screen clearly. Try again with the holdings page more fully visible, or add manually.
-            </p>
+          {/* foundList.length === 0 means two very different things: the AI
+              genuinely found nothing (savedCount still 0), or every detected
+              row was just successfully saved and correctly removed from the
+              list (see saveAll — savedCount > 0 in that case). Only the first
+              is actually "nothing was detected"; the saved-banner below
+              already covers the second, so this block must not show for it. */}
+          {(foundList.length > 0 || savedCount === 0) && (
+            <>
+              <p className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)] mb-1">
+                Review detected holdings ({foundList.length})
+              </p>
+              <p className="text-xs text-[var(--text-secondary)] mb-1">
+                Rows we couldn't verify against our instrument list start unchecked — double-check the name before including them. Every field
+                below is editable, and you can remove any row entirely.
+              </p>
+              {excludedNotes && <p className="text-xs text-[var(--text-tertiary)] italic mb-3">{excludedNotes}</p>}
+              {foundList.length === 0 && (
+                <p className="text-sm text-[var(--text-secondary)] mb-4">
+                  Nothing was detected — DIVVE couldn't read that screen clearly. Try again with the holdings page more fully visible, or add manually.
+                </p>
+              )}
+            </>
           )}
           <div className="space-y-3">
             {foundList.map((c) => (
@@ -272,6 +346,11 @@ export default function BotScan() {
                     <span className="text-[10px] font-bold text-[var(--amber)] uppercase tracking-wide">Not found in instrument list — verify name</span>
                   </div>
                 )}
+                {c.saveError && (
+                  <p className="text-[11px] font-semibold text-[var(--red)] mb-2" data-testid={`botscan-error-${c._localId}`}>
+                    Couldn't save: {c.saveError}
+                  </p>
+                )}
                 <select value={c.assetClass || "EQUITY"} onChange={(e) => updateCandidate(c._localId, { assetClass: e.target.value })}
                   className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-card)] text-[var(--text-primary)] px-3 py-2 text-xs font-semibold mb-2">
                   {ASSET_CLASSES.map((a) => <option key={a} value={a}>{a}</option>)}
@@ -300,8 +379,14 @@ export default function BotScan() {
           {foundList.length > 0 && (
             <button data-testid="bot-scan-save-all-btn" onClick={saveAll} disabled={savingAll}
               className="w-full mt-5 gold-btn rounded-full py-4 font-bold disabled:opacity-40 hover:bg-[var(--dive-blue-hover)] transition-colors flex items-center justify-center gap-2">
-              {savingAll ? <Loader2 size={16} className="animate-spin" /> : null} Save selected holdings
+              {savingAll ? <Loader2 size={16} className="animate-spin" /> : null} {saveFailedCount > 0 ? "Retry failed holdings" : "Save selected holdings"}
             </button>
+          )}
+
+          {saveFailedCount > 0 && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-4 bg-[var(--red)]/10 border border-[var(--red)]/20 rounded-xl px-4 py-3 text-sm font-semibold text-[var(--red)]" data-testid="bot-scan-failed-banner">
+              {saveFailedCount} holding{saveFailedCount > 1 ? "s" : ""} couldn't be saved — see the reason on each row above, fix it, and tap {saveFailedCount > 1 ? '"Retry failed holdings"' : '"Retry"'} again.
+            </motion.div>
           )}
 
           {savedCount > 0 && (
@@ -310,7 +395,7 @@ export default function BotScan() {
             </motion.div>
           )}
 
-          <button data-testid="bot-scan-done-btn" onClick={() => setScreen("reveal")}
+          <button data-testid="bot-scan-done-btn" onClick={finish}
             className="w-full mt-4 bg-[var(--surface-card)] border border-[var(--border)] rounded-full py-3.5 font-bold hover:bg-[var(--surface-card-hover)] transition-colors">
             Done
           </button>

@@ -5,9 +5,10 @@ import { useDive } from "../context/DiveContext";
 import { Donut, Legend, QualityBadge } from "../components/dive/Widgets";
 import { segmentBreakdown, companyExposure, topExposure, fmtINR, effectiveHoldings } from "../lib/diveEngine";
 import { api } from "../lib/api";
+import { HoldingsLoadingState, HoldingsLoadErrorState, HoldingsEmptyState } from "../components/dive/HoldingsGateStates";
 
 export default function XRay() {
-  const { holdings, setScreen, sims } = useDive();
+  const { holdings, holdingsLoading, holdingsError, loadHoldings, setScreen, sims } = useDive();
   const [deep, setDeep] = useState(false);
   const [companyOpen, setCompanyOpen] = useState(false);
   const [openSegment, setOpenSegment] = useState(null);
@@ -29,7 +30,19 @@ export default function XRay() {
     }
   }
 
-  if (!holdings.length) return null;
+  // Same reasoning as Home.jsx: a bare `return null` here is indistinguishable
+  // from a crash, including for a logged-out visitor exploring the demo
+  // phone-frame (falls through to the genuinely-empty case below).
+  if (holdingsLoading) return <HoldingsLoadingState testId="xray-loading-state" />;
+  if (!holdings.length && holdingsError) {
+    return <HoldingsLoadErrorState onRetry={loadHoldings} testId="xray-load-error-state" retryTestId="xray-load-error-retry-btn" />;
+  }
+  if (!holdings.length) {
+    return (
+      <HoldingsEmptyState setScreen={setScreen} testId="xray-empty-state" ctaTestId="xray-empty-add-btn"
+        title="Nothing to X-Ray yet" body="Add your first holding and DIVVE will trace exactly where your money is really exposed." ctaLabel="Add investments" />
+    );
+  }
   const h = effectiveHoldings(holdings, sims);
   const segs = segmentBreakdown(h);
   const comps = companyExposure(h);

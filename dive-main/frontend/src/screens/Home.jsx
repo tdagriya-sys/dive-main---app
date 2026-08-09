@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { Search, Bell, Settings, AlertTriangle, CheckCircle2, ChevronRight } from "lucide-react";
 import { useDive } from "../context/DiveContext";
 import { ScoreRing, AnimatedNumber } from "../components/dive/Widgets";
+import { HoldingsLoadingState, HoldingsLoadErrorState, HoldingsEmptyState } from "../components/dive/HoldingsGateStates";
 import {
   diveScore, topExposure, totalInvested, apparentDiversification,
   realDiversification, segmentBreakdown, fmtINR, effectiveHoldings, CORE_CATEGORIES,
@@ -10,7 +11,7 @@ import {
 import { isCategoryExpected, contextSummaryMessage } from "../lib/contextMessaging";
 
 export default function Home() {
-  const { holdings, holdingsLoading, user, setScreen, sims, resetSims, scoreBreakdown, loadScoreBreakdown } = useDive();
+  const { holdings, holdingsLoading, holdingsError, loadHoldings, user, setScreen, sims, resetSims, scoreBreakdown, loadScoreBreakdown } = useDive();
   const simulating = sims.some((s) => s.amount > 0);
 
   useEffect(() => {
@@ -18,8 +19,22 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [holdings.length]);
 
-  if (holdingsLoading) return null;
-  if (!holdings.length) return <EmptyHome setScreen={setScreen} />;
+  // A blank `return null` looks identical to a crash — every one of these
+  // needs its own visible state, including a logged-out visitor exploring
+  // the demo phone-frame (holdings/holdingsLoading/holdingsError all sit at
+  // their defaults there, landing on the same genuinely-empty case below).
+  if (holdingsLoading) return <HoldingsLoadingState testId="home-loading-state" />;
+  // A failed load must not look like a genuinely empty portfolio — those are
+  // different states with different fixes (retry vs. go add a holding).
+  if (!holdings.length && holdingsError) {
+    return <HoldingsLoadErrorState onRetry={loadHoldings} testId="home-load-error-state" retryTestId="home-load-error-retry-btn" />;
+  }
+  if (!holdings.length) {
+    return (
+      <HoldingsEmptyState setScreen={setScreen} testId="home-empty-state" ctaTestId="home-empty-add-btn"
+        title="No investments yet" body="Add your first holding and DIVVE will score your portfolio." ctaLabel="Add investments" />
+    );
+  }
   const h = effectiveHoldings(holdings, sims);
   const segs = segmentBreakdown(h);
   const missingCore = CORE_CATEGORIES.filter((c) => !segs.some((s) => s.name === c));
@@ -139,19 +154,6 @@ export default function Home() {
           Add more investments
         </button>
       </div>
-    </div>
-  );
-}
-
-function EmptyHome({ setScreen }) {
-  return (
-    <div className="flex flex-col h-full px-7 items-center justify-center text-center dive-app-surface" data-testid="home-empty-state">
-      <h1 className="font-heading font-black text-2xl mb-3">No investments yet</h1>
-      <p className="text-[var(--text-secondary)] mb-8">Add your first holding and DIVVE will score your portfolio.</p>
-      <button data-testid="home-empty-add-btn" onClick={() => setScreen("chooseMethod")}
-        className="w-full gold-btn rounded-full py-4 font-bold hover:bg-[var(--dive-blue-hover)] transition-colors">
-        Add investments
-      </button>
     </div>
   );
 }

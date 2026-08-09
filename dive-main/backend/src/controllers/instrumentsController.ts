@@ -29,9 +29,12 @@ export async function detail(req: AuthedRequest, res: Response) {
   res.json({ instrument, detail: instrumentDetail });
 }
 
-// NOTE: this is a manual/admin trigger for testing the refresh job on demand.
-// There is no admin-role system yet — any authenticated user can call it.
-// Gate this behind real admin authorization before exposing it publicly.
+// Manual/admin trigger for testing the refresh job on demand — gated by
+// requireAdmin (env.adminEmails) at the route level. runInstrumentRefresh()
+// itself de-dupes concurrent calls (see instrumentService.ts), so this is
+// also safe to call while the daily cron or another admin's request is
+// already mid-run — this just joins that run instead of starting a second
+// one.
 export async function triggerRefresh(_req: AuthedRequest, res: Response) {
   const summary = await runInstrumentRefresh();
   res.json({ message: "Instrument refresh complete.", summary });

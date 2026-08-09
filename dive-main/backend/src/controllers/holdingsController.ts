@@ -1,11 +1,13 @@
 import { Response } from "express";
+import { Types } from "mongoose";
 import { Holding } from "../models/Holding";
 import { AssetClass, Instrument } from "../models/Instrument";
-import { parseManualHolding, computeFdValues } from "../validators/holdings";
+import { parseManualHolding, computeFdValues, parseNonFdHoldingUpdate, parseFdHoldingUpdate, FdHoldingInput } from "../validators/holdings";
 import { AuthedRequest } from "../middleware/auth";
 import { ApiError } from "../middleware/errorHandler";
 import { computeHoldingQuality } from "../services/holdingQualityService";
 import { fetchInstrumentDetail } from "../services/instrumentDetailService";
+import { invalidateDiveScoreCache } from "../services/diveScoreService";
 
 export async function listHoldings(req: AuthedRequest, res: Response) {
   const holdings = await Holding.find({ userId: req.userId })
@@ -79,6 +81,7 @@ export async function createManualHolding(req: AuthedRequest, res: Response) {
       },
       source: input.source ?? "MANUAL",
     });
+    invalidateDiveScoreCache(req.userId!);
     return res.status(201).json({ holding });
   }
 
@@ -101,11 +104,68 @@ export async function createManualHolding(req: AuthedRequest, res: Response) {
     extraFields: {},
     source: input.source ?? "MANUAL",
   });
+  invalidateDiveScoreCache(req.userId!);
   return res.status(201).json({ holding });
+}
+
+// Edits an existing holding in place — assetClass itself can't change (a
+// different field set entirely; that's closer to delete-and-recreate), but
+// everything else can, and anything not sent (purchaseDate, source,
+// sourceRef, needsReview, and — for FD — whichever extraFields weren't part
+// of this request) is preserved rather than wiped, unlike the old
+// delete-and-recreate workaround.
+export async function updateHolding(req: AuthedRequest, res: Response) {
+  const holding = await Holding.findOne({ _id: req.params.id, userId: req.userId });
+  if (!holding) throw new ApiError(404, "HOLDING_NOT_FOUND", "Holding not found.");
+
+  if (holding.assetClass === "FD") {
+    const input = parseFdHoldingUpdate(req.body);
+    const merged: FdHoldingInput = {
+      assetClass: "FD",
+      bank: input.bank ?? (holding.extraFields.bank as string),
+      principal: input.principal ?? holding.investedValue,
+      tenureMonths: input.tenureMonths ?? (holding.extraFields.tenureMonths as number),
+      startMonth: input.startMonth ?? (holding.extraFields.startMonth as number),
+      startYear: input.startYear ?? (holding.extraFields.startYear as number),
+      interestRate: input.interestRate ?? (holding.extraFields.interestRate as number),
+    };
+    const { currentValue, maturityValue, maturityDate } = computeFdValues(merged);
+    holding.name = `${merged.bank} Fixed Deposit`;
+    holding.investedValue = merged.principal;
+    holding.currentValue = currentValue;
+    holding.extraFields = {
+      bank: merged.bank,
+      tenureMonths: merged.tenureMonths,
+      startMonth: merged.startMonth,
+      startYear: merged.startYear,
+      interestRate: merged.interestRate,
+      maturityValue,
+      maturityDate,
+    };
+  } else {
+    const input = parseNonFdHoldingUpdate(req.body);
+    if (input.instrumentId) {
+      const instrument = await Instrument.findById(input.instrumentId).lean();
+      if (!instrument) throw new ApiError(404, "INSTRUMENT_NOT_FOUND", "Selected instrument was not found.");
+      holding.instrumentId = new Types.ObjectId(input.instrumentId);
+      holding.name = instrument.name;
+    } else if (input.name !== undefined) {
+      holding.name = input.name;
+    }
+    if (input.investedValue !== undefined) holding.investedValue = input.investedValue;
+    if (input.currentValue !== undefined) holding.currentValue = input.currentValue;
+    if (input.quantity !== undefined) holding.quantity = input.quantity;
+    if (input.purchaseDate !== undefined) holding.purchaseDate = input.purchaseDate;
+  }
+
+  await holding.save();
+  invalidateDiveScoreCache(req.userId!);
+  res.json({ holding });
 }
 
 export async function deleteHolding(req: AuthedRequest, res: Response) {
   const holding = await Holding.findOneAndDelete({ _id: req.params.id, userId: req.userId });
   if (!holding) throw new ApiError(404, "HOLDING_NOT_FOUND", "Holding not found.");
+  invalidateDiveScoreCache(req.userId!);
   res.json({ message: "Holding deleted." });
 }

@@ -49,6 +49,39 @@ export function parseManualHolding(body: unknown): ManualHoldingInput {
   return assetClass === "FD" ? fdSchema.parse(body) : nonFdSchema.parse(body);
 }
 
+// Editing never changes assetClass (that would mean an entirely different
+// field set, closer to "delete and recreate" than "edit") — every field is
+// optional so a caller can send just what changed; the controller merges
+// this onto the existing document, not a full replacement.
+export const nonFdUpdateSchema = z.object({
+  instrumentId: z.string().regex(objectIdRegex).optional(),
+  name: z.string().trim().min(1, "Instrument name is required").optional(),
+  investedValue: z.coerce.number().min(0).optional(),
+  currentValue: z.coerce.number().min(0).optional(),
+  quantity: z.coerce.number().min(0).optional(),
+  purchaseDate: z.coerce.date().optional(),
+});
+
+export const fdUpdateSchema = z.object({
+  bank: z.string().trim().min(1, "Bank / institution is required").optional(),
+  principal: z.coerce.number().positive("Principal amount must be greater than 0").optional(),
+  tenureMonths: z.coerce.number().int().positive("Tenure (months) must be greater than 0").optional(),
+  startMonth: z.coerce.number().int().min(1).max(12).optional(),
+  startYear: z.coerce.number().int().min(1990).max(new Date().getFullYear()).optional(),
+  interestRate: z.coerce.number().positive("Interest rate must be greater than 0").optional(),
+});
+
+export type NonFdHoldingUpdateInput = z.infer<typeof nonFdUpdateSchema>;
+export type FdHoldingUpdateInput = z.infer<typeof fdUpdateSchema>;
+
+export function parseNonFdHoldingUpdate(body: unknown): NonFdHoldingUpdateInput {
+  return nonFdUpdateSchema.parse(body);
+}
+
+export function parseFdHoldingUpdate(body: unknown): FdHoldingUpdateInput {
+  return fdUpdateSchema.parse(body);
+}
+
 /**
  * FD current/maturity value, compounded quarterly (the typical convention for
  * Indian bank FDs) — an approximation, not the exact per-bank compounding rule.

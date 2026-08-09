@@ -1,38 +1,40 @@
+import crypto from "crypto";
 import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import { User } from "../models/User";
 import { PendingSignup } from "../models/PendingSignup";
+import { RefreshToken } from "../models/RefreshToken";
 import { signupStartSchema, signupVerifySchema, loginSchema } from "../validators/auth";
 import { requestOtp, verifyOtp } from "../services/otpService";
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../utils/jwt";
 import { env } from "../config/env";
 import { AuthedRequest } from "../middleware/auth";
 import { REFRESH_COOKIE_NAME as REFRESH_COOKIE } from "../config/constants";
+import { publicUser } from "../utils/publicUser";
 
-function setRefreshCookie(res: Response, token: string) {
+function setRefreshCookie(res: Response, token: string, expiresAt: Date) {
   res.cookie(REFRESH_COOKIE, token, {
     httpOnly: true,
     secure: env.nodeEnv === "production",
     sameSite: "lax",
-    maxAge: 30 * 24 * 60 * 60 * 1000,
+    expires: expiresAt,
     path: "/api/auth",
   });
 }
 
-function normalizeMobile(mobile: string): string {
-  return mobile.replace(/^\+91/, "").replace(/^0/, "");
+// Issues a brand-new refresh token, persists the RefreshToken record that
+// makes it revocable, and sets the cookie — the one path every login/signup/
+// refresh call goes through, so "every live refresh token has a matching DB
+// record" can't drift out of sync.
+async function issueRefreshToken(res: Response, userId: string): Promise<void> {
+  const jti = crypto.randomUUID();
+  const { token, expiresAt } = signRefreshToken(userId, jti);
+  await RefreshToken.create({ jti, userId, expiresAt });
+  setRefreshCookie(res, token, expiresAt);
 }
 
-function publicUser(user: InstanceType<typeof User>) {
-  return {
-    id: user._id.toString(),
-    name: user.name,
-    mobile: user.mobile,
-    email: user.email,
-    age: user.age,
-    preferences: user.preferences,
-    portfolio: user.portfolio,
-  };
+function normalizeMobile(mobile: string): string {
+  return mobile.replace(/^\+91/, "").replace(/^0/, "");
 }
 
 export async function signupStart(req: Request, res: Response) {
@@ -105,8 +107,7 @@ export async function signupVerify(req: Request, res: Response) {
   await PendingSignup.deleteOne({ mobile });
 
   const accessToken = signAccessToken(user._id.toString());
-  const refreshToken = signRefreshToken(user._id.toString());
-  setRefreshCookie(res, refreshToken);
+  await issueRefreshToken(res, user._id.toString());
 
   return res.status(201).json({ accessToken, user: publicUser(user) });
 }
@@ -126,8 +127,7 @@ export async function login(req: Request, res: Response) {
   }
 
   const accessToken = signAccessToken(user._id.toString());
-  const refreshToken = signRefreshToken(user._id.toString());
-  setRefreshCookie(res, refreshToken);
+  await issueRefreshToken(res, user._id.toString());
 
   return res.status(200).json({ accessToken, user: publicUser(user) });
 }
@@ -137,20 +137,56 @@ export async function refresh(req: Request, res: Response) {
   if (!token) {
     return res.status(401).json({ error: "NO_REFRESH_TOKEN", message: "Not logged in." });
   }
+
+  let payload;
   try {
-    const payload = verifyRefreshToken(token);
-    const user = await User.findById(payload.sub);
-    if (!user) {
-      return res.status(401).json({ error: "USER_NOT_FOUND", message: "Account no longer exists." });
-    }
-    const accessToken = signAccessToken(user._id.toString());
-    return res.status(200).json({ accessToken, user: publicUser(user) });
+    payload = verifyRefreshToken(token);
   } catch {
     return res.status(401).json({ error: "INVALID_REFRESH_TOKEN", message: "Session expired. Please log in again." });
   }
+
+  // Single-use rotation: atomically revoke this token (only succeeds if it's
+  // still live) so a concurrent second refresh call with the same cookie
+  // can't also claim it. `claimed` is the pre-update doc, so a match here
+  // means this call is the one that just revoked it.
+  const claimed = await RefreshToken.findOneAndUpdate({ jti: payload.jti, revokedAt: null }, { revokedAt: new Date() });
+
+  if (!claimed) {
+    const existing = await RefreshToken.findOne({ jti: payload.jti });
+    res.clearCookie(REFRESH_COOKIE, { path: "/api/auth" });
+    if (existing) {
+      // A record exists but was already revoked (rotated away by an earlier
+      // refresh, or killed by logout) — this exact token being presented
+      // again is the strongest signal available that it leaked. Revoke every
+      // other still-live token for this user too, not just this one, so a
+      // stolen token can't keep working via a delayed replay.
+      await RefreshToken.updateMany({ userId: existing.userId, revokedAt: null }, { revokedAt: new Date() });
+      return res.status(401).json({ error: "REFRESH_TOKEN_REUSED", message: "This session was already used elsewhere. Please log in again." });
+    }
+    return res.status(401).json({ error: "INVALID_REFRESH_TOKEN", message: "Session expired. Please log in again." });
+  }
+
+  const user = await User.findById(payload.sub);
+  if (!user) {
+    return res.status(401).json({ error: "USER_NOT_FOUND", message: "Account no longer exists." });
+  }
+
+  const accessToken = signAccessToken(user._id.toString());
+  await issueRefreshToken(res, user._id.toString());
+
+  return res.status(200).json({ accessToken, user: publicUser(user) });
 }
 
 export async function logout(req: Request, res: Response) {
+  const token = req.cookies?.[REFRESH_COOKIE];
+  if (token) {
+    try {
+      const payload = verifyRefreshToken(token);
+      await RefreshToken.updateOne({ jti: payload.jti, revokedAt: null }, { revokedAt: new Date() });
+    } catch {
+      // Malformed/expired cookie — nothing valid to revoke server-side.
+    }
+  }
   res.clearCookie(REFRESH_COOKIE, { path: "/api/auth" });
   return res.status(200).json({ message: "Logged out." });
 }

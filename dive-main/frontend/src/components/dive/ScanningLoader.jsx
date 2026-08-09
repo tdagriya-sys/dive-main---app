@@ -216,7 +216,7 @@ const DEFAULT_MESSAGES = [
  * doing multi-second AI work (Bot Scan's analyze step, file/doc upload
  * parsing) so the wait reads as active progress instead of a frozen spinner.
  */
-export default function ScanningLoader({ title, subtitle, messages = DEFAULT_MESSAGES, intervalMs = 3000 }) {
+export default function ScanningLoader({ title, subtitle, messages = DEFAULT_MESSAGES, intervalMs = 3000, onCancel }) {
   const [idx, setIdx] = useState(0);
   // Callers typically pass `messages` as a fresh inline array literal, which
   // gets a new identity on every parent re-render. Depending on it directly
@@ -260,6 +260,16 @@ export default function ScanningLoader({ title, subtitle, messages = DEFAULT_MES
           </motion.p>
         </AnimatePresence>
       </div>
+      {onCancel && (
+        // A hung AI response otherwise has no escape short of waiting out the
+        // full timeout chain (Anthropic SDK timeout x retries, Nginx's
+        // proxy_read_timeout, this request's own axios timeout) — this is
+        // the only way to bail out immediately instead.
+        <button data-testid="scanning-loader-cancel-btn" onClick={onCancel}
+          className="mt-8 text-sm font-bold text-[var(--text-secondary)] underline">
+          Cancel
+        </button>
+      )}
     </div>
   );
 }

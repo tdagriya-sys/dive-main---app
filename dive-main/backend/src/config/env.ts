@@ -8,6 +8,17 @@ function isPlaceholder(value: string | undefined): boolean {
   return /REPLACE_ME|REPLACE_WITH|YOUR_KEY|CHANGE_ME/i.test(value);
 }
 
+// A JWT signing secret needs a real strength check, not just "isn't the known
+// placeholder string" — a short, guessable value (or the literal dev fallback
+// below, which doesn't match isPlaceholder()'s CHANGE_ME regex since it uses a
+// hyphen, "change-me", not an underscore) would pass isPlaceholder() but still
+// let anyone forge valid tokens. 32 chars is a floor comfortably below what
+// `openssl rand -base64 48` (the value the deploy guide has people generate)
+// produces, without being strict about exact entropy.
+function isWeakJwtSecret(value: string): boolean {
+  return isPlaceholder(value) || value.length < 32;
+}
+
 export const env = {
   nodeEnv: process.env.NODE_ENV || "development",
   port: parseInt(process.env.PORT || "8000", 10),
@@ -19,11 +30,23 @@ export const env = {
 
   jwtAccessSecret: process.env.JWT_ACCESS_SECRET || "dev-access-secret-change-me",
   jwtRefreshSecret: process.env.JWT_REFRESH_SECRET || "dev-refresh-secret-change-me",
+  jwtAccessSecretIsWeak: isWeakJwtSecret(process.env.JWT_ACCESS_SECRET || "dev-access-secret-change-me"),
+  jwtRefreshSecretIsWeak: isWeakJwtSecret(process.env.JWT_REFRESH_SECRET || "dev-refresh-secret-change-me"),
   jwtAccessTtl: process.env.JWT_ACCESS_TTL || "15m",
   jwtRefreshTtl: process.env.JWT_REFRESH_TTL || "30d",
 
   otpTtlMinutes: parseInt(process.env.OTP_TTL_MINUTES || "5", 10),
   minSignupAge: parseInt(process.env.MIN_SIGNUP_AGE || "18", 10),
+
+  // Gates admin-only endpoints (e.g. POST /api/admin/instruments/refresh) —
+  // there's no full role system in this app yet, so admin access is just
+  // "your account's email is on this list", checked fresh on every request
+  // rather than a persisted per-user flag (one env var to edit beats a DB
+  // migration for something this small in scope).
+  adminEmails: (process.env.ADMIN_EMAILS || "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean),
 
   // OTP delivery via email (Resend) instead of SMS — no per-message regulatory
   // approval needed (unlike SMS in India, which requires a DLT-registered

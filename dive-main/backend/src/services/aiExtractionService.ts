@@ -18,6 +18,13 @@ export class AiExtractionNotConfiguredError extends Error {
   }
 }
 
+export class AiExtractionTimeoutError extends Error {
+  constructor() {
+    super("The AI took too long to analyze this — try again with fewer screens/pages, or a clearer image.");
+    this.name = "AiExtractionTimeoutError";
+  }
+}
+
 // Always "not configured" in the test environment, even if a real key is
 // present in .env for local dev — tests must never spend real API credits or
 // depend on network access, same policy as priceHistoryService's real-price
@@ -28,7 +35,16 @@ export function isAiExtractionConfigured(): boolean {
 
 let client: Anthropic | null = null;
 function getClient(): Anthropic {
-  if (!client) client = new Anthropic({ apiKey: env.anthropicApiKey });
+  // Without an explicit timeout, a slow/stuck Claude response (or an under-
+  // provisioned deploy — see docs/SERVER_DEPLOYMENT_GUIDE.md) can leave the
+  // request hanging far longer than any UI should ever sit spinning, since
+  // neither Express nor the frontend axios client set one either (see the
+  // matching timeout on the frontend's api.js call, and Nginx's
+  // proxy_read_timeout in the deploy guide, both set comfortably longer than
+  // this so a slow-but-real response still has a chance to arrive intact).
+  // maxRetries: 1 (not the SDK's default of 2) keeps the worst-case total
+  // wait bounded at roughly 2x this timeout, not 3x.
+  if (!client) client = new Anthropic({ apiKey: env.anthropicApiKey, timeout: 60_000, maxRetries: 1 });
   return client;
 }
 
@@ -36,12 +52,15 @@ const ASSET_CLASS_LIST = ASSET_CLASSES.join(", ");
 
 /**
  * The extraction prompt. This is the entire safety net that replaced the old
- * regex/section-marker/noise-blacklist pipeline (see holdingsSectionExtractor.ts,
- * brokerParsers/angelOne.ts, genericRowParser.ts — those remain in place only as
- * the CSV/XLSX/JSON structured-data path's helpers; they are no longer used for
- * images/PDFs). Every rule below exists because the old heuristic pipeline broke
- * on it in real testing: watchlist/index leakage, garbage short-token rows, and
- * duplicate/triple-counted holdings across repeated or multi-account screenshots.
+ * regex/section-marker/noise-blacklist pipeline for images/PDFs
+ * (holdingsSectionExtractor.ts, brokerParsers/angelOne.ts, genericRowParser.ts
+ * — all deleted, no longer used by anything). The CSV/XLSX/JSON structured-
+ * data path never used that pipeline either; it goes through
+ * fileParsers/rowNormalizer.ts's broker-agnostic fuzzy column matching
+ * instead, a genuinely different piece of code. Every rule below exists
+ * because the old heuristic pipeline broke on it in real testing:
+ * watchlist/index leakage, garbage short-token rows, and duplicate/triple-
+ * counted holdings across repeated or multi-account screenshots.
  */
 function buildSystemPrompt(context: AiExtractionContext): string {
   const sourceDescription =
@@ -222,17 +241,23 @@ export async function extractHoldingsWithAI(
         : "Above is one image/document. Extract the holdings as described in your instructions.",
   });
 
-  const response = await getClient().messages.create({
-    // Sonnet 5 handles this vision-extraction task well at roughly half the
-    // per-token cost of Opus 5 and near-Opus quality on structured
-    // extraction — a better cost/quality fit for a task run on every scan
-    // and every image/PDF upload than the top-tier model.
-    model: "claude-sonnet-5",
-    max_tokens: 8000,
-    system: buildSystemPrompt(context),
-    output_config: { format: { type: "json_schema", schema: OUTPUT_SCHEMA } },
-    messages: [{ role: "user", content }],
-  });
+  let response: Anthropic.Messages.Message;
+  try {
+    response = await getClient().messages.create({
+      // Sonnet 5 handles this vision-extraction task well at roughly half the
+      // per-token cost of Opus 5 and near-Opus quality on structured
+      // extraction — a better cost/quality fit for a task run on every scan
+      // and every image/PDF upload than the top-tier model.
+      model: "claude-sonnet-5",
+      max_tokens: 8000,
+      system: buildSystemPrompt(context),
+      output_config: { format: { type: "json_schema", schema: OUTPUT_SCHEMA } },
+      messages: [{ role: "user", content }],
+    });
+  } catch (err) {
+    if (err instanceof Anthropic.APIConnectionTimeoutError) throw new AiExtractionTimeoutError();
+    throw err;
+  }
 
   const textBlock = response.content.find((b): b is Anthropic.Messages.TextBlock => b.type === "text");
   if (!textBlock) return { holdings: [], excludedNotes: "The AI model returned no readable output." };
@@ -244,12 +269,11 @@ export async function extractHoldingsWithAI(
     return { holdings: [], excludedNotes: "The AI model's response could not be parsed." };
   }
 
-  const holdings: AiExtractedHolding[] = [];
-  for (const raw of parsed.holdings || []) {
-    const { instrumentId, verifiedInInstrumentList, matchedName } = await verifyAgainstInstrumentMaster(
-      raw.name,
-      raw.assetClass
-    );
+  const rawHoldings = parsed.holdings || [];
+  const matches = await verifyAgainstInstrumentMasterBatch(rawHoldings);
+
+  const holdings: AiExtractedHolding[] = rawHoldings.map((raw, i) => {
+    const { instrumentId, verifiedInInstrumentList, matchedName } = matches[i];
     const candidate: AiExtractedHolding = {
       name: matchedName || raw.name,
       assetClass: raw.assetClass,
@@ -269,32 +293,65 @@ export async function extractHoldingsWithAI(
       fdMaturityDate: raw.fdMaturityDate,
     };
     candidate.missingFields = missingFieldsFor(candidate);
-    holdings.push(candidate);
-  }
+    return candidate;
+  });
 
   return { holdings, excludedNotes: parsed.excludedNotes || "" };
 }
 
-async function verifyAgainstInstrumentMaster(
-  name: string,
-  assetClass: AssetClass
-): Promise<{ instrumentId: string | null; verifiedInInstrumentList: boolean; matchedName: string | null }> {
-  const trimmed = name.trim();
-  if (!trimmed) return { instrumentId: null, verifiedInInstrumentList: false, matchedName: null };
-  const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+interface InstrumentCandidate {
+  _id: unknown;
+  symbol?: string;
+  name: string;
+  assetClass: AssetClass;
+}
 
-  const symbolMatch = await Instrument.findOne({
-    assetClass,
-    symbol: new RegExp(`^${escaped}$`, "i"),
-  }).lean();
-  if (symbolMatch) {
-    return { instrumentId: String(symbolMatch._id), verifiedInInstrumentList: true, matchedName: symbolMatch.name };
+type InstrumentMatch = { instrumentId: string | null; verifiedInInstrumentList: boolean; matchedName: string | null };
+
+// Replaces what used to be up to 2 sequential findOne round-trips PER
+// extracted holding (20-60 round-trips for a typical 20-30-item scan,
+// stacked on top of the already-slow Claude call) with exactly ONE query
+// for the whole batch — every instrument in the asset classes actually
+// present here, matched against each raw holding in memory instead of at
+// the database. Only the 3 fields the matching logic needs are pulled, so
+// even a class with thousands of entries (EQUITY) is a cheap payload
+// compared to the network round-trip latency this eliminates.
+export async function verifyAgainstInstrumentMasterBatch(
+  raws: Array<{ name: string; assetClass: AssetClass }>
+): Promise<InstrumentMatch[]> {
+  const uniqueClasses = Array.from(new Set(raws.map((r) => r.assetClass)));
+  if (uniqueClasses.length === 0) return [];
+
+  const candidates: InstrumentCandidate[] = await Instrument.find({ assetClass: { $in: uniqueClasses } })
+    .select("symbol name assetClass")
+    .lean();
+
+  const byClass = new Map<AssetClass, InstrumentCandidate[]>();
+  for (const c of candidates) {
+    const list = byClass.get(c.assetClass);
+    if (list) list.push(c);
+    else byClass.set(c.assetClass, [c]);
   }
 
-  const nameMatch = await Instrument.findOne({ assetClass, name: new RegExp(escaped, "i") }).lean();
-  if (nameMatch) {
-    return { instrumentId: String(nameMatch._id), verifiedInInstrumentList: true, matchedName: nameMatch.name };
-  }
+  return raws.map((raw): InstrumentMatch => {
+    const trimmed = raw.name.trim();
+    if (!trimmed) return { instrumentId: null, verifiedInInstrumentList: false, matchedName: null };
+    const pool = byClass.get(raw.assetClass) || [];
+    const lowerTrimmed = trimmed.toLowerCase();
 
-  return { instrumentId: null, verifiedInInstrumentList: false, matchedName: null };
+    // Same two-pass semantics as the original per-item regex queries: an
+    // exact (case-insensitive, full-string) symbol match first, falling
+    // back to a substring (case-insensitive, anywhere) name match.
+    const symbolMatch = pool.find((c) => c.symbol && c.symbol.toLowerCase() === lowerTrimmed);
+    if (symbolMatch) {
+      return { instrumentId: String(symbolMatch._id), verifiedInInstrumentList: true, matchedName: symbolMatch.name };
+    }
+
+    const nameMatch = pool.find((c) => c.name.toLowerCase().includes(lowerTrimmed));
+    if (nameMatch) {
+      return { instrumentId: String(nameMatch._id), verifiedInInstrumentList: true, matchedName: nameMatch.name };
+    }
+
+    return { instrumentId: null, verifiedInInstrumentList: false, matchedName: null };
+  });
 }

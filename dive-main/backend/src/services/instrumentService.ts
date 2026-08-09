@@ -45,6 +45,26 @@ async function upsertBatch(rows: SeedInstrument[], source: string): Promise<{ ad
   return { added, updated };
 }
 
+// Both the daily cron (instrumentRefresh.cron.ts) and the admin-triggered
+// endpoint (instrumentsController.ts) call runInstrumentRefresh() — without
+// this, an admin trigger landing while the cron (or another admin request)
+// is already mid-run would start a second overlapping pass, doubling up on
+// AMFI/NSE/CoinGecko calls against sources that are already rate-limited or
+// unreliable on their own. A concurrent caller instead joins the
+// already-running pass and gets its result once it finishes, rather than
+// starting a new one — same in-flight-dedup shape as the frontend's own
+// refreshPromise pattern for token refresh (lib/api.js).
+let refreshInFlight: Promise<RefreshSummary[]> | null = null;
+
+export function runInstrumentRefresh(): Promise<RefreshSummary[]> {
+  if (!refreshInFlight) {
+    refreshInFlight = runInstrumentRefreshInternal().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+}
+
 /**
  * Refreshes the Instrument master collection across all 11 asset classes.
  * Live public sources: Equity (NSE), ETF (NSE — also reclassifies gold/silver
@@ -58,7 +78,7 @@ async function upsertBatch(rows: SeedInstrument[], source: string): Promise<{ ad
  * Any live source that fails (offline, rate-limited, layout changed) is
  * logged and skipped — it never aborts the whole run.
  */
-export async function runInstrumentRefresh(): Promise<RefreshSummary[]> {
+async function runInstrumentRefreshInternal(): Promise<RefreshSummary[]> {
   const summaries: RefreshSummary[] = [];
 
   const staticRes = await upsertBatch(STATIC_INSTRUMENTS, "SEED");

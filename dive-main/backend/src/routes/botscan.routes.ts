@@ -1,6 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import { requireAuth } from "../middleware/auth";
+import { aiIngestLimiter } from "../middleware/rateLimit";
 import { asyncHandler } from "../utils/asyncHandler";
 import * as botScanController from "../controllers/botScanController";
 
@@ -18,6 +19,6 @@ const framesUpload = multer({
 
 const router = Router();
 
-router.post("/analyze", requireAuth, framesUpload.array("frames", 30), asyncHandler(botScanController.analyzeFrames));
+router.post("/analyze", requireAuth, aiIngestLimiter, framesUpload.array("frames", 30), asyncHandler(botScanController.analyzeFrames));
 
 export default router;
