@@ -230,7 +230,8 @@
       "Bash(REACT_APP_BACKEND_URL=http://localhost:8000 npx craco build)",
       "Bash(node -e \"console.log\\(require\\('@testing-library/user-event/package.json'\\).version\\)\")",
       "Bash(rm -v src/services/brokerParsers/angelOne.ts src/services/genericRowParser.ts src/services/holdingsSectionExtractor.ts)",
-      "Bash(rmdir src/services/brokerParsers)"
+      "Bash(rmdir src/services/brokerParsers)",
+      "Bash(ls -la \"D:\\\\Dive\\\\dive-main - app\\\\dive-main\\\\frontend\\\\\" | grep -i \"lock\\\\|yarn\" *)"
     ]
   }
 }

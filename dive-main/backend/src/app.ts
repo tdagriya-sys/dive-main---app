@@ -19,6 +19,21 @@ import scoreRoutes from "./routes/score.routes";
 export function createApp() {
   const app = express();
 
+  // Without this, Express has no reason to trust the X-Forwarded-For header
+  // Nginx sets, and falls back to req.socket.remoteAddress — which, behind a
+  // reverse proxy, is always Nginx's own loopback address for every request,
+  // from every real client. Every IP-keyed rate limiter below then collapses
+  // onto ONE shared bucket for the entire site instead of one per visitor —
+  // confirmed live: a handful of admin-testing login calls exhausted the
+  // login limiter for every device, new signups included, all sharing that
+  // one bucket. `"loopback"` (not `true`) matches this deployment's actual
+  // topology exactly — Nginx runs on the same machine, proxying to
+  // localhost:8000 (see docs/SERVER_DEPLOYMENT_GUIDE.md Part 9) — so only a
+  // connection genuinely arriving via 127.0.0.1/::1 is trusted to set this
+  // header, unlike `true`, which would trust it from anywhere (letting a
+  // client spoof their own IP if this port were ever reachable directly).
+  app.set("trust proxy", "loopback");
+
   app.use(helmet());
   app.use(
     cors({
