@@ -39,6 +39,47 @@ describe("holding deletion", () => {
   });
 });
 
+// Bug report: Divve Planner's inputs (lumpsum amount, SIP fields) were only
+// ever kept in frontend memory, never saved — so a returning user always saw
+// the defaults again instead of their last-entered values.
+describe("planner state persistence", () => {
+  it("defaults to the same values DiveContext.js's DEFAULT_PLANNER_STATE uses, for a brand-new account", async () => {
+    const token = await signupAndLogin("9200000005", "plannerdefaults@example.com");
+    const me = await request(app).get("/api/auth/me").set({ Authorization: `Bearer ${token}` });
+
+    expect(me.body.user.plannerState).toEqual({
+      mode: null, lumpsumAmount: 50000, sipMonthly: 5000, sipStepUp: 10, sipYears: 10, sipExpandedMonthly: false,
+    });
+  });
+
+  it("saves a partial patch and returns it on the next login", async () => {
+    const token = await signupAndLogin("9200000006", "plannersave@example.com");
+    const auth = { Authorization: `Bearer ${token}` };
+
+    const save = await request(app).patch("/api/users/me/planner").set(auth).send({ mode: "lumpsum", lumpsumAmount: 250000 });
+    expect(save.status).toBe(200);
+    expect(save.body.plannerState.lumpsumAmount).toBe(250000);
+    expect(save.body.plannerState.mode).toBe("lumpsum");
+    // A partial patch must not clobber untouched fields back to defaults.
+    expect(save.body.plannerState.sipMonthly).toBe(5000);
+
+    const login = await request(app).post("/api/auth/login").send({ identifier: "plannersave@example.com", password: "Passw0rd!" });
+    expect(login.body.user.plannerState.lumpsumAmount).toBe(250000);
+    expect(login.body.user.plannerState.mode).toBe("lumpsum");
+  });
+
+  it("requires authentication", async () => {
+    const res = await request(app).patch("/api/users/me/planner").send({ lumpsumAmount: 100000 });
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects an out-of-range value", async () => {
+    const token = await signupAndLogin("9200000007", "plannerinvalid@example.com");
+    const res = await request(app).patch("/api/users/me/planner").set({ Authorization: `Bearer ${token}` }).send({ sipStepUp: 500 });
+    expect(res.status).toBe(400);
+  });
+});
+
 describe("account deletion", () => {
   it("deletes the account and cascades its holdings", async () => {
     const token = await signupAndLogin("9200000004", "deleteme@example.com");

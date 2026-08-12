@@ -5,6 +5,18 @@ import { adaptHolding, IDEAL_RANGES } from "../lib/diveEngine";
 const DiveContext = createContext(null);
 export const useDive = () => useContext(DiveContext);
 
+// Must match backend/src/models/User.ts's plannerStateSchema defaults
+// exactly — this is what a brand-new account (or any account whose
+// plannerState was never saved) starts from, both here and on the server.
+const DEFAULT_PLANNER_STATE = {
+  mode: null, // null | "lumpsum" | "sip"
+  lumpsumAmount: 50000,
+  sipMonthly: 5000,
+  sipStepUp: 10,
+  sipYears: 10,
+  sipExpandedMonthly: false,
+};
+
 export function DiveProvider({ children }) {
   const [screen, setScreenState] = useState("splash"); // onboarding + app screens
   // Tracks the single screen navigated FROM, so a generic "back" can return to
@@ -73,21 +85,41 @@ export function DiveProvider({ children }) {
   // key={screen}> unmounts a screen's component tree on every navigation away
   // from it — local state would silently reset to defaults each time the user
   // left and returned to the Planner tab. Lifting it here means it survives for
-  // the rest of the session. Not yet synced to the backend (no endpoint/schema
-  // field exists for it, unlike `prefs`), so a fresh login/session still starts
-  // from these defaults — wire up a real save the same way `savePrefs` does once
-  // Mongo-backed persistence for this is needed.
-  const [plannerState, setPlannerStateRaw] = useState({
-    mode: null, // null | "lumpsum" | "sip"
-    lumpsumAmount: 50000,
-    sipMonthly: 5000,
-    sipStepUp: 10,
-    sipYears: 10,
-    sipExpandedMonthly: false,
-  });
+  // the rest of the session. Persisted server-side via PATCH /users/me/planner
+  // (debounced below) so a returning user sees their real last-entered values,
+  // not just the defaults — the demo phone frame and the logged-in app share
+  // this same context instance without a remount between them, so on login/
+  // signup this also has to explicitly load (or reset to defaults) the new
+  // identity's own value; it's never automatic on its own.
+  const [plannerState, setPlannerStateRaw] = useState(DEFAULT_PLANNER_STATE);
   const setPlannerState = useCallback((patch) => {
     setPlannerStateRaw((p) => ({ ...p, ...(typeof patch === "function" ? patch(p) : patch) }));
   }, []);
+  const loadPlannerStateFrom = (u) => setPlannerStateRaw({ ...DEFAULT_PLANNER_STATE, ...(u?.plannerState || {}) });
+
+  // Debounced save — Planner's slider/number inputs fire on every drag tick
+  // or keystroke, and PATCHing on each one would spam the backend. Waits for
+  // 800ms of no further changes before actually saving. `skipNextSaveRef`
+  // suppresses the save that would otherwise fire right after loadPlannerStateFrom
+  // itself changes plannerState (login/signup/session-restore) — that's a
+  // load, not a user edit, and re-saving the identical value back is pure
+  // waste. Best-effort: a failed save just gets superseded by the next real
+  // edit, and a slider drag isn't worth interrupting with an error toast.
+  const plannerSaveTimerRef = useRef(null);
+  const skipNextPlannerSaveRef = useRef(true);
+  useEffect(() => {
+    if (skipNextPlannerSaveRef.current) {
+      skipNextPlannerSaveRef.current = false;
+      return undefined;
+    }
+    if (!user) return undefined;
+    if (plannerSaveTimerRef.current) clearTimeout(plannerSaveTimerRef.current);
+    plannerSaveTimerRef.current = setTimeout(() => {
+      api.patch("/users/me/planner", plannerState).catch(() => {});
+    }, 800);
+    return () => clearTimeout(plannerSaveTimerRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plannerState, user]);
 
   const addSim = (segment, amount) => {
     setSims((prev) => {
@@ -138,6 +170,8 @@ export function DiveProvider({ children }) {
           preferred: data.user.preferences?.preferredCategories ?? p.preferred,
           excluded: data.user.preferences?.excludedCategories ?? p.excluded,
         }));
+        skipNextPlannerSaveRef.current = true;
+        loadPlannerStateFrom(data.user);
         const loaded = await loadHoldings();
         setScreen(loaded.length ? "home" : "chooseMethod");
       } catch (e) {
@@ -168,10 +202,29 @@ export function DiveProvider({ children }) {
     return data; // { message, mobile, devOtp? }
   };
 
+  // The demo phone frame and the real logged-in app share this same
+  // long-lived context (deliberately never remounted on login — see
+  // App.js/PhoneFrame), so anything a logged-out visitor played with in the
+  // demo (Ask DIVVE's "what-if" simulation — never persisted, unlike
+  // plannerState now) would otherwise survive straight into their real
+  // account the moment they sign up or log in, in the same tab. Planner
+  // itself is handled by loadPlannerStateFrom (loads the new identity's real
+  // saved value, or its defaults if it has none) rather than a blind reset.
+  // Also matters for logout→a different person logging in on the same
+  // shared/kiosk browser.
+  const resetClientOnlyScratchState = () => {
+    skipNextPlannerSaveRef.current = true;
+    setPlannerStateRaw(DEFAULT_PLANNER_STATE);
+    setSims([]);
+  };
+
   const signupVerify = async (mobile, otp) => {
     const { data } = await api.post("/auth/signup/verify", { mobile, otp });
     setAccessToken(data.accessToken);
     setUser(data.user);
+    skipNextPlannerSaveRef.current = true;
+    loadPlannerStateFrom(data.user);
+    setSims([]);
     return data.user;
   };
 
@@ -180,6 +233,9 @@ export function DiveProvider({ children }) {
     setAccessToken(data.accessToken);
     setUser(data.user);
     setPrefs((p) => ({ ...p, ...(data.user.preferences || {}) }));
+    skipNextPlannerSaveRef.current = true;
+    loadPlannerStateFrom(data.user);
+    setSims([]);
     const loaded = await loadHoldings();
     setScreen(loaded.length ? "home" : "chooseMethod");
     return data.user;
@@ -190,6 +246,7 @@ export function DiveProvider({ children }) {
     setAccessToken(null);
     setUser(null);
     setHoldings([]);
+    resetClientOnlyScratchState();
     setScreen("splash");
   };
 

@@ -12,5 +12,6 @@ export function publicUser(user: InstanceType<typeof User>) {
     age: user.age,
     preferences: user.preferences,
     portfolio: user.portfolio,
+    plannerState: user.plannerState,
   };
 }

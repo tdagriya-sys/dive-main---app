@@ -280,6 +280,35 @@ export function normalizeIssuer(name) {
 // diversification can never exceed apparent diversification — and if apparent
 // is 0 (everything in one segment), real must be 0 too, no matter how well
 // diversified the holdings are BY NAME within that one segment.
+// Holdings whose (normalized) name repeats across more than one segment —
+// e.g. "Reliance Industries" held directly via Equity AND via a "Reliance
+// Industries Bonds" position in Bonds. This is the exact mechanism
+// realDiversification() below penalizes; exposed separately (rather than
+// just folded into that score) so a screen like X-Ray can name the specific
+// overlapping holding instead of only showing the resulting number.
+export function crossSegmentOverlaps(holdings, extra = null) {
+  const list = extra && extra.amount > 0
+    ? [...holdings, { amount: extra.amount, segment: extra.segment, name: extra.name || `Simulated ${extra.segment}` }]
+    : holdings;
+  const total = list.reduce((s, h) => s + h.amount, 0);
+  if (!total) return [];
+
+  const byIssuer = new Map(); // normalized name -> { displayName, value, segments: Set }
+  list.forEach((h) => {
+    const key = normalizeIssuer(h.name) || h.name;
+    const entry = byIssuer.get(key) || { displayName: h.name, value: 0, segments: new Set() };
+    if (h.name.length < entry.displayName.length) entry.displayName = h.name;
+    entry.value += h.amount;
+    entry.segments.add(h.segment);
+    byIssuer.set(key, entry);
+  });
+
+  return Array.from(byIssuer.values())
+    .filter((e) => e.segments.size > 1)
+    .map((e) => ({ name: e.displayName, amount: e.value, pct: (e.value / total) * 100, segments: Array.from(e.segments).sort() }))
+    .sort((a, b) => b.amount - a.amount);
+}
+
 export function realDiversification(holdings, extra = null) {
   const apparent = apparentDiversification(holdings, extra);
   if (apparent <= 0) return 0;
@@ -290,19 +319,7 @@ export function realDiversification(holdings, extra = null) {
   const total = list.reduce((s, h) => s + h.amount, 0);
   if (!total) return apparent;
 
-  const byIssuer = new Map();
-  list.forEach((h) => {
-    const key = normalizeIssuer(h.name) || h.name;
-    const entry = byIssuer.get(key) || { value: 0, segments: new Set() };
-    entry.value += h.amount;
-    entry.segments.add(h.segment);
-    byIssuer.set(key, entry);
-  });
-
-  let overlapValue = 0;
-  for (const { value, segments } of byIssuer.values()) {
-    if (segments.size > 1) overlapValue += value;
-  }
+  const overlapValue = crossSegmentOverlaps(holdings, extra).reduce((s, o) => s + o.amount, 0);
   const overlapShare = overlapValue / total;
   return Math.max(0, Math.min(apparent, Math.round(apparent * (1 - overlapShare))));
 }

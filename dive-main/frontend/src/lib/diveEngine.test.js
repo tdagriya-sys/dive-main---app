@@ -3,6 +3,7 @@ import {
   segmentBreakdown,
   apparentDiversification,
   realDiversification,
+  crossSegmentOverlaps,
   diveScore,
   normalizeIssuer,
   missingCategories,
@@ -123,6 +124,27 @@ describe("apparentDiversification / realDiversification / diveScore", () => {
       { segment: "Bonds", amount: 500, name: "Government Bond", lookthrough: [{ company: "Government Bond", pct: 100 }] },
     ];
     expect(realDiversification(sameIssuer)).toBeLessThan(realDiversification(differentIssuers));
+  });
+
+  it("crossSegmentOverlaps names the specific issuer recurring across segments, not just a number", () => {
+    const sameIssuer = [
+      { segment: "Equity", amount: 500, name: "HDFC Bank", lookthrough: [{ company: "HDFC Bank", pct: 100 }] },
+      { segment: "Bonds", amount: 500, name: "HDFC Bank Bonds", lookthrough: [{ company: "HDFC Bank Bonds", pct: 100 }] },
+      { segment: "Gold", amount: 200, name: "Digital Gold", lookthrough: [{ company: "Digital Gold", pct: 100 }] },
+    ];
+    const overlaps = crossSegmentOverlaps(sameIssuer);
+    expect(overlaps).toHaveLength(1);
+    expect(overlaps[0].name).toBe("HDFC Bank"); // shorter display name preferred over the "...Bonds" variant
+    expect(overlaps[0].segments).toEqual(["Bonds", "Equity"]);
+    expect(overlaps[0].amount).toBe(1000);
+  });
+
+  it("crossSegmentOverlaps returns nothing when no issuer repeats across segments", () => {
+    const differentIssuers = [
+      { segment: "Equity", amount: 500, name: "HDFC Bank", lookthrough: [{ company: "HDFC Bank", pct: 100 }] },
+      { segment: "Bonds", amount: 500, name: "Government Bond", lookthrough: [{ company: "Government Bond", pct: 100 }] },
+    ];
+    expect(crossSegmentOverlaps(differentIssuers)).toEqual([]);
   });
 
   it("if apparent diversification is 0, real diversification must also be 0", () => {

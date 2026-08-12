@@ -70,6 +70,7 @@ describe("BotScan — \"Nothing was detected\" must not show after a successful 
       goBack: jest.fn(),
       loadHoldings: jest.fn().mockResolvedValue([]),
       holdings: [],
+      user: { id: "u1", name: "Test", age: 30 },
     });
     mockCaptureApis();
   });
@@ -106,5 +107,138 @@ describe("BotScan — \"Nothing was detected\" must not show after a successful 
     // The actual bug: this must NOT appear once a real save succeeded.
     expect(screen.queryByText(/nothing was detected/i)).not.toBeInTheDocument();
     expect(reviewHeader()).not.toBeInTheDocument();
+  });
+});
+
+// Bug report: the marketing landing page's interactive phone demo lets a
+// logged-out visitor reach Bot Scan and tap Start Scan, firing a REAL OS
+// screen-share permission prompt for something guaranteed to fail (analyze
+// requires auth). ChooseFetchMethod normally blocks navigating in at all,
+// but this is the backstop inside BotScan itself.
+describe("BotScan — blocks starting a scan when logged out", () => {
+  it("never calls getDisplayMedia and shows a sign-up prompt instead", async () => {
+    jest.clearAllMocks();
+    const getDisplayMedia = jest.fn();
+    global.navigator.mediaDevices = { getDisplayMedia };
+    useDive.mockReturnValue({
+      setScreen: jest.fn(),
+      goBack: jest.fn(),
+      loadHoldings: jest.fn().mockResolvedValue([]),
+      holdings: [],
+      user: null,
+    });
+    const user = userEvent.setup();
+    render(<BotScan />);
+
+    await user.click(screen.getByTestId("bot-scan-start-btn"));
+
+    expect(getDisplayMedia).not.toHaveBeenCalled();
+    expect(screen.getByText(/sign up first to scan and save/i)).toBeInTheDocument();
+  });
+});
+
+// Bug report: on mobile, Bot Scan said "permission was denied" without the
+// browser ever showing a prompt. Root cause: getDisplayMedia doesn't exist on
+// most phone browsers at all, so calling it fails immediately for a reason
+// that has nothing to do with the user denying anything.
+describe("BotScan — screen sharing unsupported on this device (e.g. mobile)", () => {
+  let user;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    user = userEvent.setup();
+    useDive.mockReturnValue({
+      setScreen: jest.fn(),
+      goBack: jest.fn(),
+      loadHoldings: jest.fn().mockResolvedValue([]),
+      holdings: [],
+      user: { id: "u1", name: "Test", age: 30 },
+    });
+  });
+
+  it("shows an accurate 'not supported' message, not a misleading permission-denied one, when getDisplayMedia doesn't exist", async () => {
+    global.navigator.mediaDevices = {};
+    render(<BotScan />);
+
+    await user.click(screen.getByTestId("bot-scan-start-btn"));
+
+    expect(screen.getByText(/needs screen sharing, which most phone browsers/i)).toBeInTheDocument();
+    expect(screen.queryByText(/permission was denied/i)).not.toBeInTheDocument();
+  });
+
+  it("still shows the real permission-denied message when the browser does support it but the user declines", async () => {
+    const err = new Error("denied");
+    err.name = "NotAllowedError";
+    global.navigator.mediaDevices = { getDisplayMedia: jest.fn().mockRejectedValue(err) };
+    render(<BotScan />);
+
+    await user.click(screen.getByTestId("bot-scan-start-btn"));
+
+    expect(await screen.findByText(/permission was denied/i)).toBeInTheDocument();
+  });
+});
+
+// Bug report: sharing "entire screen" and switching between two other tabs
+// (e.g. an equity broker tab, then a mutual fund tab) during one scan session
+// silently fails — because the DIVVE tab itself, which owns the setInterval
+// driving captureFrame, gets throttled by the browser once it's backgrounded.
+describe("BotScan — warns when this tab has been backgrounded during a scan", () => {
+  let user;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.useFakeTimers();
+    user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime, delay: null });
+    useDive.mockReturnValue({
+      setScreen: jest.fn(),
+      goBack: jest.fn(),
+      loadHoldings: jest.fn().mockResolvedValue([]),
+      holdings: [],
+      user: { id: "u1", name: "Test", age: 30 },
+    });
+    mockCaptureApis();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  function setHidden(hidden) {
+    Object.defineProperty(document, "hidden", { value: hidden, configurable: true });
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+  }
+
+  it("shows a warning once the tab has been hidden for a while", async () => {
+    render(<BotScan />);
+    await user.click(screen.getByTestId("bot-scan-start-btn"));
+    await waitFor(() => expect(screen.getByTestId("bot-scan-stop-btn")).toBeInTheDocument());
+
+    expect(screen.queryByTestId("bot-scan-tab-hidden-warning")).not.toBeInTheDocument();
+
+    setHidden(true);
+    act(() => {
+      jest.advanceTimersByTime(20_000);
+    });
+
+    expect(screen.getByTestId("bot-scan-tab-hidden-warning")).toBeInTheDocument();
+
+    setHidden(false);
+    expect(screen.queryByTestId("bot-scan-tab-hidden-warning")).not.toBeInTheDocument();
+  });
+
+  it("does not warn for a brief tab switch", async () => {
+    render(<BotScan />);
+    await user.click(screen.getByTestId("bot-scan-start-btn"));
+    await waitFor(() => expect(screen.getByTestId("bot-scan-stop-btn")).toBeInTheDocument());
+
+    setHidden(true);
+    act(() => {
+      jest.advanceTimersByTime(5_000);
+    });
+    setHidden(false);
+
+    expect(screen.queryByTestId("bot-scan-tab-hidden-warning")).not.toBeInTheDocument();
   });
 });

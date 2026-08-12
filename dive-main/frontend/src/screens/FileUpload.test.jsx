@@ -26,6 +26,7 @@ describe("FileUpload — per-row save failures (P2 #20)", () => {
       goBack: jest.fn(),
       loadHoldings: jest.fn().mockResolvedValue([]),
       holdings: [],
+      user: { id: "u1", name: "Test", age: 30 },
     });
   });
 
@@ -89,10 +90,23 @@ describe("FileUpload — per-row save failures (P2 #20)", () => {
   });
 });
 
+describe("FileUpload — blocks uploading when logged out", () => {
+  it("never calls /uploads and shows a sign-up prompt instead", async () => {
+    jest.clearAllMocks();
+    useDive.mockReturnValue({ setScreen: jest.fn(), goBack: jest.fn(), loadHoldings: jest.fn().mockResolvedValue([]), holdings: [], user: null });
+
+    render(<FileUpload />);
+    await selectFile(screen.getByTestId("file-upload-input"));
+
+    expect(api.post).not.toHaveBeenCalled();
+    expect(await screen.findByText(/sign up first to upload/i)).toBeInTheDocument();
+  });
+});
+
 describe("FileUpload — cancel button for a hung AI extraction call (P3 #32)", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    useDive.mockReturnValue({ setScreen: jest.fn(), goBack: jest.fn(), loadHoldings: jest.fn().mockResolvedValue([]), holdings: [] });
+    useDive.mockReturnValue({ setScreen: jest.fn(), goBack: jest.fn(), loadHoldings: jest.fn().mockResolvedValue([]), holdings: [], user: { id: "u1", name: "Test", age: 30 } });
   });
 
   it("shows a Cancel button while extraction is in flight, and aborts the real request when clicked", async () => {

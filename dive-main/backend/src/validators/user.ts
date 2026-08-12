@@ -25,5 +25,18 @@ export const passwordChangeSchema = z
     path: ["confirmNewPassword"],
   });
 
+// Every field optional — the frontend sends a merge-patch of whatever
+// changed (matching how setPlannerState works locally), not the full object
+// every time.
+export const plannerStateSchema = z.object({
+  mode: z.enum(["lumpsum", "sip"]).nullable().optional(),
+  lumpsumAmount: z.coerce.number().min(0).optional(),
+  sipMonthly: z.coerce.number().min(0).optional(),
+  sipStepUp: z.coerce.number().min(0).max(100).optional(),
+  sipYears: z.coerce.number().int().min(1).max(100).optional(),
+  sipExpandedMonthly: z.boolean().optional(),
+});
+
 export type ProfileUpdateInput = z.infer<typeof profileUpdateSchema>;
 export type PasswordChangeInput = z.infer<typeof passwordChangeSchema>;
+export type PlannerStateInput = z.infer<typeof plannerStateSchema>;

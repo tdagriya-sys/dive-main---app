@@ -13,6 +13,18 @@ export interface IPortfolioMeta {
   sources: string[];
 }
 
+// Divve Planner's inputs — kept purely as user-editable scratch state (no
+// derived/computed fields), mirroring exactly what frontend/src/context/
+// DiveContext.js's DEFAULT_PLANNER_STATE holds locally between saves.
+export interface IPlannerState {
+  mode: "lumpsum" | "sip" | null;
+  lumpsumAmount: number;
+  sipMonthly: number;
+  sipStepUp: number;
+  sipYears: number;
+  sipExpandedMonthly: boolean;
+}
+
 export interface IUser extends Document {
   _id: Types.ObjectId;
   name: string;
@@ -23,6 +35,7 @@ export interface IUser extends Document {
   personalDetails: Record<string, unknown>;
   portfolio: IPortfolioMeta;
   preferences: IPreferences;
+  plannerState: IPlannerState;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -46,6 +59,22 @@ const portfolioMetaSchema = new Schema<IPortfolioMeta>(
   { _id: false }
 );
 
+// Defaults here must match DEFAULT_PLANNER_STATE in DiveContext.js exactly —
+// they're what a brand-new account (and every pre-existing account that
+// predates this field — Mongoose applies schema defaults on read for any
+// path missing from the stored document, not just at creation) starts from.
+const plannerStateSchema = new Schema<IPlannerState>(
+  {
+    mode: { type: String, enum: ["lumpsum", "sip", null], default: null },
+    lumpsumAmount: { type: Number, default: 50000 },
+    sipMonthly: { type: Number, default: 5000 },
+    sipStepUp: { type: Number, default: 10 },
+    sipYears: { type: Number, default: 10 },
+    sipExpandedMonthly: { type: Boolean, default: false },
+  },
+  { _id: false }
+);
+
 const userSchema = new Schema<IUser>(
   {
     name: { type: String, required: true, trim: true },
@@ -56,6 +85,7 @@ const userSchema = new Schema<IUser>(
     personalDetails: { type: Schema.Types.Mixed, default: {} },
     portfolio: { type: portfolioMetaSchema, default: () => ({ lastSyncedAt: null, sources: [] }) },
     preferences: { type: preferencesSchema, default: () => ({}) },
+    plannerState: { type: plannerStateSchema, default: () => ({}) },
   },
   { timestamps: true }
 );

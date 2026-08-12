@@ -8,7 +8,7 @@ import { RefreshToken } from "../models/RefreshToken";
 import { AuthedRequest } from "../middleware/auth";
 import { ApiError } from "../middleware/errorHandler";
 import { REFRESH_COOKIE_NAME as REFRESH_COOKIE } from "../config/constants";
-import { profileUpdateSchema, passwordChangeSchema } from "../validators/user";
+import { profileUpdateSchema, passwordChangeSchema, plannerStateSchema } from "../validators/user";
 import { publicUser } from "../utils/publicUser";
 import { invalidateDiveScoreCache } from "../services/diveScoreService";
 
@@ -64,6 +64,29 @@ export async function updateProfile(req: AuthedRequest, res: Response) {
 // lock the real owner out. On success, revokes every live refresh token for
 // this user (see models/RefreshToken.ts) so a change made because a password
 // leaked actually ends every other still-logged-in session, not just this one.
+// Best-effort persistence for Divve Planner's inputs — mirrors
+// updatePreferences above (partial merge-patch, direct subdocument field
+// assignment so Mongoose's change tracking picks it up). The frontend
+// debounces calls here while a slider is being dragged, so this can receive
+// several requests a second during active use; it stays deliberately
+// lightweight (no cache invalidation, no side effects) since planner inputs
+// don't feed the DIVE Score or any other computed value.
+export async function updatePlannerState(req: AuthedRequest, res: Response) {
+  const input = plannerStateSchema.parse(req.body);
+  const user = await User.findById(req.userId);
+  if (!user) throw new ApiError(404, "USER_NOT_FOUND", "Account no longer exists.");
+
+  if (input.mode !== undefined) user.plannerState.mode = input.mode;
+  if (input.lumpsumAmount !== undefined) user.plannerState.lumpsumAmount = input.lumpsumAmount;
+  if (input.sipMonthly !== undefined) user.plannerState.sipMonthly = input.sipMonthly;
+  if (input.sipStepUp !== undefined) user.plannerState.sipStepUp = input.sipStepUp;
+  if (input.sipYears !== undefined) user.plannerState.sipYears = input.sipYears;
+  if (input.sipExpandedMonthly !== undefined) user.plannerState.sipExpandedMonthly = input.sipExpandedMonthly;
+  await user.save();
+
+  res.json({ plannerState: user.plannerState });
+}
+
 export async function changePassword(req: AuthedRequest, res: Response) {
   const input = passwordChangeSchema.parse(req.body);
   const user = await User.findById(req.userId);

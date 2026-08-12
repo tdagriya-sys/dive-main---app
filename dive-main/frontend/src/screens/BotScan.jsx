@@ -16,7 +16,7 @@ function emptyFd() {
 const ASSET_CLASSES = ["EQUITY", "MUTUAL_FUND", "ETF", "BOND", "REIT", "INVIT", "GOLD", "SILVER", "ULIP_INSURANCE", "FD", "CRYPTO"];
 
 export default function BotScan() {
-  const { setScreen, goBack, loadHoldings, holdings } = useDive();
+  const { setScreen, goBack, loadHoldings, holdings, user } = useDive();
   const [phase, setPhase] = useState("idle"); // idle | sharing | analyzing | review
   const [error, setError] = useState("");
   const [framesCaptured, setFramesCaptured] = useState(0);
@@ -36,6 +36,13 @@ export default function BotScan() {
   // proxy_read_timeout, this request's own axios timeout — see
   // aiExtractionService.ts) — this lets the user bail out immediately instead.
   const analyzeAbortRef = useRef(null);
+  // Backgrounded tabs get their timers throttled by the browser, so if the
+  // user switches away to a different TAB (not just looks at the shared
+  // content — that's fine) for a while, captureFrame's setInterval can
+  // effectively stall. A brief glance is harmless; only warn once it's been
+  // hidden long enough to actually matter.
+  const [tabHiddenWarning, setTabHiddenWarning] = useState(false);
+  const hiddenTimerRef = useRef(null);
 
   const stopStream = () => {
     if (intervalRef.current) clearInterval(intervalRef.current);
@@ -47,6 +54,37 @@ export default function BotScan() {
   };
 
   useEffect(() => () => stopStream(), []);
+
+  // Only watch visibility while actually sharing — the warning is about
+  // capture reliability, which only matters once captureFrame's interval is
+  // actually running.
+  useEffect(() => {
+    if (phase !== "sharing") {
+      setTabHiddenWarning(false);
+      if (hiddenTimerRef.current) {
+        clearTimeout(hiddenTimerRef.current);
+        hiddenTimerRef.current = null;
+      }
+      return undefined;
+    }
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        hiddenTimerRef.current = setTimeout(() => setTabHiddenWarning(true), 20_000);
+      } else {
+        if (hiddenTimerRef.current) clearTimeout(hiddenTimerRef.current);
+        hiddenTimerRef.current = null;
+        setTabHiddenWarning(false);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (hiddenTimerRef.current) {
+        clearTimeout(hiddenTimerRef.current);
+        hiddenTimerRef.current = null;
+      }
+    };
+  }, [phase]);
 
   const captureFrame = () => {
     const video = videoRef.current;
@@ -71,6 +109,24 @@ export default function BotScan() {
 
   const startScan = async () => {
     setError("");
+    // Backstop for ChooseFetchMethod's own gate (which normally keeps a
+    // logged-out visitor from ever reaching this screen) — without it, a
+    // scan would fire a REAL OS screen-share prompt only to fail at analyze
+    // time (that endpoint requires auth), asking for something invasive that
+    // was always going to be thrown away.
+    if (!user) {
+      setError("Sign up first to scan and save real investments — this preview can't save anything yet.");
+      return;
+    }
+    // Most phone browsers don't implement getDisplayMedia at all — calling it
+    // there either throws synchronously (no such function) or rejects
+    // instantly without ever showing a system prompt. The old catch-all below
+    // labelled that "permission was denied", which is misleading: the user
+    // was never asked anything, the feature just isn't available here.
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      setError("Bot Scan needs screen sharing, which most phone browsers don't support yet. Try DIVVE on a laptop or desktop browser instead, or add your holdings with File Upload or Manual Entry.");
+      return;
+    }
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
       streamRef.current = stream;
@@ -86,7 +142,11 @@ export default function BotScan() {
       setPhase("sharing");
       intervalRef.current = setInterval(captureFrame, FRAME_INTERVAL_MS);
     } catch (err) {
-      setError("Screen share permission was denied or cancelled. You can try again, or add investments another way.");
+      if (err?.name === "NotAllowedError") {
+        setError("Screen share permission was denied or cancelled. You can try again, or add investments another way.");
+      } else {
+        setError("Couldn't start screen sharing on this browser or device — it may not be supported here. Try a desktop browser, or add investments with File Upload or Manual Entry.");
+      }
     }
   };
 
@@ -244,9 +304,10 @@ export default function BotScan() {
           </div>
           <p className="text-xs text-[var(--text-tertiary)] mb-5 leading-relaxed">
             This only works for the tab/window you choose to share — it's a real, user-initiated screen share (your browser's own permission
-            dialog enforces that), never a hidden or automatic capture. This also only works from a website in your browser, not from inside a
-            native mobile app. An AI model reviews the captured screens to find your real holdings and filter out watchlists, indices, and
-            summary cards.
+            dialog enforces that), never a hidden or automatic capture. It works best on a laptop or desktop browser — most phone browsers don't
+            support screen sharing yet. Scanning more than one source (e.g. equity, then mutual funds, then crypto)? Do one Start Scan → Stop
+            Scan → Save per source instead of switching tabs mid-scan — browsers slow down capturing on this tab while another tab is in front.
+            An AI model reviews the captured screens to find your real holdings and filter out watchlists, indices, and summary cards.
           </p>
           {error && <p className="text-xs text-[var(--red)] font-semibold mb-4">{error}</p>}
           <button data-testid="bot-scan-start-btn" onClick={startScan}
@@ -267,6 +328,12 @@ export default function BotScan() {
           <p className="text-xs text-[var(--text-tertiary)] mb-6 max-w-xs">
             Scroll slowly through your full holdings list, then tap Stop Scan — an AI model will analyze everything captured in one pass.
           </p>
+          {tabHiddenWarning && (
+            <p className="text-xs text-[var(--red)] font-semibold mb-6 max-w-xs" data-testid="bot-scan-tab-hidden-warning">
+              This tab has been in the background a while — capturing slows down here while another tab is in front. Come back to this tab, tap
+              Stop Scan, save what's found, then start a new scan for your next source.
+            </p>
+          )}
           <button data-testid="bot-scan-stop-btn" onClick={stopScan}
             className="w-full bg-[var(--surface-card)] border border-[var(--border)] rounded-full py-3.5 font-bold hover:bg-[var(--surface-card-hover)] transition-colors">
             Stop Scan

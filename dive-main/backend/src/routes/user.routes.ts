@@ -8,6 +8,7 @@ const router = Router();
 
 router.patch("/me/preferences", requireAuth, asyncHandler(userController.updatePreferences));
 router.patch("/me/profile", requireAuth, asyncHandler(userController.updateProfile));
+router.patch("/me/planner", requireAuth, asyncHandler(userController.updatePlannerState));
 router.patch("/me/password", requireAuth, authLimiter, asyncHandler(userController.changePassword));
 router.delete("/me", requireAuth, asyncHandler(userController.deleteMe));
 

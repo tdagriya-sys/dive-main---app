@@ -3,9 +3,94 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Search, ChevronDown, Lightbulb, Loader2 } from "lucide-react";
 import { useDive } from "../context/DiveContext";
 import { Donut, Legend, QualityBadge } from "../components/dive/Widgets";
-import { segmentBreakdown, companyExposure, topExposure, fmtINR, effectiveHoldings } from "../lib/diveEngine";
+import { segmentBreakdown, companyExposure, topExposure, crossSegmentOverlaps, missingCategories, fmtINR, effectiveHoldings } from "../lib/diveEngine";
 import { api } from "../lib/api";
 import { HoldingsLoadingState, HoldingsLoadErrorState, HoldingsEmptyState } from "../components/dive/HoldingsGateStates";
+
+// Bug report: the surface (segment-level) view always said "Looks nicely
+// diversified" verbatim, even with 100% of the portfolio in one segment —
+// the copy was a hardcoded string, never actually derived from the segment
+// breakdown it sat right next to. This builds a real diagnosis instead:
+// concentration (one segment dominating, or the only segment there is) takes
+// priority since it's the most severe and most visible-at-a-glance issue;
+// cross-segment issuer overlap (the same company showing up in, say, both
+// Equity and Bonds — invisible at the segment level, exactly what "Look
+// Deeper" exists to reveal) is always called out by name when present, even
+// on top of an otherwise-fine segment spread; missing core categories are
+// mentioned only when nothing more urgent is going on. Only genuinely
+// well-spread, non-overlapping portfolios get the reassuring message.
+function buildSurfaceInsight({ segs, overlaps, missing }) {
+  const top = segs[0];
+  if (!top) return { centerPct: null, centerLabel: null, centerTone: null, message: "" };
+
+  const singleSegment = segs.length <= 1;
+  const heavilyConcentrated = !singleSegment && top.pct >= 60;
+  const someConcentration = !singleSegment && !heavilyConcentrated && top.pct >= 40;
+  const concentrated = singleSegment || heavilyConcentrated || someConcentration;
+
+  const sentences = [];
+  if (singleSegment) {
+    sentences.push(`${top.name} is 100% of your portfolio — there's nothing else here to soften a bad quarter for it.`);
+  } else if (heavilyConcentrated) {
+    sentences.push(`${top.pct.toFixed(0)}% of your money is in ${top.name} alone — that's carrying almost all your risk.`);
+  } else if (someConcentration) {
+    sentences.push(`Spread across ${segs.length} segments, but ${top.name} still makes up ${top.pct.toFixed(0)}% of it.`);
+  }
+
+  if (overlaps.length > 0) {
+    const o = overlaps[0];
+    sentences.push(`${o.name} shows up in both your ${o.segments.join(" and ")} — they'll move together, not apart.`);
+  }
+
+  if (!concentrated && overlaps.length === 0) {
+    sentences.push(
+      missing.length > 0
+        ? `Nicely spread across ${segs.length} segments — though you're not in ${missing.slice(0, 2).join(" or ")} yet.`
+        : `Nicely spread across ${segs.length} segments — no single one dominates. Tap to look deeper for hidden overlap.`
+    );
+  }
+
+  return {
+    centerPct: concentrated ? top.pct : null,
+    centerLabel: concentrated ? top.name : null,
+    centerToneClass: singleSegment || heavilyConcentrated ? "text-[var(--red)]" : someConcentration ? "text-[var(--amber)]" : "",
+    message: sentences.join(" "),
+  };
+}
+
+// The "True exposure" (deep/company-level) view had the mirror-image problem
+// to buildSurfaceInsight above: the NUMBERS were always real (topExposure()
+// computed live from actual look-through data), but the copy and color were
+// a single fixed "gotcha" template painted red regardless of what that
+// number actually was — a genuinely low 12% top-company exposure got the
+// exact same alarmist framing as a real 70% concentration. Tiered the same
+// way surface view is: only the tier that's actually warranted gets the red
+// "you thought vs. you're actually" reveal; a real reassurance for a
+// genuinely well-spread top holding, not the same alarm every time.
+function buildDeepInsight({ segs, comps, top }) {
+  if (!top || top.pct <= 0) {
+    return { toneClass: "", message: "" };
+  }
+  const heavilyConcentrated = top.pct >= 50;
+  const someConcentration = !heavilyConcentrated && top.pct >= 25;
+
+  if (heavilyConcentrated) {
+    return {
+      toneClass: "text-[var(--red)]",
+      message: `You thought you spread across ${segs.length} categories. You're actually ${top.pct.toFixed(0)}% exposed to ${top.name} alone.`,
+    };
+  }
+  if (someConcentration) {
+    return {
+      toneClass: "text-[var(--amber)]",
+      message: `${top.name} is your single largest real exposure at ${top.pct.toFixed(0)}% — not a crisis, but worth watching.`,
+    };
+  }
+  return {
+    toneClass: "",
+    message: `Genuinely spread across ${comps.length} real companies — even ${top.name}, your largest single exposure, is only ${top.pct.toFixed(0)}%.`,
+  };
+}
 
 export default function XRay() {
   const { holdings, holdingsLoading, holdingsError, loadHoldings, setScreen, sims } = useDive();
@@ -48,6 +133,10 @@ export default function XRay() {
   const comps = companyExposure(h);
   const top = topExposure(h);
   const view = deep ? comps : segs;
+  const overlaps = crossSegmentOverlaps(h);
+  const missing = missingCategories(h);
+  const surfaceInsight = buildSurfaceInsight({ segs, overlaps, missing });
+  const deepInsight = buildDeepInsight({ segs, comps, top });
   // Grouped for Drill Down: segment -> its own holdings, largest first. Keeps
   // the initial view to one card per segment (name, count, total) instead of
   // a flat list of every holding — a portfolio with 20+ stocks, several funds
@@ -76,16 +165,24 @@ export default function XRay() {
                 centerTop={<span className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-tertiary)]">{deep ? "True exposure" : "By segment"}</span>}
                 centerBottom={deep
                   ? <>
-                      <span className="font-heading font-black text-2xl text-[var(--red)] leading-none">{top.pct.toFixed(0)}%</span>
+                      <span className={`font-heading font-black text-2xl leading-none ${deepInsight.toneClass}`} data-testid="xray-deep-top-pct">
+                        {top.pct.toFixed(0)}%
+                      </span>
                       <span className="text-[11px] text-[var(--text-secondary)] font-semibold leading-tight line-clamp-2">{top.name}</span>
+                    </>
+                  : surfaceInsight.centerPct !== null
+                  ? <>
+                      <span className={`font-heading font-black text-2xl leading-none ${surfaceInsight.centerToneClass}`} data-testid="xray-surface-concentration-pct">
+                        {surfaceInsight.centerPct.toFixed(0)}%
+                      </span>
+                      <span className="text-[11px] text-[var(--text-secondary)] font-semibold leading-tight line-clamp-2">{surfaceInsight.centerLabel}</span>
                     </>
                   : <span className="font-heading font-black text-lg leading-tight">Looks<br />diverse</span>} />
             </motion.div>
           </AnimatePresence>
 
-          <p className="text-center text-sm text-[var(--text-secondary)] mt-4 mb-4 break-words">
-            {deep ? `You thought you spread across ${segs.length} categories. You're actually ${top.pct.toFixed(0)}% in one company.`
-              : "Looks nicely diversified across segments. But tap to look deeper…"}
+          <p className="text-center text-sm text-[var(--text-secondary)] mt-4 mb-4 break-words" data-testid="xray-insight-message">
+            {deep ? deepInsight.message : surfaceInsight.message}
           </p>
           <button data-testid="xray-look-deeper-btn" onClick={() => setDeep(!deep)}
             className={`w-full rounded-full py-3.5 font-bold flex items-center justify-center gap-2 transition-colors ${deep ? "bg-[var(--surface-card)] border border-[var(--border)]" : "gold-btn shadow-lg shadow-[var(--dive-blue)]/25 hover:bg-[var(--dive-blue-hover)]"}`}>

@@ -15,7 +15,7 @@ function emptyFd() {
 }
 
 export default function FileUpload() {
-  const { setScreen, goBack, loadHoldings, holdings } = useDive();
+  const { setScreen, goBack, loadHoldings, holdings, user } = useDive();
   const fileInputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const [candidates, setCandidates] = useState(null); // null = not yet uploaded
@@ -36,6 +36,14 @@ export default function FileUpload() {
   const onFileSelected = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    // Backstop for ChooseFetchMethod's own gate (which normally keeps a
+    // logged-out visitor from ever reaching this screen) — /uploads requires
+    // auth, so without this a picked file would always fail after the fact.
+    if (!user) {
+      setError("Sign up first to upload and save real investments — this preview can't save anything yet.");
+      e.target.value = "";
+      return;
+    }
     setError("");
     setUploading(true);
     setCandidates(null);

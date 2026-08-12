@@ -31,6 +31,7 @@ describe("AskDive — Fit for you diversification figures (bug report: real show
       goBack: jest.fn(),
       holdings: [existingHolding],
       sims: [],
+      user: { id: "u1", name: "Test", age: 30 },
       // The canonical backend figures — this is what Home/X-Ray show, and
       // what the "before" numbers in Fit for you must match.
       scoreBreakdown: {
@@ -75,5 +76,23 @@ describe("AskDive — Fit for you diversification figures (bug report: real show
     // not the client formula's own 58% either — 44 + (58-55) = 47, clamped
     // to be no higher than the new apparent figure (55).
     expect(screen.getByText((_, el) => el?.tagName === "SPAN" && el.textContent === "44% → 47%")).toBeInTheDocument();
+  });
+});
+
+// Bug report: the marketing landing page's interactive phone demo lets a
+// logged-out visitor reach Ask DIVVE and search — /instruments/search
+// requires auth, so every search 401ed and silently showed "no instruments
+// match", which reads as a real (if unlucky) empty result rather than what
+// it actually was (search was never allowed to run at all).
+describe("AskDive — blocks searching when logged out", () => {
+  it("never calls /instruments/search and shows a sign-up prompt instead", async () => {
+    jest.clearAllMocks();
+    useDive.mockReturnValue({ goBack: jest.fn(), holdings: [], sims: [], scoreBreakdown: null, user: null });
+
+    render(<AskDive />);
+    await userEvent.type(screen.getByTestId("ask-search-input"), "Bitcoin");
+
+    await waitFor(() => expect(screen.getByTestId("ask-signup-required")).toBeInTheDocument());
+    expect(api.get).not.toHaveBeenCalled();
   });
 });

@@ -12,7 +12,7 @@ const FI_TYPES = [
 ];
 
 export default function AAConsent() {
-  const { setScreen, goBack, loadHoldings } = useDive();
+  const { setScreen, goBack, loadHoldings, user } = useDive();
   const [phase, setPhase] = useState("loading"); // loading | consent | fetching | error
   const [consent, setConsent] = useState(null);
   const [consented, setConsented] = useState(false);
@@ -20,6 +20,14 @@ export default function AAConsent() {
   const [fetchedCount, setFetchedCount] = useState(null);
 
   useEffect(() => {
+    // Backstop for ChooseFetchMethod's own gate (which normally keeps a
+    // logged-out visitor from ever reaching this screen) — /aa/consent/*
+    // requires auth, so without this the request below would always 401.
+    if (!user) {
+      setError("Sign up first to connect real accounts — this preview can't save anything yet.");
+      setPhase("error");
+      return;
+    }
     (async () => {
       try {
         const { data } = await api.post("/aa/consent/request");
@@ -30,7 +38,7 @@ export default function AAConsent() {
         setPhase("error");
       }
     })();
-  }, []);
+  }, [user]);
 
   const giveConsent = async () => {
     if (!consented || !consent) return;

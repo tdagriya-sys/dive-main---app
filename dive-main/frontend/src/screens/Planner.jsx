@@ -208,7 +208,7 @@ function SipPlanner({ holdings, prefs, age, onBack, monthly, setMonthly, stepUp,
 
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)]">Yearly split</p>
-              <button data-testid="planner-expand-monthly-btn" onClick={() => setExpandedMonthly((v) => !v)}
+              <button data-testid="planner-expand-monthly-btn" onClick={() => setExpandedMonthly(!expandedMonthly)}
                 className="flex items-center gap-1 text-xs font-bold text-[var(--dive-blue)]">
                 {expandedMonthly ? "Show yearly" : "Show monthly"} <ChevronDown size={14} className={expandedMonthly ? "rotate-180" : ""} />
               </button>
