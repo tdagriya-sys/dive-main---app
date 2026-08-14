@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Divve Bot — Fit for You",
+  "version": "0.1.0",
+  "description": "Pops up a Divve Bot verdict card on Angel One's order screen, telling you whether the trade you're about to place improves or hurts your Divve Score and diversification.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "*://*.angelone.in/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "background": {
+    "service_worker": "background/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.angelone.in/*"],
+      "js": ["content/siteAdapters.js", "content/overlay.js", "content/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Divve Bot"
+  },
+  "options_page": "popup/popup.html"
+}

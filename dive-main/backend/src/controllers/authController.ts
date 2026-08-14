@@ -25,12 +25,31 @@ function setRefreshCookie(res: Response, token: string, expiresAt: Date) {
 // Issues a brand-new refresh token, persists the RefreshToken record that
 // makes it revocable, and sets the cookie — the one path every login/signup/
 // refresh call goes through, so "every live refresh token has a matching DB
-// record" can't drift out of sync.
-async function issueRefreshToken(res: Response, userId: string): Promise<void> {
+// record" can't drift out of sync. Returns the raw token too (in addition to
+// setting the cookie) so a caller without a shared browser cookie jar — see
+// EXTENSION_CLIENT_TYPE below — can hand it back to that kind of client
+// directly instead.
+async function issueRefreshToken(res: Response, userId: string): Promise<string> {
   const jti = crypto.randomUUID();
   const { token, expiresAt } = signRefreshToken(userId, jti);
   await RefreshToken.create({ jti, userId, expiresAt });
   setRefreshCookie(res, token, expiresAt);
+  return token;
+}
+
+// The web SPA always uses the httpOnly cookie set above and never sees a
+// refresh token in JS. The Divve Bot browser extension (extension/) has no
+// access to that cookie from its background service worker — cross-site
+// fetches don't carry a SameSite=Lax cookie the way a top-level page
+// navigation does — so a client that explicitly identifies itself with this
+// flag additionally gets the raw refresh token in the JSON response body,
+// to store in its own isolated chrome.storage.local and submit back on
+// /auth/refresh itself. This is strictly additive: omitting clientType (or
+// sending anything other than "extension") reproduces the exact previous
+// behavior for every existing caller.
+const EXTENSION_CLIENT_TYPE = "extension";
+function wantsRefreshTokenInBody(req: Request): boolean {
+  return req.body?.clientType === EXTENSION_CLIENT_TYPE;
 }
 
 function normalizeMobile(mobile: string): string {
@@ -127,13 +146,23 @@ export async function login(req: Request, res: Response) {
   }
 
   const accessToken = signAccessToken(user._id.toString());
-  await issueRefreshToken(res, user._id.toString());
+  const refreshToken = await issueRefreshToken(res, user._id.toString());
 
-  return res.status(200).json({ accessToken, user: publicUser(user) });
+  return res.status(200).json({
+    accessToken,
+    user: publicUser(user),
+    ...(wantsRefreshTokenInBody(req) ? { refreshToken } : {}),
+  });
 }
 
 export async function refresh(req: Request, res: Response) {
-  const token = req.cookies?.[REFRESH_COOKIE];
+  // Only trust a body-supplied refresh token from a caller that explicitly
+  // identified itself as the extension — an arbitrary caller can't just pass
+  // any refreshToken in the body and skip the cookie requirement, since this
+  // whole branch is gated on the same clientType flag that controls whether
+  // one was ever handed out in the first place.
+  const bodyToken = wantsRefreshTokenInBody(req) ? (req.body?.refreshToken as string | undefined) : undefined;
+  const token = bodyToken || req.cookies?.[REFRESH_COOKIE];
   if (!token) {
     return res.status(401).json({ error: "NO_REFRESH_TOKEN", message: "Not logged in." });
   }
@@ -172,13 +201,17 @@ export async function refresh(req: Request, res: Response) {
   }
 
   const accessToken = signAccessToken(user._id.toString());
-  await issueRefreshToken(res, user._id.toString());
+  const newRefreshToken = await issueRefreshToken(res, user._id.toString());
 
-  return res.status(200).json({ accessToken, user: publicUser(user) });
+  return res.status(200).json({
+    accessToken,
+    user: publicUser(user),
+    ...(bodyToken ? { refreshToken: newRefreshToken } : {}),
+  });
 }
 
 export async function logout(req: Request, res: Response) {
-  const token = req.cookies?.[REFRESH_COOKIE];
+  const token = (wantsRefreshTokenInBody(req) ? (req.body?.refreshToken as string | undefined) : undefined) || req.cookies?.[REFRESH_COOKIE];
   if (token) {
     try {
       const payload = verifyRefreshToken(token);

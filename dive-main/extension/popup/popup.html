@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Divve Bot</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand-row">
+      <div class="dot">✦</div>
+      <span class="brand">Divve Bot</span>
+    </div>
+
+    <div id="status" class="status">Checking status…</div>
+
+    <form id="login-form" class="section">
+      <label>Email or mobile
+        <input id="identifier" type="text" autocomplete="username" required />
+      </label>
+      <label>Password
+        <input id="password" type="password" autocomplete="current-password" required />
+      </label>
+      <button type="submit" id="login-btn">Log in</button>
+      <p id="login-error" class="error"></p>
+    </form>
+
+    <div id="logged-in" class="section hidden">
+      <p class="muted">Logged in as <span id="logged-in-email"></span></p>
+      <button id="logout-btn" class="secondary">Log out</button>
+    </div>
+
+    <details class="section">
+      <summary>Advanced: API server</summary>
+      <label>Backend API base URL
+        <input id="api-base" type="text" placeholder="http://localhost:8000/api" />
+      </label>
+      <button id="save-api-base-btn" class="secondary">Save</button>
+      <p id="api-base-note" class="muted small"></p>
+    </details>
+
+    <p class="footer-note">Watches Angel One's order screen and shows how a trade fits your Divve portfolio. Nothing here is financial advice.</p>
+  </div>
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

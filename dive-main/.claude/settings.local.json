@@ -232,7 +232,14 @@
       "Bash(rm -v src/services/brokerParsers/angelOne.ts src/services/genericRowParser.ts src/services/holdingsSectionExtractor.ts)",
       "Bash(rmdir src/services/brokerParsers)",
       "Bash(ls -la \"D:\\\\Dive\\\\dive-main - app\\\\dive-main\\\\frontend\\\\\" | grep -i \"lock\\\\|yarn\" *)",
-      "Bash(CI=false REACT_APP_BACKEND_URL=http://localhost:8000/api npx craco build)"
+      "Bash(CI=false REACT_APP_BACKEND_URL=http://localhost:8000/api npx craco build)",
+      "Bash(git fetch *)",
+      "Bash(node \"C:\\\\Users\\\\DAGRIY~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\D--Dive-dive-main---app-dive-main\\\\be0f32bd-ad12-4459-84d1-5874ba96a1b6\\\\scratchpad\\\\test_fitmessage.mjs\")",
+      "Bash(node _smoketest.mjs)",
+      "Bash(node --check background.js)",
+      "Bash(node --check siteAdapters.js)",
+      "Bash(node _smoketest2.mjs)",
+      "Bash(node --check diveApi.js)"
     ]
   }
 }
