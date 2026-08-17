@@ -2,7 +2,7 @@
 
 **Status:** Living document. This must be updated in the same change as any edit to the scoring model's formulas, weights, tiers, or data sources — see [§15 Maintenance](#15-maintenance--change-log) for how.
 
-**Last verified against source:** 2026-08-02, against the codebase in this repository (`backend/src/services/diveScoreService.ts`, `lookthroughService.ts`, `priceHistoryService.ts`, `contextEngine.ts`, `stats.ts`, `backend/src/seed/*`, `backend/src/services/instrumentSources.ts`, `frontend/src/lib/diveEngine.js`, `frontend/src/lib/contextMessaging.js`).
+**Last verified against source:** 2026-08-17, against the codebase in this repository (`backend/src/services/diveScoreService.ts`, `lookthroughService.ts`, `priceHistoryService.ts`, `contextEngine.ts`, `stats.ts`, `backend/src/seed/*`, `backend/src/services/instrumentSources.ts`, `frontend/src/lib/diveEngine.js`, `frontend/src/lib/contextMessaging.js`, `frontend/src/screens/XRay.jsx`).
 
 ---
 
@@ -288,6 +288,14 @@ Every detected connection (both tiers) is also returned as a human-readable `Con
 
 **Asset-class coverage for the same-sector tier today:** EQUITY (full NSE Nifty 500 coverage), MUTUAL_FUND (Sectoral/Thematic funds only), CRYPTO (curated 10-segment coverage only). **Not yet covered:** BOND, GOLD, SILVER, REIT, INVIT, ETF, FD, ULIP_INSURANCE — no free classification source has been found/wired for these; same-class connections silently don't fire for them (fails soft, never guesses).
 
+### 7.9 Frontend display: X-Ray's "True exposure" view vs. this model
+
+`XRay.jsx`'s deep/company-level donut is **not** built from this section's tiered model — it's a much simpler client-side grouping in `diveEngine.js`'s `companyExposure()`, which only sees each holding's own `lookthrough` field. For a real (non-mutual-fund) holding, `adaptHolding()` sets that to a flat `[{ company: itsOwnName, pct: 100 }]` — there is no client-side equivalent of the MF top-holdings look-through (§7.3), keyword affinity (§7.4), industry affinity (§7.5), or same-sector (§7.1/§7.6) tiers. So the donut only ever catches the exact-issuer-name-across-segments case (roughly §7.2), never the richer tiers.
+
+Left alone, this meant X-Ray's "You're actually X% in one company" claim could silently disagree with the real, canonical `realDiversificationPct` shown on Home/Score Breakdown for the exact same portfolio — understating real concentration whenever a genuine overlap only this model's richer tiers (§7.1, §7.3–§7.6) could see.
+
+**Fixed 2026-08-17:** rather than trying to rebuild the donut itself around this model's tiered strengths (each `strength` is a partial, weighted overlap estimate, not a hard "these are the same bucket" fact — forcing that into rigid donut slices would itself overclaim a precision that doesn't exist), X-Ray now also fetches `scoreBreakdown.connections` (the same real, per-pair `{reason, strength}` data already trusted for `realDiversificationPct` and rendered on Score Breakdown's "Why real is below apparent", §7.7) and shows it directly underneath the deep-view donut whenever the backend detected something the name-only grouping couldn't. Suppressed while a what-if simulation (`sims`) is active, since `connections` describes the real saved portfolio, not a hypothetical one. See `frontend/src/screens/XRay.jsx`'s `realOverlaps` and the `xray-real-overlaps` test id.
+
 ## 8. Resilience Sub-Scores
 
 Computed from the portfolio's weighted daily-return series (`portfolioReturns[t] = Σ weight_h × return_h[t]`, aligned to the shortest common history across holdings, capped at 252 trading days).
@@ -496,6 +504,7 @@ Run via `cd backend && npm test` (or `./node_modules/.bin/jest --runInBand` if d
 
 | Date | Change | Why | File(s) |
 |---|---|---|---|
+| 2026-08-17 | Added §7.9 (X-Ray's donut vs. this model) and §16 (Suggestions' ideal-₹ calculation), both previously entirely undocumented; wired `scoreBreakdown.connections` into X-Ray's deep view so it surfaces real backend-detected overlap (MF look-through, sector/industry affinity) the name-only donut structurally can't see | User asked how Suggestions' ideal ₹ amounts are calculated and flagged it (and possibly other things) as missing from this doc; auditing turned up a real, previously-unnoticed discrepancy — X-Ray's "True exposure" view could disagree with the canonical `realDiversificationPct` for the same portfolio, since it only ever detected same-name overlap | `XRay.jsx`, `docs/DIVE_SCORE_MODEL.md` |
 | 2026-08-04 | Scaled the frontend fast-path's simulated score delta by `weights.concentration` (0.17) instead of adding it 1:1 to the real anchor score; capped Ask DIVVE's Fit-for-you slider range to `Math.max(100000, total * 2)` instead of an unbounded, value-chasing max | User reported Ask DIVVE's Fit-for-you score reaching 99-100 when simulating a large mutual-fund addition, despite the portfolio missing FD/REIT/InvIT coverage and holding minimal ETF/Gold — confirmed as a real bug: the concentration-only delta is unbounded in magnitude and was being added to the real composite anchor as if concentration were the whole score, not 17% of it | `Suggestions.jsx` (`SimulateSheet`), `AskDive.jsx` (`FitForYouCard`) |
 | 2026-08-02 | Added Tier 5 — sectoral mutual fund ↔ matching-sector equity cross-class connection (fixed strength 0.15), via a new `MF_SEGMENT_TO_NSE_INDUSTRY` curated translation table and a new "Automobile" `MUTUAL_FUND_SEGMENT_KEYWORDS` entry | User reported apparent==real diversification for an Automobile-sector equity held alongside an Automobile-themed sectoral mutual fund. No tier connected equity to mutual funds by sector at all — Tier 4's `INDUSTRY_ASSET_CLASS_AFFINITY` only ever targets GOLD/SILVER/REIT/INVIT (asset classes that are themselves sector-homogeneous); naively extending it to MUTUAL_FUND would have wrongly connected an equity to *any* fund the user holds, not just matching-sector ones — needed a genuinely different mechanism comparing both sides' own sector tags. Not yet covered by an automated test (verified via live manual testing only) | `lookthroughService.ts`, `seed/sectorAffinity.ts`, `seed/mutualFundSegments.ts` |
 | 2026-08-02 | Wired real AMFI mutual fund NAV history (via MFAPI.in) into `resolveHoldingReturns()` — mutual funds with a resolvable AMFI scheme code now use a real daily-return series for volatility/drawdown/VaR/beta/correlation, the same tier as EQUITY/ETF/CRYPTO, instead of always-synthetic | Every mutual fund holding's resilience math was previously 100% synthetic regardless of data availability, silently understating `dataQuality.realPriceCoveragePct` for what's typically the largest single asset class in an Indian retail portfolio, even though a free real source exists | `priceHistoryService.ts` |
@@ -508,3 +517,52 @@ Run via `cd backend && npm test` (or `./node_modules/.bin/jest --runInBand` if d
 | 2026-07-29 | Redefined `realDiversificationPct = apparent × (1 − overlapShare)`, guaranteeing real ≤ apparent | User-reported bug: real diversification (88%) exceeded apparent (0%), which is nonsensical | `diveScoreService.ts` |
 | 2026-07-29 | Lowered single-asset-class correlation default from neutral 50 to 20; rebalanced concentration to blend apparent/real/name | An all-equity, multi-stock portfolio scored deceptively high (75+) | `diveScoreService.ts` |
 | 2026-07-28 | Initial Dive Score v2 build — composite engine, 8 sub-scores, real/synthetic price sourcing | Replace the original mock-backend scoring with a real, resilience-aware model | `diveScoreService.ts`, `priceHistoryService.ts`, `stats.ts` |
+
+## 16. Suggestions — Ideal Allocation Ranges
+
+**Not part of the DIVE Score composite itself** — this is a fully separate, client-side-only calculation that powers `Suggestions.jsx`'s "current ₹ → ideal ₹" cards. It shares no code or formula with §6-§9's concentration/resilience math; the only thing it has in common with the score is which *categories* exist (`CORE_CATEGORIES`, the same 9-way segment label set §7's tables use).
+
+### 16.1 The ideal-range table
+
+`frontend/src/lib/diveEngine.js`'s `IDEAL_RANGES` — a static `[lo%, hi%]` band per category, one full table per risk profile (Conservative / Balanced / Aggressive):
+
+```js
+export const IDEAL_RANGES = {
+  Conservative: { Equity: [20, 30], "Mutual Funds": [15, 25], Bonds: [20, 30], "Gold/Silver": [8, 12], "REIT/InvIT": [5, 10], FD: [10, 20], ETF: [3, 8], Insurance: [5, 10], Crypto: [0, 2] },
+  Balanced:     { Equity: [25, 35], "Mutual Funds": [20, 30], Bonds: [15, 25], "Gold/Silver": [8, 12], "REIT/InvIT": [8, 12], FD: [8, 15],  ETF: [5, 10], Insurance: [3, 7],  Crypto: [0, 5] },
+  Aggressive:   { Equity: [35, 50], "Mutual Funds": [20, 30], Bonds: [5, 15],  "Gold/Silver": [5, 10], "REIT/InvIT": [8, 15], FD: [3, 8],   ETF: [5, 12], Insurance: [2, 5],  Crypto: [2, 8] },
+};
+```
+
+Ported from the original prototype, hand-extended for the 3 classes it left out (ETF, Insurance, Crypto — see the comment above the table in source for the reasoning behind each). **Illustrative reference bands, not personalized or backtested** — same caveat as every other curated constant in this document (§13.2), but unlike §6-§9's model, these bands are keyed *only* on risk profile, not on Layer D's corpus tier or persona (see §16.4).
+
+### 16.2 From bands to ₹ amounts — `buildSuggestions(holdings, ranges, risk)`
+
+For each of the 9 core categories:
+
+```
+current%    = categoryValue / totalPortfolioValue × 100
+[loPct, hiPct] = IDEAL_RANGES[risk][category]
+loAmt, hiAmt   = loPct% × total, hiPct% × total        // scales with what's already invested, not a target future corpus
+action      = current% < loPct ? "increase" : current% > hiPct ? "reduce" : "hold"
+suggestedAmt = round( |midpoint(loAmt, hiAmt) − current| )   // gap to the BAND'S MIDPOINT, not its nearer edge
+```
+
+Sorted: every `increase`/`reduce` category first, `hold` last; within each, biggest ₹ gap first.
+
+### 16.3 Personalization layer — `personalizeSuggestions(suggestions, prefs)`
+
+Runs after §16.2, never changes the ₹ figures themselves — only which categories appear and their order:
+
+- `prefs.excluded` categories are dropped from the list entirely (filtered out by the caller, before this function even runs).
+- `prefs.preferred` categories are always sorted to the top, regardless of their own `action`/`hold` status.
+- `prefs.returnExpectation` (Modest/Moderate/High) nudges growth-tier categories (`RETURN_TIER`: Equity/ETF/Crypto = high, Gold/REIT/MutualFunds = medium, FD/Bonds/Insurance = low) up or down the order via `RETURN_BIAS`.
+- `prefs.diversificationPriority` (Low/Medium/High) caps how many "live" `increase` pushes are active at once (`DIVERSIFICATION_CAP`) — categories beyond the cap still show, just without an active push.
+
+### 16.4 Interaction with Layer D (Context Engine, §12)
+
+`contextMessaging.js`'s `deferredIncreaseNote()`/`deferredReduceNote()` sit on top of §16.2's raw `action`, softening (not hiding) a suggestion that doesn't make sense yet for the user's corpus tier/persona — e.g. an `increase` on a category outside `expectedAssetClasses` becomes a deferred note instead of a live push; a `reduce` on the user's *sole* expected class is deferred too (§12.5). **The underlying `[loPct, hiPct]` band and the ₹ gap itself are never adjusted by Context — only whether the suggestion is presented as an active ask.** This mirrors §12.4's note that Layer D never touches the raw Apparent/Real Diversification numbers either — same design principle applied to a different screen.
+
+### 16.5 Known gap
+
+No connection to any of §8's resilience math (volatility/drawdown/liquidity/beta) — the bands are pure allocation-mix targets, informed only by risk profile. A category that's "on track" per its ideal range could still be a low-liquidity or high-volatility drag on the composite score; Suggestions doesn't currently reconcile the two.

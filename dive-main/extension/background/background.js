@@ -30,11 +30,32 @@ async function loadPortfolioSnapshot() {
   return cache;
 }
 
-function invalidateCache() {
-  cache = { at: 0, holdings: null, scoreBreakdown: null, me: null };
+// Same short-lived-cache pattern as loadPortfolioSnapshot, applied to
+// /instruments/search — previously fired on EVERY single evaluation (every
+// debounced quantity/amount keystroke), a full uncached network round trip
+// each time even for the identical query moments apart. Keyed by normalized
+// query text; cleared on SET_API_BASE alongside the portfolio cache, since a
+// different backend has a different instrument master and stale cross-
+// backend results would be actively wrong, not just outdated.
+const searchCache = new Map(); // normalized query -> { at, matches }
+
+async function cachedSearchInstruments(query) {
+  const key = norm(query);
+  const cached = searchCache.get(key);
+  if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.matches;
+  const matches = await diveApi.searchInstruments(query);
+  searchCache.set(key, { at: Date.now(), matches });
+  return matches;
 }
 
-const norm = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+function invalidateCache() {
+  cache = { at: 0, holdings: null, scoreBreakdown: null, me: null };
+  searchCache.clear();
+}
+
+function norm(s) {
+  return (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
 
 // assetClassHint comes from siteAdapters.js's extractAssetClassHint — a
 // keyword read off the instrument's own descriptive name/page text ("...
@@ -62,7 +83,7 @@ async function resolveInstrument(rawName, assetClassHint) {
   const confident = !!assetClassHint; // the page itself told us — trust that even without a DB match
   if (!trimmed) return { name: rawName, assetClass: fallbackAssetClass, confident };
   try {
-    const matches = await diveApi.searchInstruments(trimmed);
+    const matches = await cachedSearchInstruments(trimmed);
     const target = norm(trimmed);
     if (matches && matches.length > 0 && target) {
       const exact = matches.find((m) => norm(m.symbol) === target || norm(m.name) === target);

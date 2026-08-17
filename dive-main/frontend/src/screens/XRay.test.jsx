@@ -163,3 +163,73 @@ describe("XRay — deep view tiers its framing/color to the real top-company exp
     expect(screen.getByTestId("xray-insight-message")).toHaveTextContent(/Genuinely spread across 5 real companies/i);
   });
 });
+
+// Gap found while writing DIVE_SCORE_MODEL.md's documentation of this screen:
+// the deep donut groups purely by literal holding name (every holding's
+// lookthrough is flatly "100% to itself" client-side — see diveEngine.js's
+// adaptHolding) so it can never see a mutual fund's real disclosed top
+// holdings, sector affinity, or industry affinity the backend's real
+// lookthroughService.ts detects. scoreBreakdown.connections is that same
+// real detection, already trusted for realDiversificationPct and shown on
+// Score Breakdown's "Why real is below apparent" — now also surfaced here.
+describe("XRay — surfaces real backend-detected overlaps the by-name donut can't see", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  const connections = [
+    { a: "h1", b: "h2", strength: 0.089, reason: "HDFC Flexi Cap Fund holds ~8.9% in HDFC Bank, which you also hold directly" },
+  ];
+
+  async function openDeepView() {
+    const user = userEvent.setup();
+    render(<XRay />);
+    await user.click(screen.getByTestId("xray-look-deeper-btn"));
+    await waitFor(() => expect(screen.getByTestId("xray-deep-top-pct")).toBeInTheDocument());
+  }
+
+  it("shows the real connection reason/strength in the deep view when the backend detected one", async () => {
+    useDive.mockReturnValue({
+      ...baseContext,
+      holdings: [holding({ name: "A", segment: "Equity", amount: 50000, lookthrough: [{ company: "Company A", pct: 100 }] })],
+      scoreBreakdown: { hasHoldings: true, connections },
+    });
+    await openDeepView();
+
+    expect(screen.getByTestId("xray-real-overlaps")).toBeInTheDocument();
+    expect(screen.getByTestId("xray-overlap-0")).toHaveTextContent(/HDFC Flexi Cap Fund holds ~8.9% in HDFC Bank/i);
+    expect(screen.getByTestId("xray-overlap-0")).toHaveTextContent("9% shared exposure");
+  });
+
+  it("does not show the overlaps section on the surface view, only the deep view", async () => {
+    useDive.mockReturnValue({
+      ...baseContext,
+      holdings: [holding({ name: "A", segment: "Equity", amount: 50000, lookthrough: [{ company: "Company A", pct: 100 }] })],
+      scoreBreakdown: { hasHoldings: true, connections },
+    });
+    render(<XRay />);
+
+    expect(screen.queryByTestId("xray-real-overlaps")).not.toBeInTheDocument();
+  });
+
+  it("does not show stale real-portfolio overlaps while a what-if simulation is active", async () => {
+    useDive.mockReturnValue({
+      ...baseContext,
+      holdings: [holding({ name: "A", segment: "Equity", amount: 50000, lookthrough: [{ company: "Company A", pct: 100 }] })],
+      sims: [{ segment: "Gold/Silver", amount: 10000 }],
+      scoreBreakdown: { hasHoldings: true, connections },
+    });
+    await openDeepView();
+
+    expect(screen.queryByTestId("xray-real-overlaps")).not.toBeInTheDocument();
+  });
+
+  it("shows nothing when the backend found no real overlaps", async () => {
+    useDive.mockReturnValue({
+      ...baseContext,
+      holdings: [holding({ name: "A", segment: "Equity", amount: 50000, lookthrough: [{ company: "Company A", pct: 100 }] })],
+      scoreBreakdown: { hasHoldings: true, connections: [] },
+    });
+    await openDeepView();
+
+    expect(screen.queryByTestId("xray-real-overlaps")).not.toBeInTheDocument();
+  });
+});

@@ -93,7 +93,7 @@ function buildDeepInsight({ segs, comps, top }) {
 }
 
 export default function XRay() {
-  const { holdings, holdingsLoading, holdingsError, loadHoldings, setScreen, sims } = useDive();
+  const { holdings, holdingsLoading, holdingsError, loadHoldings, setScreen, sims, scoreBreakdown } = useDive();
   const [deep, setDeep] = useState(false);
   const [companyOpen, setCompanyOpen] = useState(false);
   const [openSegment, setOpenSegment] = useState(null);
@@ -137,6 +137,20 @@ export default function XRay() {
   const missing = missingCategories(h);
   const surfaceInsight = buildSurfaceInsight({ segs, overlaps, missing });
   const deepInsight = buildDeepInsight({ segs, comps, top });
+  // The deep donut/topExposure() above groups purely by literal holding name
+  // (adaptHolding() gives every real holding a flat lookthrough of "100% to
+  // itself" — see diveEngine.js) — it can never see a mutual fund's actual
+  // disclosed top holdings, sector affinity, or industry affinity the way
+  // the backend's real lookthroughService.ts (DIVE_SCORE_MODEL.md §7) can.
+  // scoreBreakdown.connections is that same real, richer detection already
+  // trusted for realDiversificationPct and rendered on Score Breakdown's "Why
+  // real is below apparent" — surfaced here too so this screen's numbers
+  // don't silently under-represent overlap the canonical score already
+  // caught. Simulating (sims active) invalidates it — connections describe
+  // the real SAVED portfolio, not a hypothetical one — so it's suppressed
+  // rather than shown stale.
+  const simulating = sims.some((s) => s.amount > 0);
+  const realOverlaps = !simulating && scoreBreakdown?.hasHoldings ? scoreBreakdown.connections || [] : [];
   // Grouped for Drill Down: segment -> its own holdings, largest first. Keeps
   // the initial view to one card per segment (name, count, total) instead of
   // a flat list of every holding — a portfolio with 20+ stocks, several funds
@@ -199,6 +213,25 @@ export default function XRay() {
           <Lightbulb size={18} /> See Suggestions For You
         </button>
       </div>
+
+      {deep && realOverlaps.length > 0 && (
+        <div className="px-6 mt-6">
+          <div className="bg-[var(--surface-card)] rounded-2xl border border-[var(--border)] p-4" data-testid="xray-real-overlaps">
+            <h3 className="font-bold text-sm mb-1">Hidden overlaps this donut can't show by name alone</h3>
+            <p className="text-xs text-[var(--text-secondary)] mb-3">
+              Your Real Diversification score already accounts for these — holdings above that look independent by name but actually share exposure:
+            </p>
+            <div className="space-y-2">
+              {realOverlaps.map((c, i) => (
+                <div key={i} className="text-xs bg-[var(--surface-card-hover)] rounded-xl p-3" data-testid={`xray-overlap-${i}`}>
+                  <span className="font-semibold">{c.reason}.</span>{" "}
+                  <span className="text-[var(--text-tertiary)]">~{Math.round(c.strength * 100)}% shared exposure.</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="px-6 mt-6">
         <div className="bg-[var(--surface-card)] rounded-2xl border border-[var(--border)] overflow-hidden">

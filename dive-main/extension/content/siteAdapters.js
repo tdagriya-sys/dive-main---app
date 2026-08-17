@@ -1,19 +1,25 @@
 // Site-specific DOM heuristics live here, isolated from the generic
-// observe/orchestrate logic in content.js. Angel One's web trading UI
-// (angelone.in — order widgets can appear on /trade/portfolio, /trade/
-// markets, or any other path, not just a dedicated order page) is a React
-// SPA with hashed/generated CSS class names, which makes hardcoded selectors
-// ("div.jss482") brittle across deploys — so detection here is LABEL- and
-// ROLE-based (aria-label/placeholder/name text, nearby heading text) rather
-// than exact selectors or a URL check, which tends to survive a CSS rebuild
-// even when it can't survive a full redesign.
+// observe/orchestrate logic in content.js. Broker web UIs (Angel One, Groww,
+// ...) are React/Svelte SPAs with hashed/generated CSS class names, which
+// makes hardcoded selectors ("div.jss482") brittle across deploys — so
+// detection is LABEL- and ROLE-based (aria-label/placeholder/name text,
+// nearby heading text) rather than exact selectors, which tends to survive a
+// CSS rebuild even when it can't survive a full redesign.
 //
-// IMPORTANT: this was built without a live, logged-in Angel One session (an
-// automated agent should never authenticate into a real brokerage account).
-// If detection doesn't fire on your real order window, open DevTools on the
-// actual order ticket, find the quantity input, and adjust the regexes/
-// selectors below to match what you see — everything site-specific is
-// isolated in this one file. See extension/README.md.
+// IMPORTANT: every adapter here was built without a live, logged-in
+// brokerage session (an automated agent should never authenticate into a
+// real trading account). Everything was tuned iteratively against real DOM
+// dumps a human collected and pasted back — not guessed blind. If detection
+// doesn't fire on a real order window for a broker already listed below,
+// open DevTools on the actual order ticket and adjust that broker's
+// section; see extension/README.md.
+//
+// Below is split into: (1) generic, broker-agnostic helpers — proven across
+// multiple real Angel One page layouts (inline watchlist widget, dedicated
+// instrument page, mutual-fund one-time/SIP pages), so a reasonable first
+// try for a brand-new broker too — followed by (2) each broker's own
+// adapter object, which may layer broker-specific logic (e.g. Angel One's
+// mutual-fund URL parsing) on top of the generic helpers.
 //
 // Loaded as a plain (non-module) content script — exposes itself via the
 // shared `self.DiveBotCS` namespace so content.js and overlay.js (loaded
@@ -21,21 +27,30 @@
 (function () {
   const NS = (self.DiveBotCS = self.DiveBotCS || {});
 
-  // Leading word-boundary only (no trailing \b) — deliberately, so these
-  // still match camelCase ids like "amountInput" or "quantityOrderPad",
-  // confirmed via real inspection to be how Angel One actually names these
-  // fields. A trailing \b would require "amount"/"quantity" to be a whole
-  // word, which silently rejects exactly the id attributes meant to
-  // identify the field (id="amountInput" has no boundary between "amount"
-  // and "Input" — both are letters).
-  const QTY_HINT = /\b(qty|quantity|units?)/i;
-  const PRICE_HINT = /\b(price|ltp|rate)/i;
-  const AMOUNT_HINT = /\bamount/i;
+  // ======================== Generic, broker-agnostic ========================
+
+  // Plain case-insensitive substring — NO word boundaries at all, on
+  // either side. Real ids embed these words anywhere in a camelCase
+  // identifier, confirmed on two different brokers now: Angel One puts them
+  // at the START ("amountInput", "quantityOrderPad" — a leading \b alone
+  // would've been enough), but Groww's price field is "limitPriceInput" —
+  // "Price" sits in the MIDDLE, with no boundary on either side ("t" before
+  // it, "I" after, both letters) — so even a leading-only \b silently
+  // rejects it. "shares?" covers Groww's quantity field too, which is
+  // simply id="inputShare" — different vocabulary than "qty"/"quantity"
+  // entirely, not a boundary issue.
+  const QTY_HINT = /qty|quantity|units?|shares?/i;
+  // "rate" deliberately excluded now that there's no boundary requirement —
+  // as an unbounded substring it would match common unrelated words
+  // ("Corporate", "Separate", "Moderate"). "price"/"ltp" alone are
+  // distinctive enough without it.
+  const PRICE_HINT = /price|ltp/i;
+  const AMOUNT_HINT = /amount/i;
   // "Lots" (as in "1 Lot = 1KGS") is F&O/commodity-contract terminology,
   // never used on an equity/ETF/mutual-fund order screen — a deliberate,
   // reliable signal that this is a margin-leveraged derivatives position,
   // not a plain allocation purchase. See isDerivativesOrCommodityContract().
-  const LOTS_HINT = /\blots?\b/i;
+  const LOTS_HINT = /lots?/i;
   // "pay"/"invest" cover the amount-only mutual-fund flow (angelone.in/
   // mutual-funds/...), which has no Buy/Sell toggle at all — just a
   // "PAY ₹5,000" / "Invest" CTA.
@@ -112,9 +127,50 @@
     return best;
   }
 
+  // A Market order (as opposed to Limit) has no fixed price to read — the
+  // price field shows non-numeric text instead ("At market" on Groww;
+  // likely similar on other brokers) since it executes at whatever the
+  // current price is when the order fills. Confirmed by real testing: this
+  // silently broke detection entirely (quantity × price needs a real price)
+  // on a Market-order screen, which is the common case for most retail
+  // trades, not an edge case. Falls back to the LTP/current-price figure
+  // that's always shown somewhere in the ticket header regardless of order
+  // type — searches root's own text for the first ₹-prefixed number, safe
+  // because root is already tightly scoped to just this order ticket (see
+  // findOrderPanelRoot), so it won't accidentally pick up an unrelated
+  // price elsewhere on the page.
+  function findMarketPriceInRoot(root) {
+    if (!root) return null;
+    const match = (root.textContent || "").match(/₹\s?([\d,]+(?:\.\d+)?)/);
+    return match ? match[1] : null;
+  }
+
+  // "/mutual-funds/..." turns out to be shared convention, not an Angel
+  // One-specific one — Groww uses it too (groww.in/mutual-funds/parag-
+  // parikh-flexi-cap-fund-regular-growth). Not guaranteed for every future
+  // broker, but reasonable as a starting generic check.
   function isMutualFundPage() {
     return /\/mutual-funds\//i.test(location.pathname);
   }
+
+  // Some brokers' amount field carries NO identifying label at all (empty
+  // id/aria-label/placeholder/name) — confirmed on Groww's mutual-fund SIP
+  // page. .value reads correctly there once actually typed into (verified
+  // live), so the fix isn't reading display text instead (tried that first —
+  // wrong, it picked up an unrelated NAV/price figure elsewhere on the page
+  // rather than the actual amount) — it's finding the field a different way:
+  // when a page has exactly ONE visible text/number input, it's reasonable
+  // to assume that's the page's one purpose-built entry field.
+  function findSoleVisibleNumericInput() {
+    const candidates = Array.from(document.querySelectorAll("input")).filter((input) => {
+      if (!isVisible(input)) return false;
+      const type = (input.getAttribute("type") || "text").toLowerCase();
+      return ["number", "text", "tel", "search"].includes(type);
+    });
+    return candidates.length === 1 ? candidates[0] : null;
+  }
+
+  // ============================== Angel One ==============================
 
   // Angel One's mutual-fund URLs encode the fund's name directly — confirmed
   // on two different path shapes so far: the one-time-purchase page
@@ -200,12 +256,19 @@
   }
 
   function extractInstrumentNameFromTitle() {
-    // Weak last resort — Angel One's tab title isn't reliably per-instrument
-    // (e.g. plain "Angel One - Portfolio" on a portfolio-page order widget),
-    // so background.js additionally cross-checks whatever this returns
-    // against the instrument search results before trusting an asset-class
-    // match derived from it.
-    const titleMatch = document.title.match(/^([A-Za-z0-9&.\- ]{2,40})\s*[-|]/);
+    // Weak last resort — tab titles aren't reliably per-instrument (e.g.
+    // plain "Angel One - Portfolio" on a portfolio-page order widget), so
+    // background.js additionally cross-checks whatever this returns against
+    // the instrument search results before trusting an asset-class match
+    // derived from it. Comma added as a terminator alongside dash/pipe —
+    // Groww's stock-page titles use it before any dash ("SGBDEC31 Share
+    // Price, Stock, ... - Groww"), which the dash-only version missed
+    // entirely. Dash deliberately NOT in the capture character class (only
+    // as a terminator) — every real title seen has the instrument name
+    // BEFORE the first separator, never containing one itself; keeping dash
+    // in both roles let the greedy match swallow past a real separator
+    // ("Fund Growth - NAV, ...") before backtracking found the wrong one.
+    const titleMatch = document.title.match(/^([A-Za-z0-9&. ]{2,40})\s*[-|,]/);
     return titleMatch ? titleMatch[1].trim() : null;
   }
 
@@ -214,8 +277,19 @@
   // "HDFC Balanced Advantage Fund", "Embassy Office Parks REIT", "Reliance
   // Industries Bonds"...) — checked in this order so more specific terms
   // ("ETF"/"REIT"/"InvIT"/"Bond") win over the generic "Fund", which would
-  // otherwise also match "Exchange Traded FUND".
+  // otherwise also match "Exchange Traded FUND". Sovereign Gold Bond
+  // tickers are the one exception that ISN'T self-describing this way — the
+  // symbol alone ("SGBSEP27", "SGBDE31III") contains no matchable keyword —
+  // but they reliably start with the "SGB" prefix on NSE/BSE, confirmed
+  // across four real tickers this session (SGBSEP27, SGBDE31III,
+  // SGBFEB32IV, SGBDEC31). Classified GOLD rather than BOND deliberately:
+  // an SGB's value tracks the gold price directly, so GOLD reflects its
+  // real economic exposure for diversification purposes — the same
+  // principle the backend's own live instrument refresh already applies to
+  // gold ETFs like GOLDBEES (see instrumentSources.ts's fetchNseEtfs,
+  // which reclassifies those from ETF to GOLD).
   const ASSET_CLASS_KEYWORDS = [
+    [/^SGB[A-Z0-9]*$/i, "GOLD"],
     [/\bETFs?\b/i, "ETF"],
     [/\bREITs?\b/i, "REIT"],
     [/\bInvITs?\b/i, "INVIT"],
@@ -234,31 +308,27 @@
   // A bare ticker symbol ("AONETOTAL") doesn't self-identify its asset class
   // the way the instrument's full descriptive name does — and the Dive
   // instrument master (background.js's resolveInstrument) won't have every
-  // Angel One-specific product seeded, so a failed/low-confidence search
-  // match there falls back to this hint instead of blindly assuming Equity
-  // (which used to be the only fallback, and is wrong for e.g. ETFs the
-  // instrument master doesn't recognize).
-  function extractAssetClassHint(root) {
-    // /mutual-funds/... is unambiguous — no keyword-guessing needed.
-    if (isMutualFundPage()) return "MUTUAL_FUND";
-    // Angel One's dedicated per-instrument page (e.g. /trade/tradeone/...)
-    // typically titles the tab with the full descriptive name, which
-    // self-identifies non-equity classes far more reliably than the ticker
-    // symbol alone.
+  // broker-specific product seeded, so a failed/low-confidence search match
+  // there falls back to this hint instead of blindly assuming Equity (which
+  // used to be the only fallback, and is wrong for e.g. ETFs the instrument
+  // master doesn't recognize). Generic/broker-agnostic — a broker's own
+  // wrapper (see Angel One's extractAssetClassHint below) can check for
+  // unambiguous broker-specific signals (like a URL pattern) first.
+  //
+  // Deliberately checks ONLY the tab title and the instrument name already
+  // extracted for this trade — NOT a broad ancestor-textContent walk, which
+  // an earlier version of this function did. That was confirmed wrong by
+  // real testing: on a watchlist page with an open search dropdown showing
+  // an unrelated recent search ("BHARAT BOND ETF"), the walk swept that
+  // sibling UI's text in and mislabeled a Sovereign Gold Bond ("SGBSEP27",
+  // which self-identifies as nothing — correctly yields no hint here) as an
+  // ETF. Checking only text actually tied to THIS instrument (its own name,
+  // its own tab title) can't pick up an unrelated dropdown's contents the
+  // way scanning arbitrary nearby page structure can.
+  function assetClassHintFromPageText(instrumentName) {
     const fromTitle = assetClassFromText(document.title);
     if (fromTitle) return fromTitle;
-    // Fall back to a bounded walk up from the order ticket — wide enough to
-    // reach a page header sitting just outside the ticket modal (as on the
-    // dedicated instrument page, where "AONETOTAL" and "Angel One Nifty
-    // Total Market ETF" are siblings just above the order widget), narrow
-    // enough to avoid the unrelated watchlist sidebar/global nav.
-    let node = root;
-    for (let i = 0; i < 15 && node; i++) {
-      const hint = assetClassFromText(node.textContent || "");
-      if (hint) return hint;
-      node = node.parentElement;
-    }
-    return null;
+    return assetClassFromText(instrumentName || "");
   }
 
   function parseNumber(raw) {
@@ -281,6 +351,14 @@
   // order screen.
   function isDerivativesOrCommodityContract() {
     return !!findInputMatching(LOTS_HINT);
+  }
+
+  // Angel One's own wrapper: /mutual-funds/... is unambiguous, no
+  // keyword-guessing needed, so check that first before falling back to the
+  // generic page-text scan.
+  function extractAssetClassHint(instrumentName) {
+    if (isMutualFundPage()) return "MUTUAL_FUND";
+    return assetClassHintFromPageText(instrumentName);
   }
 
   const AngelOne = {
@@ -308,13 +386,20 @@
       let amount = null;
       if (directAmount) amount = directAmount;
       else if (quantity && price) amount = quantity * price;
+      else if (quantity && !price) {
+        // Price field wasn't numeric — likely a Market order (see
+        // findMarketPriceInRoot) — fall back to the ticket's own displayed
+        // current price.
+        const marketPrice = parseNumber(findMarketPriceInRoot(root));
+        if (marketPrice) amount = quantity * marketPrice;
+      }
 
       if (!amount) return null;
 
       const instrumentName = extractInstrumentName(root, isMutualFundPage());
       if (!instrumentName) return null;
 
-      return { instrumentName, amount, quantity, price, assetClassHint: extractAssetClassHint(root) };
+      return { instrumentName, amount, quantity, price, assetClassHint: extractAssetClassHint(instrumentName) };
     },
 
     // The set of elements whose changes should re-trigger detection —
@@ -325,6 +410,76 @@
     },
   };
 
-  NS.adapters = [AngelOne];
+  // ================================ Groww =================================
+  //
+  // Equity/ETF path was validated against a real Groww session (id="inputShare"
+  // for quantity, id="limitPriceInput" for price — confirmed via live DOM
+  // dumps, same iterative process Angel One went through). The mutual-fund
+  // path was ALSO validated against a real Groww SIP page and turned out
+  // structurally different enough to need its own handling: the amount
+  // <input> there has no identifying label at all (empty id/aria-label/
+  // placeholder/name) and its .value stays empty even with an amount
+  // visibly entered — the "₹10,000" shown is display text, not the input's
+  // real value — so findDisplayedAmountText() reads it directly instead.
+  const Groww = {
+    id: "groww",
+    matches: () => /(^|\.)groww\.in$/i.test(location.hostname),
+
+    readOrderState() {
+      if (isDerivativesOrCommodityContract()) return null;
+
+      if (isMutualFundPage()) {
+        const soleInput = findSoleVisibleNumericInput();
+        const amount = soleInput ? parseNumber(soleInput.value) : null;
+        if (!amount) return null;
+        const instrumentName = extractInstrumentNameFromTitle() || extractPageHeading();
+        if (!instrumentName) return null;
+        return { instrumentName, amount, quantity: null, price: null, assetClassHint: "MUTUAL_FUND" };
+      }
+
+      const root = findOrderPanelRoot();
+      if (!root) return null;
+
+      const qtyInput = findInputMatching(QTY_HINT);
+      const amountInput = findInputMatching(AMOUNT_HINT, { excludeQty: true });
+      const priceInput = findInputMatching(PRICE_HINT, { excludeQty: true });
+
+      const quantity = qtyInput ? parseNumber(qtyInput.value) : null;
+      const directAmount = amountInput ? parseNumber(amountInput.value) : null;
+      const price = priceInput ? parseNumber(priceInput.value) : null;
+
+      let amount = null;
+      if (directAmount) amount = directAmount;
+      else if (quantity && price) amount = quantity * price;
+      else if (quantity && !price) {
+        // Price field wasn't numeric — likely a Market order (see
+        // findMarketPriceInRoot) — fall back to the ticket's own displayed
+        // current price.
+        const marketPrice = parseNumber(findMarketPriceInRoot(root));
+        if (marketPrice) amount = quantity * marketPrice;
+      }
+
+      if (!amount) return null;
+
+      // extractPageHeading() searches the WHOLE document for h1/h2/heading-
+      // like elements — confirmed too broad by real testing: on a Groww
+      // stock page it picked up an unrelated promo banner ("Effortless tax
+      // filing with Cleartax") instead of the instrument name. Angel One's
+      // equity path never had this problem because it goes straight to the
+      // order-ticket-scoped leaf-scan; matching that safer order here too —
+      // extractPageHeading() only stays as the last-resort fallback.
+      const instrumentName = extractFromLeafScan(root) || extractInstrumentNameFromTitle() || extractPageHeading();
+      if (!instrumentName) return null;
+
+      return { instrumentName, amount, quantity, price, assetClassHint: assetClassHintFromPageText(instrumentName) };
+    },
+
+    watchTargets() {
+      if (isMutualFundPage()) return [findSoleVisibleNumericInput()].filter(Boolean);
+      return [findInputMatching(QTY_HINT), findInputMatching(AMOUNT_HINT, { excludeQty: true }), findInputMatching(PRICE_HINT, { excludeQty: true })].filter(Boolean);
+    },
+  };
+
+  NS.adapters = [AngelOne, Groww];
   NS.getActiveAdapter = () => NS.adapters.find((a) => a.matches()) || null;
 })();

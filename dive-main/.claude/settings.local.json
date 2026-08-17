@@ -239,7 +239,12 @@
       "Bash(node --check background.js)",
       "Bash(node --check siteAdapters.js)",
       "Bash(node _smoketest2.mjs)",
-      "Bash(node --check diveApi.js)"
+      "Bash(node --check diveApi.js)",
+      "Bash(node --check content.js)",
+      "Bash(python -c \"import json; json.load\\(open\\('manifest.json'\\)\\)\")",
+      "Bash(node --check content/siteAdapters.js)",
+      "Bash(node --check content/content.js)",
+      "Bash(node --check background/background.js)"
     ]
   }
 }
