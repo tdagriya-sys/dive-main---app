@@ -144,7 +144,7 @@ export default function Preferences() {
           className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-card)] px-4 py-3 mb-4 outline-none font-semibold text-[var(--text-primary)]" />
         {profileError && <p className="text-xs text-[var(--red)] font-semibold mb-3" data-testid="profile-save-error">{profileError}</p>}
         <button data-testid="profile-save-btn" onClick={saveProfile} disabled={profileSaving || !name.trim() || !age}
-          className="w-full gold-btn rounded-full py-3.5 font-bold flex items-center justify-center gap-2 disabled:opacity-40 transition-colors">
+          className="w-full md:max-w-xs md:ml-auto gold-btn rounded-full py-3.5 font-bold flex items-center justify-center gap-2 disabled:opacity-40 transition-colors">
           {profileSaving ? <Loader2 size={16} className="animate-spin" /> : profileSaved ? <Check size={16} /> : null}
           {profileSaving ? "Saving…" : profileSaved ? "Saved" : "Save changes"}
         </button>
@@ -182,7 +182,7 @@ export default function Preferences() {
       <Section title="Reports" hint="Your full resilience score breakdown, as a downloadable one-pager.">
         {reportError && <p className="text-xs text-[var(--red)] font-semibold mb-3">{reportError}</p>}
         <button data-testid="prefs-download-report-btn" onClick={downloadReport} disabled={downloadingReport}
-          className="w-full gold-btn rounded-full py-3.5 font-bold flex items-center justify-center gap-2 disabled:opacity-60 transition-colors">
+          className="w-full md:max-w-sm md:mx-auto gold-btn rounded-full py-3.5 font-bold flex items-center justify-center gap-2 disabled:opacity-60 transition-colors">
           {downloadingReport ? <Loader2 size={18} className="animate-spin" /> : <FileDown size={18} />}
           {downloadingReport ? "Preparing report…" : "Download Resilience Score Report (PDF)"}
         </button>
@@ -190,14 +190,14 @@ export default function Preferences() {
 
       <div className="px-6 mt-6">
         <button data-testid="prefs-manage-holdings-btn" onClick={() => setScreen("myHoldings")}
-          className="w-full bg-[var(--surface-card)] border border-[var(--border)] rounded-full py-3.5 font-bold flex items-center justify-center gap-2 hover:bg-[var(--surface-card-hover)] transition-colors">
+          className="w-full md:max-w-xs md:mx-auto bg-[var(--surface-card)] border border-[var(--border)] rounded-full py-3.5 font-bold flex items-center justify-center gap-2 hover:bg-[var(--surface-card-hover)] transition-colors">
           <ListChecks size={18} className="text-[var(--dive-blue)]" /> Manage holdings
         </button>
       </div>
 
       <div className="px-6 mt-3">
         <button data-testid="prefs-simulate-popup-btn" onClick={() => setScreen("divebot")}
-          className="w-full bg-[var(--surface-card)] border border-[var(--border)] rounded-full py-3.5 font-bold flex items-center justify-center gap-2 hover:bg-[var(--surface-card-hover)] transition-colors">
+          className="w-full md:max-w-xs md:mx-auto bg-[var(--surface-card)] border border-[var(--border)] rounded-full py-3.5 font-bold flex items-center justify-center gap-2 hover:bg-[var(--surface-card-hover)] transition-colors">
           <Bot size={18} className="text-[var(--dive-blue)]" /> Simulate app pop-up
         </button>
       </div>
@@ -216,7 +216,7 @@ export default function Preferences() {
           {passwordError && <p className="text-xs text-[var(--red)] font-semibold mb-3" data-testid="password-save-error">{passwordError}</p>}
           {passwordSuccess && <p className="text-xs text-[var(--dive-blue)] font-semibold mb-3" data-testid="password-save-success">{passwordSuccess}</p>}
           <button data-testid="password-save-btn" type="submit" disabled={passwordSaving}
-            className="w-full gold-btn rounded-full py-3.5 font-bold flex items-center justify-center gap-2 disabled:opacity-40 transition-colors">
+            className="w-full md:max-w-xs md:ml-auto gold-btn rounded-full py-3.5 font-bold flex items-center justify-center gap-2 disabled:opacity-40 transition-colors">
             {passwordSaving ? <Loader2 size={16} className="animate-spin" /> : null}
             {passwordSaving ? "Updating…" : "Update password"}
           </button>
@@ -229,7 +229,7 @@ export default function Preferences() {
         {error && <p className="text-xs text-[var(--red)] font-semibold mb-3">{error}</p>}
         {!confirmingDelete ? (
           <button data-testid="delete-account-btn" onClick={() => setConfirmingDelete(true)}
-            className="w-full rounded-full py-3.5 font-bold border border-[var(--red)] text-[var(--red)] hover:bg-[var(--red)]/10 transition-colors">
+            className="block w-full md:max-w-xs md:mx-auto rounded-full py-3.5 font-bold border border-[var(--red)] text-[var(--red)] hover:bg-[var(--red)]/10 transition-colors">
             Delete account
           </button>
         ) : (

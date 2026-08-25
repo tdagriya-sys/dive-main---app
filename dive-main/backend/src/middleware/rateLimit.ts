@@ -24,6 +24,19 @@ export const otpLimiter = rateLimit({
   message: { error: "RATE_LIMITED", message: "Too many OTP requests. Please wait before trying again." },
 });
 
+// The contact form is public and unauthenticated (no login required to
+// reach it), which makes it the same kind of spam target OTP requests are —
+// same window/ceiling shape as otpLimiter for that reason, on top of the
+// general /api-wide limiter in app.ts.
+export const contactLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip,
+  message: { error: "RATE_LIMITED", message: "Too many messages sent. Please wait before trying again." },
+});
+
 // Shared across /uploads and /botscan/analyze — both ultimately trigger a
 // paid Claude vision call (botscan up to 30 images per request), so they're
 // capped together rather than per-route to stop a user from just splitting

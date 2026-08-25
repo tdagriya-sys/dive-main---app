@@ -18,7 +18,7 @@ export function normalizeIssuer(name: string): string {
   return name
     .toLowerCase()
     .replace(
-      /\b(ltd|limited|inc|incorporated|industries|industry|banks?|corp|corporation|bonds?|ncds?|funds?|etfs?|schemes?|plans?|trusts?|reits?|invits?|fds?|deposits?|sgbs?|bees)\b/g,
+      /\b(ltd|limited|inc|incorporated|industries|industry|banks?|corp|corporate|corporation|bonds?|ncds?|debentures?|funds?|etfs?|schemes?|plans?|trusts?|reits?|invits?|fds?|deposits?|sgbs?|bees)\b/g,
       ""
     )
     .replace(/[^a-z0-9]/g, "")

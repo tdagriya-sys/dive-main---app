@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { env } from "../config/env";
 import { Instrument, ASSET_CLASSES, AssetClass } from "../models/Instrument";
 import { CandidateHolding, missingFieldsFor } from "./fileParsers/types";
@@ -12,7 +13,7 @@ export type AiExtractionContext = "bot_scan" | "file_upload";
 export class AiExtractionNotConfiguredError extends Error {
   constructor() {
     super(
-      "AI-based extraction is not configured. Set a real ANTHROPIC_API_KEY in backend/.env — see /docs/GETTING_API_KEYS.md."
+      "AI-based extraction is not configured. Set a real OPENAI_API_KEY (primary) and/or ANTHROPIC_API_KEY (fallback) in backend/.env — see /docs/GETTING_API_KEYS.md."
     );
     this.name = "AiExtractionNotConfiguredError";
   }
@@ -25,16 +26,39 @@ export class AiExtractionTimeoutError extends Error {
   }
 }
 
+function isOpenAiConfigured(): boolean {
+  return env.nodeEnv !== "test" && !env.openaiApiKeyIsPlaceholder;
+}
+
+function isClaudeConfigured(): boolean {
+  return env.nodeEnv !== "test" && !env.anthropicApiKeyIsPlaceholder;
+}
+
 // Always "not configured" in the test environment, even if a real key is
 // present in .env for local dev — tests must never spend real API credits or
 // depend on network access, same policy as priceHistoryService's real-price
 // fetches (gated by env.nodeEnv !== "test").
 export function isAiExtractionConfigured(): boolean {
-  return env.nodeEnv !== "test" && !env.anthropicApiKeyIsPlaceholder;
+  return isOpenAiConfigured() || isClaudeConfigured();
 }
 
-let client: Anthropic | null = null;
-function getClient(): Anthropic {
+// GPT-5.6 Terra is the PRIMARY extraction model — see extractHoldingsWithAI()
+// below for the fallback-to-Claude orchestration.
+const OPENAI_MODEL = "gpt-5.6-terra";
+
+let openaiClient: OpenAI | null = null;
+function getOpenAiClient(): OpenAI {
+  // Same latency-bounding reasoning as getClaudeClient() below: an explicit
+  // timeout plus a single retry (not the SDK's default of 2) keeps the
+  // worst-case wait for this ONE provider attempt bounded at roughly 2x
+  // this timeout, not 3x — important now that a failed OpenAI attempt falls
+  // through to a second, full Claude attempt (see extractHoldingsWithAI).
+  if (!openaiClient) openaiClient = new OpenAI({ apiKey: env.openaiApiKey, timeout: 60_000, maxRetries: 1 });
+  return openaiClient;
+}
+
+let claudeClient: Anthropic | null = null;
+function getClaudeClient(): Anthropic {
   // Without an explicit timeout, a slow/stuck Claude response (or an under-
   // provisioned deploy — see docs/SERVER_DEPLOYMENT_GUIDE.md) can leave the
   // request hanging far longer than any UI should ever sit spinning, since
@@ -44,8 +68,8 @@ function getClient(): Anthropic {
   // this so a slow-but-real response still has a chance to arrive intact).
   // maxRetries: 1 (not the SDK's default of 2) keeps the worst-case total
   // wait bounded at roughly 2x this timeout, not 3x.
-  if (!client) client = new Anthropic({ apiKey: env.anthropicApiKey, timeout: 60_000, maxRetries: 1 });
-  return client;
+  if (!claudeClient) claudeClient = new Anthropic({ apiKey: env.anthropicApiKey, timeout: 60_000, maxRetries: 1 });
+  return claudeClient;
 }
 
 const ASSET_CLASS_LIST = ASSET_CLASSES.join(", ");
@@ -212,63 +236,12 @@ export interface AiExtractionResult {
   excludedNotes: string;
 }
 
-export async function extractHoldingsWithAI(
-  sources: AiSource[],
-  context: AiExtractionContext
-): Promise<AiExtractionResult> {
-  if (!isAiExtractionConfigured()) throw new AiExtractionNotConfiguredError();
-  if (sources.length === 0) return { holdings: [], excludedNotes: "" };
-
-  const content: Anthropic.Messages.ContentBlockParam[] = [];
-  for (const source of sources) {
-    if (source.kind === "image") {
-      content.push({
-        type: "image",
-        source: { type: "base64", media_type: source.mimeType as any, data: source.data.toString("base64") },
-      });
-    } else {
-      content.push({
-        type: "document",
-        source: { type: "base64", media_type: "application/pdf", data: source.data.toString("base64") },
-      });
-    }
-  }
-  content.push({
-    type: "text",
-    text:
-      sources.length > 1
-        ? `Above are ${sources.length} images/documents from the same scan or upload session. Analyze all of them together as described in your instructions and return the final, deduplicated holdings list.`
-        : "Above is one image/document. Extract the holdings as described in your instructions.",
-  });
-
-  let response: Anthropic.Messages.Message;
-  try {
-    response = await getClient().messages.create({
-      // Sonnet 5 handles this vision-extraction task well at roughly half the
-      // per-token cost of Opus 5 and near-Opus quality on structured
-      // extraction — a better cost/quality fit for a task run on every scan
-      // and every image/PDF upload than the top-tier model.
-      model: "claude-sonnet-5",
-      max_tokens: 8000,
-      system: buildSystemPrompt(context),
-      output_config: { format: { type: "json_schema", schema: OUTPUT_SCHEMA } },
-      messages: [{ role: "user", content }],
-    });
-  } catch (err) {
-    if (err instanceof Anthropic.APIConnectionTimeoutError) throw new AiExtractionTimeoutError();
-    throw err;
-  }
-
-  const textBlock = response.content.find((b): b is Anthropic.Messages.TextBlock => b.type === "text");
-  if (!textBlock) return { holdings: [], excludedNotes: "The AI model returned no readable output." };
-
-  let parsed: { holdings: AiHoldingRaw[]; excludedNotes: string };
-  try {
-    parsed = JSON.parse(textBlock.text);
-  } catch {
-    return { holdings: [], excludedNotes: "The AI model's response could not be parsed." };
-  }
-
+// Turns the raw, provider-agnostic { holdings, excludedNotes } JSON (already
+// validated against OUTPUT_SCHEMA by whichever provider answered) into the
+// app's AiExtractionResult shape — instrument-master verification plus
+// missingFields computation, identical regardless of which model produced
+// the raw data.
+async function finalizeHoldings(parsed: { holdings: AiHoldingRaw[]; excludedNotes: string }): Promise<AiExtractionResult> {
   const rawHoldings = parsed.holdings || [];
   const matches = await verifyAgainstInstrumentMasterBatch(rawHoldings);
 
@@ -297,6 +270,155 @@ export async function extractHoldingsWithAI(
   });
 
   return { holdings, excludedNotes: parsed.excludedNotes || "" };
+}
+
+function extractionInstructionText(sources: AiSource[]): string {
+  return sources.length > 1
+    ? `Above are ${sources.length} images/documents from the same scan or upload session. Analyze all of them together as described in your instructions and return the final, deduplicated holdings list.`
+    : "Above is one image/document. Extract the holdings as described in your instructions.";
+}
+
+// PRIMARY provider. Uses OpenAI's Responses API (not classic Chat
+// Completions) specifically because it's the one surface that accepts
+// images AND PDFs as native input content blocks (`input_image` /
+// `input_file`) alongside `json_schema` structured-output enforcement — the
+// same two capabilities the Claude call below relies on via `image`/
+// `document` content blocks and `output_config.format`. On ANY failure here
+// (network/timeout/auth/rate-limit/empty-or-unparseable output) this throws
+// rather than returning a soft-empty result, so extractHoldingsWithAI's
+// caller can tell "OpenAI genuinely found nothing" apart from "OpenAI failed
+// to answer at all" — only the latter should trigger the Claude fallback.
+async function extractHoldingsWithOpenAI(
+  sources: AiSource[],
+  context: AiExtractionContext
+): Promise<AiExtractionResult> {
+  const content: OpenAI.Responses.ResponseInputContent[] = [];
+  for (const source of sources) {
+    if (source.kind === "image") {
+      content.push({
+        type: "input_image",
+        image_url: `data:${source.mimeType};base64,${source.data.toString("base64")}`,
+        detail: "high",
+      });
+    } else {
+      content.push({
+        type: "input_file",
+        filename: "statement.pdf",
+        file_data: `data:application/pdf;base64,${source.data.toString("base64")}`,
+      });
+    }
+  }
+  content.push({ type: "input_text", text: extractionInstructionText(sources) });
+
+  const response = await getOpenAiClient().responses.create({
+    model: OPENAI_MODEL,
+    instructions: buildSystemPrompt(context),
+    input: [{ role: "user", content }],
+    max_output_tokens: 8000,
+    text: { format: { type: "json_schema", name: "holdings_extraction", schema: OUTPUT_SCHEMA, strict: true } },
+  });
+
+  const outputText = response.output_text;
+  if (!outputText) throw new Error("OpenAI (GPT-5.6 Terra) returned no readable output.");
+
+  let parsed: { holdings: AiHoldingRaw[]; excludedNotes: string };
+  try {
+    parsed = JSON.parse(outputText);
+  } catch {
+    throw new Error("OpenAI (GPT-5.6 Terra) response could not be parsed as JSON.");
+  }
+
+  return finalizeHoldings(parsed);
+}
+
+// FALLBACK provider — also usable standalone as the only provider when
+// OPENAI_API_KEY isn't set. Unlike extractHoldingsWithOpenAI above, this
+// returns a soft-empty result (rather than throwing) on an empty/unparseable
+// response, since by the time this runs there is nowhere further left to
+// fall back to.
+async function extractHoldingsWithClaude(
+  sources: AiSource[],
+  context: AiExtractionContext
+): Promise<AiExtractionResult> {
+  const content: Anthropic.Messages.ContentBlockParam[] = [];
+  for (const source of sources) {
+    if (source.kind === "image") {
+      content.push({
+        type: "image",
+        source: { type: "base64", media_type: source.mimeType as any, data: source.data.toString("base64") },
+      });
+    } else {
+      content.push({
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: source.data.toString("base64") },
+      });
+    }
+  }
+  content.push({ type: "text", text: extractionInstructionText(sources) });
+
+  let response: Anthropic.Messages.Message;
+  try {
+    response = await getClaudeClient().messages.create({
+      // Sonnet 5 handles this vision-extraction task well at roughly half the
+      // per-token cost of Opus 5 and near-Opus quality on structured
+      // extraction — a better cost/quality fit for a task run on every scan
+      // and every image/PDF upload than the top-tier model. Also simply the
+      // fallback path here, behind the OpenAI (GPT-5.6 Terra) primary call.
+      model: "claude-sonnet-5",
+      max_tokens: 8000,
+      system: buildSystemPrompt(context),
+      output_config: { format: { type: "json_schema", schema: OUTPUT_SCHEMA } },
+      messages: [{ role: "user", content }],
+    });
+  } catch (err) {
+    if (err instanceof Anthropic.APIConnectionTimeoutError) throw new AiExtractionTimeoutError();
+    throw err;
+  }
+
+  const textBlock = response.content.find((b): b is Anthropic.Messages.TextBlock => b.type === "text");
+  if (!textBlock) return { holdings: [], excludedNotes: "The AI model returned no readable output." };
+
+  let parsed: { holdings: AiHoldingRaw[]; excludedNotes: string };
+  try {
+    parsed = JSON.parse(textBlock.text);
+  } catch {
+    return { holdings: [], excludedNotes: "The AI model's response could not be parsed." };
+  }
+
+  return finalizeHoldings(parsed);
+}
+
+// Orchestrator: OpenAI (GPT-5.6 Terra) is PRIMARY. If it's configured but
+// fails for any reason — network error, timeout, auth/rate-limit error, or
+// an empty/unparseable response — this falls back to Claude Sonnet 5,
+// exactly as requested. If OpenAI isn't configured at all, this goes
+// straight to Claude (which then behaves as the sole provider, same as
+// before OpenAI was added). If NEITHER is configured, this throws before
+// attempting anything.
+export async function extractHoldingsWithAI(
+  sources: AiSource[],
+  context: AiExtractionContext
+): Promise<AiExtractionResult> {
+  if (!isAiExtractionConfigured()) throw new AiExtractionNotConfiguredError();
+  if (sources.length === 0) return { holdings: [], excludedNotes: "" };
+
+  const claudeAvailable = isClaudeConfigured();
+
+  if (isOpenAiConfigured()) {
+    try {
+      return await extractHoldingsWithOpenAI(sources, context);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!claudeAvailable) {
+        console.warn(`[aiExtraction] OpenAI (${OPENAI_MODEL}) extraction failed and no Claude fallback is configured:`, message);
+        if (err instanceof OpenAI.APIConnectionTimeoutError) throw new AiExtractionTimeoutError();
+        throw err;
+      }
+      console.warn(`[aiExtraction] OpenAI (${OPENAI_MODEL}) extraction failed, falling back to Claude Sonnet 5:`, message);
+    }
+  }
+
+  return extractHoldingsWithClaude(sources, context);
 }
 
 interface InstrumentCandidate {

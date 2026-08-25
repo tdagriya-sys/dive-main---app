@@ -14,15 +14,23 @@ jest.mock("../lib/api", () => ({
 // Exposes just enough of the context for these tests to drive and observe,
 // mirroring how a real screen would consume useDive().
 function TestHarness() {
-  const { authLoading, holdings, holdingsError, loadHoldings, prefs, savePrefs } = useDive();
+  // Aliased to currentScreen — this file already imports testing-library's
+  // own `screen` query object, and useDive()'s `screen` (the app's current
+  // screen name) would otherwise shadow it.
+  const { authLoading, holdings, holdingsError, loadHoldings, prefs, savePrefs, screen: currentScreen, setScreen, goBack } = useDive();
   return (
     <div>
       <div data-testid="auth-loading">{String(authLoading)}</div>
       <div data-testid="holdings-count">{holdings.length}</div>
       <div data-testid="holdings-error">{String(holdingsError)}</div>
       <div data-testid="prefs-risk">{prefs.risk}</div>
+      <div data-testid="current-screen">{currentScreen}</div>
       <button onClick={() => loadHoldings()}>reload holdings</button>
       <button onClick={() => savePrefs({ ...prefs, risk: "Aggressive" })}>save prefs</button>
+      <button onClick={() => setScreen("home")}>go home</button>
+      <button onClick={() => setScreen("chooseMethod")}>go chooseMethod</button>
+      <button onClick={() => setScreen("manualEntry")}>go manualEntry</button>
+      <button onClick={goBack}>go back</button>
     </div>
   );
 }
@@ -87,6 +95,46 @@ describe("DiveContext — loadHoldings error handling", () => {
     // used to make a working portfolio look like it "vanished".
     expect(screen.getByTestId("holdings-count")).toHaveTextContent("1");
     expect(screen.getByTestId("holdings-error")).toHaveTextContent("true");
+  });
+});
+
+describe("DiveContext — goBack", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  // Regression test for a real user report: Home -> "Add investments"
+  // (chooseMethod) -> pick a method (manualEntry) -> back -> "Skip for now"
+  // on chooseMethod looped back to manualEntry instead of returning home. A
+  // single "previous screen" slot (instead of a real stack) got overwritten
+  // by the FIRST back-navigation itself, so the second back-navigation had
+  // nowhere correct left to go.
+  it("unwinds the actual path taken, not just the last two screens, across repeated back-navigation", async () => {
+    await renderReady();
+    // Screen starts at "splash" (pre-login) — establish "home" as the known
+    // starting point for this navigation sequence, same as where a real
+    // user lands post-login.
+    await userEvent.click(screen.getByText("go home"));
+    expect(screen.getByTestId("current-screen")).toHaveTextContent("home");
+
+    await userEvent.click(screen.getByText("go chooseMethod"));
+    expect(screen.getByTestId("current-screen")).toHaveTextContent("chooseMethod");
+
+    await userEvent.click(screen.getByText("go manualEntry"));
+    expect(screen.getByTestId("current-screen")).toHaveTextContent("manualEntry");
+
+    // First back: manualEntry -> chooseMethod.
+    await userEvent.click(screen.getByText("go back"));
+    expect(screen.getByTestId("current-screen")).toHaveTextContent("chooseMethod");
+
+    // Second back (the reported bug): must reach home, not loop back to
+    // manualEntry.
+    await userEvent.click(screen.getByText("go back"));
+    expect(screen.getByTestId("current-screen")).toHaveTextContent("home");
+  });
+
+  it("falls back to home when the history stack is empty", async () => {
+    await renderReady();
+    await userEvent.click(screen.getByText("go back"));
+    expect(screen.getByTestId("current-screen")).toHaveTextContent("home");
   });
 });
 

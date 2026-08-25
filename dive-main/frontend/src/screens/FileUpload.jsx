@@ -15,7 +15,7 @@ function emptyFd() {
 }
 
 export default function FileUpload() {
-  const { setScreen, goBack, loadHoldings, holdings, user } = useDive();
+  const { setScreen, goBack, loadHoldings, holdings } = useDive();
   const fileInputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const [candidates, setCandidates] = useState(null); // null = not yet uploaded
@@ -25,9 +25,10 @@ export default function FileUpload() {
   const [savingAll, setSavingAll] = useState(false);
   const [savedCount, setSavedCount] = useState(0);
   const [saveFailedCount, setSaveFailedCount] = useState(0);
-  // A hung Claude response otherwise has no escape short of waiting out the
-  // full ~60-150s timeout chain (Anthropic SDK timeout x maxRetries, Nginx's
-  // proxy_read_timeout, this request's own axios timeout — see
+  // A hung AI response otherwise has no escape short of waiting out the full
+  // timeout chain (OpenAI/Anthropic SDK timeout x maxRetries — up to TWICE
+  // that if the OpenAI primary call fails and falls back to Claude — plus
+  // Nginx's proxy_read_timeout and this request's own axios timeout, see
   // aiExtractionService.ts) — this lets the user bail out immediately instead.
   const uploadAbortRef = useRef(null);
 
@@ -36,14 +37,6 @@ export default function FileUpload() {
   const onFileSelected = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    // Backstop for ChooseFetchMethod's own gate (which normally keeps a
-    // logged-out visitor from ever reaching this screen) — /uploads requires
-    // auth, so without this a picked file would always fail after the fact.
-    if (!user) {
-      setError("Sign up first to upload and save real investments — this preview can't save anything yet.");
-      e.target.value = "";
-      return;
-    }
     setError("");
     setUploading(true);
     setCandidates(null);

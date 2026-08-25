@@ -1,0 +1,371 @@
+/* Ported from the uploaded reference (divve-sections_4.html). Every color
+   below is a direct token swap onto this app's existing dark/gold theme
+   (defined in index.css) — same mapping convention as HeroScene.css:
+     --bg/--bg-soft   -> var(--wrapper-bg) / var(--app-bg)
+     --card           -> var(--surface-card)
+     --card-2/--card-3-> var(--surface-card-hover) (the reference used a
+                          3-tier card scale; this theme only has two
+                          surfaces, so both collapse onto the one "raised"
+                          tier — a small simplification, not a new color)
+     --border         -> var(--border-light)
+     --border-strong  -> rgba(227,184,86,.35)  (dive-blue at low opacity)
+     --gold-1/--gold-2-> var(--gold-a) / var(--gold-c) (already this app's
+                          own gradient stops, from index.css's .gold-btn)
+     --text/-dim/-dimmer -> var(--text-primary) / var(--text-secondary) / var(--text-tertiary)
+     --real / --apparent -> var(--green) / var(--red) (already this app's
+                             convention — see FeatureMocks.jsx)
+   Headline/body text uses this app's default Manrope stack (no font-family
+   override); JetBrains Mono (already loaded by HeroScene.css, re-declared
+   here too so this file works standalone) is kept only for the small
+   numeric/label accents, exactly as in the reference. */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+.fs-accordion, .fs-accordion *,
+.fs-scrolly, .fs-scrolly *,
+.fs-bot, .fs-bot *{ box-sizing: border-box; }
+
+:root{
+  --fs-gold: linear-gradient(135deg, var(--gold-a) 0%, var(--gold-b) 48%, var(--gold-c) 100%);
+}
+
+.fs-eyebrow{
+  font-family: 'JetBrains Mono', monospace;
+  font-size: .72rem;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--dive-blue);
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  margin-bottom: 1rem;
+}
+.fs-eyebrow::before{
+  content: "";
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--fs-gold);
+  box-shadow: 0 0 0 3px rgba(227,184,86,.18);
+  flex: none;
+}
+.fs-section-head h2{
+  font-weight: 700;
+  font-size: clamp(1.9rem, 2.6vw + 1rem, 2.7rem);
+  line-height: 1.15;
+  letter-spacing: -.01em;
+  max-width: 20ch;
+}
+.fs-section-head p{
+  margin-top: 1rem;
+  color: var(--text-secondary);
+  font-size: 1rem;
+  line-height: 1.6;
+  max-width: 52ch;
+}
+
+/* =========================================================
+   SECTION 1 — USP Accordion
+========================================================== */
+.fs-accordion{
+  margin-top: 56px;
+  display: flex;
+  gap: 14px;
+  background: var(--app-bg);
+  border: 1px solid var(--border-light);
+  border-radius: 26px;
+  padding: 14px;
+  min-height: 560px;
+}
+.fs-acc-panel{
+  position: relative;
+  flex: 1;
+  background: var(--surface-card);
+  border: 1px solid var(--border-light);
+  border-radius: 20px;
+  padding: 26px 22px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: flex .55s cubic-bezier(.2,.8,.2,1), background .4s ease, border-color .4s ease;
+  display: flex;
+  flex-direction: column;
+}
+.fs-acc-panel:focus-visible{ outline: 2px solid var(--dive-blue); outline-offset: -2px; }
+.fs-acc-panel.expanded{ flex: 3.6; background: var(--surface-card-hover); border-color: rgba(227,184,86,.35); }
+.fs-acc-panel.shrunk{ flex: .62; }
+
+.fs-acc-icon{
+  width: 38px; height: 38px; border-radius: 11px;
+  background: var(--fs-gold);
+  display: flex; align-items: center; justify-content: center;
+  flex: none; margin-bottom: 16px;
+}
+.fs-acc-panel.shrunk .fs-acc-icon{ margin-bottom: 0; }
+
+.fs-acc-heading{ font-weight: 700; font-size: 1.3rem; white-space: nowrap; }
+.fs-acc-panel.shrunk .fs-acc-heading-wrap{ flex: 1; display: flex; align-items: center; justify-content: center; }
+.fs-acc-panel.shrunk .fs-acc-heading{
+  writing-mode: vertical-rl; transform: rotate(180deg);
+  color: var(--text-secondary); letter-spacing: .02em;
+}
+
+.fs-acc-oneliner{
+  margin-top: 14px; color: var(--text-primary); font-weight: 600; font-size: 1.5rem; line-height: 1.28;
+  max-width: 15ch; letter-spacing: -.01em;
+}
+.fs-acc-panel:not(.expanded):not(.shrunk){ justify-content: center; }
+.fs-acc-panel.expanded .fs-acc-oneliner, .fs-acc-panel.shrunk .fs-acc-oneliner{ display: none; }
+
+.fs-acc-expanded-content{ display: none; margin-top: 16px; flex: 1; flex-direction: row; gap: 30px; }
+.fs-acc-panel.expanded .fs-acc-expanded-content{ display: flex; }
+.fs-acc-text{ flex: 0 0 34%; min-width: 210px; }
+.fs-acc-stat{
+  font-weight: 800; font-size: 2.5rem; line-height: 1;
+  background: var(--fs-gold); -webkit-background-clip: text; background-clip: text; color: transparent;
+  margin-bottom: 12px;
+}
+.fs-acc-stat-label{ font-size: .82rem; color: var(--text-secondary); max-width: 22ch; line-height: 1.45; margin-bottom: 18px; }
+.fs-acc-expanded-content p{ color: var(--text-secondary); font-size: .96rem; line-height: 1.65; max-width: 44ch; }
+.fs-acc-visuals{ flex: 1; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+.fs-acc-visual{ background: var(--surface-card); border: 1px solid var(--border-light); border-radius: 16px; padding: 18px; }
+.fs-popup-card{
+  background: var(--surface-card-hover); border: 1px solid var(--border-light); border-radius: 14px;
+  padding: 14px 16px; box-shadow: 0 18px 40px -22px rgba(0,0,0,.6);
+}
+
+.fs-xray-chips{ display: flex; gap: 10px; }
+.fs-xray-chip{ flex: 1; border-radius: 12px; padding: 10px 12px; border: 1px solid; }
+.fs-xray-chip.apparent{ border-color: rgba(248,113,113,.4); }
+.fs-xray-chip.real{ border-color: rgba(52,211,153,.4); }
+.fs-xray-chip span{ display: block; font-family: 'JetBrains Mono', monospace; font-size: .6rem; letter-spacing: .08em; }
+.fs-xray-chip.apparent span{ color: var(--red); }
+.fs-xray-chip.real span{ color: var(--green); }
+.fs-xray-chip b{ font-family: 'JetBrains Mono', monospace; font-size: 1.15rem; display: block; margin-top: 4px; }
+.fs-xray-chip.apparent b{ color: var(--red); }
+.fs-xray-chip.real b{ color: var(--green); }
+
+.fs-overlap-pop{ display: flex; align-items: center; gap: 14px; }
+.fs-overlap-avatars{ display: flex; flex: none; }
+.fs-overlap-avatars span{
+  width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-family: 'JetBrains Mono', monospace; font-size: .55rem; font-weight: 700; margin-left: -9px;
+  border: 2px solid var(--surface-card-hover);
+}
+.fs-overlap-avatars span:first-child{ margin-left: 0; }
+.fs-overlap-pop .info b{ display: block; font-size: .86rem; font-weight: 700; }
+.fs-overlap-pop .info span.sub{ font-size: .74rem; color: var(--text-secondary); }
+.fs-exposure-pop{ display: flex; align-items: center; justify-content: space-between; border-color: rgba(248,113,113,.3); }
+.fs-exposure-pop .sub{ display: block; font-family: 'JetBrains Mono', monospace; font-size: .6rem; letter-spacing: .06em; color: var(--text-secondary); margin-bottom: 4px; }
+.fs-exposure-pop b{ font-family: 'JetBrains Mono', monospace; font-size: 1.3rem; color: var(--red); }
+
+.fs-sugg-row{
+  background: var(--surface-card-hover); border: 1px solid var(--border-light); border-radius: 12px;
+  padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+}
+.fs-sugg-row .label{ font-size: .82rem; font-weight: 700; }
+.fs-sugg-row .range{ font-family: 'JetBrains Mono', monospace; font-size: .7rem; color: var(--dive-blue); }
+.fs-sugg-bar-track{ height: 6px; border-radius: 4px; background: var(--border-light); margin-top: 10px; overflow: hidden; }
+.fs-sugg-bar-fill{ height: 100%; width: 8%; background: var(--fs-gold); border-radius: 4px; }
+
+.fs-sim-pop{ display: flex; flex-direction: column; }
+.fs-sim-pop .sim-head{ display: flex; align-items: center; justify-content: space-between; }
+.fs-sim-pop .sim-head b{ font-size: .86rem; }
+.fs-sim-pop .sim-head span{ color: var(--text-tertiary); font-size: 1rem; }
+.fs-sim-pop .sim-amount{ font-family: 'JetBrains Mono', monospace; font-size: 1.4rem; margin-top: 12px; }
+.fs-sim-stats{ display: flex; gap: 10px; margin-top: 14px; }
+.fs-sim-stat{ flex: 1; background: var(--surface-card); border-radius: 10px; padding: 9px 11px; }
+.fs-sim-stat span{ font-family: 'JetBrains Mono', monospace; font-size: .58rem; color: var(--text-secondary); letter-spacing: .06em; }
+.fs-sim-stat b{ display: block; font-family: 'JetBrains Mono', monospace; font-size: .95rem; margin-top: 3px; font-weight: 700; }
+.fs-sim-stat b em{ color: var(--green); font-style: normal; }
+
+.fs-plan-row{
+  display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border-light);
+  font-size: .78rem; color: var(--text-secondary);
+}
+.fs-plan-row:last-child{ border-bottom: none; }
+.fs-plan-dot{ width: 7px; height: 7px; border-radius: 50%; background: var(--dive-blue); flex: none; }
+.fs-plan-row b{ color: var(--text-primary); font-weight: 700; }
+
+.fs-year-pop{ display: flex; flex-direction: column; }
+.fs-year-pop .year-head{ display: flex; align-items: baseline; justify-content: space-between; }
+.fs-year-pop .year-head b{ font-size: .86rem; }
+.fs-year-pop .year-head span{ font-family: 'JetBrains Mono', monospace; font-size: .66rem; color: var(--text-secondary); }
+.fs-year-rows{ margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.fs-year-row{ display: flex; align-items: center; justify-content: space-between; font-size: .78rem; color: var(--text-secondary); }
+.fs-year-row .yr-cat{ display: flex; align-items: center; gap: 7px; }
+.fs-year-row .yr-dot{ width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.fs-year-row b{ color: var(--text-primary); font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: .78rem; }
+
+@media (max-width: 880px){
+  .fs-accordion{ flex-direction: column; min-height: 0; }
+  .fs-acc-panel{ flex: none !important; }
+  .fs-acc-panel.shrunk .fs-acc-heading{ writing-mode: horizontal-tb; transform: none; }
+  .fs-acc-panel.shrunk .fs-acc-oneliner{ display: block; }
+  .fs-acc-panel .fs-acc-expanded-content{ display: flex; flex-direction: column; }
+  .fs-acc-panel .fs-acc-oneliner{ display: none; }
+  .fs-acc-text{ flex: none; }
+}
+
+/* =========================================================
+   SECTION 2 — Scroll-driven feature showcase
+========================================================== */
+.fs-scrolly{ position: relative; background: var(--app-bg); }
+.fs-scrolly-intro{ padding: 110px 0 0; }
+.fs-scrolly-head{ font-weight: 700; font-size: clamp(1.9rem, 2.6vw + 1rem, 2.7rem); max-width: 22ch; line-height: 1.15; letter-spacing: -.01em; }
+.fs-scrolly-sub{ margin-top: 1rem; color: var(--text-secondary); max-width: 52ch; font-size: 1rem; line-height: 1.6; }
+.fs-scrolly-track{ height: 420vh; position: relative; }
+.fs-stage{ position: sticky; top: 0; height: 100vh; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.fs-stage-inner{ width: min(1180px, 92vw); display: flex; align-items: center; gap: 70px; }
+
+.fs-content-pane{ flex: 1; min-width: 0; will-change: opacity; }
+.fs-feat-index{ font-family: 'JetBrains Mono', monospace; font-size: .82rem; color: var(--dive-blue); letter-spacing: .12em; display: block; margin-bottom: 18px; }
+.fs-content-title{ font-weight: 700; font-size: clamp(2.2rem, 2.8vw + 1.2rem, 3.2rem); }
+.fs-content-body{ margin-top: 22px; color: var(--text-secondary); font-size: 1.2rem; line-height: 1.75; max-width: 44ch; }
+
+.fs-image-pane{ flex: 1; display: flex; justify-content: center; perspective: 1800px; }
+.fs-flip-3d{ position: relative; width: min(380px, 90vw); height: 440px; transform-style: preserve-3d; will-change: transform; }
+.fs-flip-face{
+  position: absolute; inset: 0; backface-visibility: hidden; border-radius: 22px;
+  background: var(--surface-card); border: 1px solid var(--border-light); padding: 22px;
+  box-shadow: 0 40px 90px -30px rgba(0,0,0,.75);
+  display: flex; flex-direction: column;
+}
+.fs-flip-back{ transform: rotateY(180deg); }
+
+.fs-dots{ position: absolute; bottom: 34px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; }
+.fs-dot{ width: 7px; height: 7px; border-radius: 50%; background: var(--border); transition: background .3s ease, width .3s ease; }
+.fs-dot.active{ background: var(--dive-blue); width: 20px; border-radius: 4px; }
+
+.fs-ring-mock{ display: flex; align-items: center; gap: 16px; }
+.fs-ring-legend .tag{ font-family: 'JetBrains Mono', monospace; font-size: .62rem; color: var(--dive-blue); letter-spacing: .08em; }
+.fs-ring-legend .tier{ font-weight: 700; margin-top: 4px; font-size: 1.05rem; }
+.fs-metric-tags{ display: flex; flex-wrap: wrap; gap: 6px; margin-top: 20px; }
+.fs-metric-tag{ font-family: 'JetBrains Mono', monospace; font-size: .62rem; color: var(--text-secondary); background: var(--surface-card-hover); border: 1px solid var(--border-light); padding: .3rem .55rem; border-radius: 999px; }
+
+.fs-fit-title{ font-weight: 700; font-size: .92rem; }
+.fs-fit-sub{ color: var(--text-secondary); font-size: .72rem; }
+.fs-fit-slider-track{ height: 5px; border-radius: 4px; background: var(--border-light); margin-top: 18px; position: relative; }
+.fs-fit-slider-fill{ position: absolute; inset: 0; width: 32%; background: var(--fs-gold); border-radius: 4px; }
+.fs-fit-slider-handle{ position: absolute; left: 32%; top: 50%; width: 14px; height: 14px; border-radius: 50%; background: var(--dive-blue); transform: translate(-50%,-50%); box-shadow: 0 0 0 4px rgba(227,184,86,.18); }
+.fs-fit-rows{ margin-top: 20px; display: flex; flex-direction: column; gap: 10px; }
+.fs-fit-row{ display: flex; align-items: center; justify-content: space-between; font-size: .78rem; color: var(--text-secondary); }
+.fs-fit-row .delta{ font-family: 'JetBrains Mono', monospace; color: var(--green); font-weight: 700; }
+
+.fs-seg-control{ display: flex; background: var(--surface-card-hover); border-radius: 999px; padding: 4px; gap: 4px; }
+.fs-seg-opt{ flex: 1; text-align: center; font-size: .72rem; padding: .45rem 0; border-radius: 999px; color: var(--text-secondary); }
+.fs-seg-opt.active{ background: var(--fs-gold); color: #1a1408; font-weight: 700; }
+.fs-chip-grid{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.fs-chip{ font-size: .72rem; padding: .4rem .75rem; border-radius: 999px; border: 1px solid var(--border-light); color: var(--text-secondary); }
+.fs-chip.on{ border-color: rgba(227,184,86,.35); color: var(--dive-blue); background: rgba(227,184,86,.08); }
+
+.fs-fetch-grid{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.fs-fetch-card{ background: var(--surface-card-hover); border: 1px solid var(--border-light); border-radius: 14px; padding: 14px; }
+.fs-fetch-card.hi{ border-color: rgba(227,184,86,.35); background: rgba(227,184,86,.06); }
+.fs-fetch-ic{ width: 28px; height: 28px; border-radius: 9px; background: var(--surface-card); display: flex; align-items: center; justify-content: center; margin-bottom: 10px; flex: none; }
+.fs-fetch-card.hi .fs-fetch-ic{ background: var(--fs-gold); }
+.fs-fetch-card .t{ font-size: .78rem; font-weight: 700; }
+.fs-fetch-card .s{ font-size: .64rem; color: var(--text-secondary); margin-top: 2px; }
+/* The 5th ("Divve Planner") option spans both columns as its own full-width
+   row rather than sitting half-empty next to nothing — laid out as a
+   horizontal icon+text row instead of the stacked block the 2-up cards use,
+   so the extra width actually gets used. */
+.fs-fetch-card.span2{ grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; }
+.fs-fetch-card.span2 .fs-fetch-ic{ margin-bottom: 0; }
+
+@media (max-width: 900px){
+  .fs-scrolly-track{ height: auto; }
+  .fs-stage{ position: static; height: auto; padding: 60px 0; }
+  .fs-stage-inner{ flex-direction: column; gap: 36px; }
+  .fs-flip-3d{ height: 380px; }
+  .fs-dots{ position: static; transform: none; justify-content: center; margin-top: 24px; }
+}
+
+/* =========================================================
+   SECTION 3 — Divve Bot
+========================================================== */
+.fs-bot{ padding: 130px 0 150px; position: relative; overflow: hidden; }
+.fs-bot::before{
+  content: ""; position: absolute; top: -20%; right: -10%; width: 60%; height: 80%;
+  background: radial-gradient(circle, rgba(227,184,86,.10), transparent 65%);
+  pointer-events: none;
+}
+.fs-bot-grid{ position: relative; display: grid; grid-template-columns: 1fr .95fr; gap: 60px; align-items: center; }
+.fs-bot-title{ font-weight: 700; font-size: clamp(2rem, 2.8vw + 1rem, 3rem); line-height: 1.14; }
+.fs-bot-body{ margin-top: 18px; color: var(--text-secondary); font-size: 1.02rem; line-height: 1.65; max-width: 46ch; }
+.fs-bot-feature-list{ margin-top: 28px; display: flex; flex-direction: column; gap: 14px; }
+.fs-bot-feature{ display: flex; gap: 12px; align-items: flex-start; }
+.fs-bot-dot-ic{ width: 22px; height: 22px; border-radius: 7px; background: var(--fs-gold); flex: none; margin-top: 2px; }
+.fs-bot-feature strong{ font-size: .92rem; display: block; }
+.fs-bot-feature span{ font-size: .82rem; color: var(--text-secondary); }
+.fs-bot-cta{ margin-top: 32px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.fs-ext-note{ display: flex; align-items: center; gap: 8px; font-size: .8rem; color: var(--text-secondary); }
+.fs-ext-note svg{ opacity: .7; }
+
+.fs-bot-visual{ position: relative; display: flex; justify-content: center; }
+/* .fs-bot-visual is wider than the 320px order card it centers (it's the
+   whole flex-container column) — .fs-ext-pill needs to anchor to a box
+   that's exactly the card's own width instead, or its `right` offset lands
+   relative to whatever's widest here and the pill ends up floating well
+   past the card's actual edge rather than overlapping it. A plain
+   shrink-to-fit wrapper doesn't reliably give that: .fs-popup-mock has no
+   width of its own, so its un-wrapped message text's natural (max-content)
+   width — wider than 320px — was winning and stretching this wrapper out
+   with it. Pinning the width explicitly to match .fs-order-mock removes
+   that ambiguity. */
+.fs-bot-visual-inner{ position: relative; width: 320px; }
+
+.fs-order-mock{ width: 320px; background: var(--surface-card); border: 1px solid var(--border-light); border-radius: 20px; padding: 20px; box-shadow: 0 30px 70px -30px rgba(0,0,0,.7); }
+.fs-order-top{ display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.fs-order-app-name{ display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: .9rem; }
+.fs-order-app-ic{ width: 22px; height: 22px; border-radius: 6px; background: var(--surface-card-hover); }
+.fs-order-close{ color: var(--text-tertiary); font-size: 1.1rem; }
+.fs-order-body{ background: var(--surface-card-hover); border-radius: 14px; padding: 16px; }
+.fs-order-label{ font-family: 'JetBrains Mono', monospace; font-size: .6rem; color: var(--text-secondary); letter-spacing: .08em; }
+.fs-order-title{ font-weight: 700; margin-top: 6px; }
+.fs-order-sub{ color: var(--text-secondary); font-size: .8rem; margin-top: 4px; }
+.fs-order-confirm{ margin-top: 16px; width: 100%; padding: .75rem; border-radius: 10px; background: var(--surface-card); color: var(--text-secondary); text-align: center; font-size: .8rem; border: 1px solid var(--border-light); }
+
+/* Sits near the order card's × close icon (top-right of .fs-order-mock),
+   shifted mostly past its right edge so only ~30-40% of the pill's own
+   width actually overlaps the card — a corner badge that's clearly its
+   own element poking in, not something sitting mostly on top of the card. */
+.fs-ext-pill{
+  position: absolute; top: 12px; right: -124px; z-index: 3;
+  background: var(--surface-card-hover); border: 1px solid rgba(227,184,86,.35); border-radius: 999px;
+  padding: .35rem .7rem; font-family: 'JetBrains Mono', monospace; font-size: .6rem; color: var(--dive-blue);
+  box-shadow: 0 12px 30px -10px rgba(0,0,0,.6);
+}
+
+/* Deliberately wider than the 320px order card it sits under — extending
+   symmetrically past both edges (negative left/right margins matching the
+   extra width) reads as more prominent/eye-catching than a popup pinned to
+   exactly the card's own width. This is independent of
+   .fs-bot-visual-inner's fixed 320px (which .fs-ext-pill positions
+   against) since it's a plain width + margin on this element alone, not a
+   change to the shared reference box. */
+.fs-popup-mock{
+  position: relative; width: 380px; margin: -26px -30px 0; z-index: 2; background: var(--surface-card-hover);
+  border: 1px solid rgba(227,184,86,.35); border-radius: 16px; padding: 16px;
+  box-shadow: 0 30px 60px -20px rgba(0,0,0,.7);
+  animation: fs-float 4.5s ease-in-out infinite;
+}
+@keyframes fs-float{ 0%,100%{ transform: translateY(0); } 50%{ transform: translateY(-8px); } }
+.fs-popup-head{ display: flex; align-items: center; justify-content: space-between; }
+.fs-popup-brand{ display: flex; align-items: center; gap: 8px; }
+.fs-pulse{ width: 8px; height: 8px; border-radius: 50%; background: var(--red); position: relative; }
+.fs-pulse::after{
+  content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 1px solid var(--red);
+  animation: fs-pulse-ring 1.8s ease-out infinite;
+}
+@keyframes fs-pulse-ring{ 0%{ transform: scale(.6); opacity: 1; } 100%{ transform: scale(1.8); opacity: 0; } }
+.fs-popup-brand b{ font-size: .8rem; }
+.fs-popup-badge{ font-family: 'JetBrains Mono', monospace; font-size: .58rem; color: var(--red); border: 1px solid rgba(248,113,113,.4); padding: .2rem .5rem; border-radius: 999px; }
+.fs-popup-msg{ margin-top: 10px; font-size: .84rem; font-weight: 700; line-height: 1.4; }
+.fs-popup-sub{ margin-top: 6px; font-size: .76rem; color: var(--text-secondary); line-height: 1.5; }
+.fs-popup-actions{ margin-top: 14px; display: flex; gap: 8px; }
+.fs-popup-actions button{ flex: 1; font-family: inherit; font-size: .76rem; padding: .55rem 0; border-radius: 8px; border: 1px solid var(--border-light); background: transparent; color: var(--text-secondary); cursor: default; }
+.fs-popup-actions button.fs-popup-primary{ background: var(--fs-gold); border: none; color: #1a1408; font-weight: 700; }
+
+@media (max-width: 880px){
+  .fs-bot-grid{ grid-template-columns: 1fr; }
+  .fs-bot-visual{ margin-top: 20px; }
+}

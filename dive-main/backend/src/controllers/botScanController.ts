@@ -19,7 +19,7 @@ export async function analyzeFrames(req: AuthedRequest, res: Response) {
     throw new ApiError(
       503,
       "AI_NOT_CONFIGURED",
-      "AI-based scan analysis isn't configured on this server yet. Ask your administrator to set a real ANTHROPIC_API_KEY (see /docs/GETTING_API_KEYS.md)."
+      "AI-based scan analysis isn't configured on this server yet. Ask your administrator to set a real OPENAI_API_KEY (primary) and/or ANTHROPIC_API_KEY (fallback) — see /docs/GETTING_API_KEYS.md."
     );
   }
 

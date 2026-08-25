@@ -10,10 +10,7 @@ jest.mock("../context/DiveContext", () => ({ useDive: jest.fn() }));
 
 // P3 #28 — Home/Suggestions/X-Ray used to `return null` for a loading or
 // genuinely-empty portfolio, indistinguishable from a crash. Every one of
-// these states (including a logged-out demo-mode visitor, whose
-// holdings/holdingsLoading/holdingsError all sit at their DiveContext
-// defaults — same as the "genuinely empty" row below) must render something
-// visible instead of a blank screen.
+// these states must render something visible instead of a blank screen.
 describe.each([
   ["Home", Home, "home"],
   ["Suggestions", Suggestions, "suggestions"],
@@ -47,9 +44,7 @@ describe.each([
     expect(screen.getByTestId(`${prefix}-load-error-retry-btn`)).toBeInTheDocument();
   });
 
-  it("shows a friendly empty state, not a blank screen, on a genuinely empty portfolio (including a logged-out demo visitor)", () => {
-    // Same shape DiveContext starts with for a visitor who never logged in —
-    // this is exactly the "scrolling the demo phone-frame" case reported.
+  it("shows a friendly empty state, not a blank screen, on a genuinely empty portfolio", () => {
     useDive.mockReturnValue({ ...baseContext, holdings: [], holdingsLoading: false, holdingsError: false, user: null });
     const { container } = render(<Screen />);
     expect(screen.getByTestId(`${prefix}-empty-state`)).toBeInTheDocument();

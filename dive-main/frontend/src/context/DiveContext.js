@@ -19,19 +19,30 @@ const DEFAULT_PLANNER_STATE = {
 
 export function DiveProvider({ children }) {
   const [screen, setScreenState] = useState("splash"); // onboarding + app screens
-  // Tracks the single screen navigated FROM, so a generic "back" can return to
-  // wherever the user actually arrived from. Several screens (Ask DIVE, My
-  // Holdings) are reachable from more than one place — a back button that
-  // hardcodes one fixed destination would silently strand a user who came in
-  // from somewhere else.
-  const previousScreenRef = useRef("home");
+  // A real navigation STACK, not just a single "previous screen" slot — the
+  // single-slot version broke as soon as a back-navigation itself became the
+  // "previous" for the next one. Concretely: Home -> chooseMethod (previous
+  // <- home) -> manualEntry (previous <- chooseMethod) -> back (goBack sets
+  // screen to chooseMethod, but ALSO overwrites previous <- manualEntry,
+  // since it's implemented as just another setScreen call) -> "Skip for now"
+  // on chooseMethod now goes BACK to manualEntry instead of home, a 2-cycle
+  // loop that never actually returns where the user started. A stack fixes
+  // this the same way browser history does: every real navigation PUSHES
+  // the screen being left, and goBack POPs — never pushes — so unwinding
+  // repeatedly retraces the actual path taken, however deep, instead of
+  // bouncing between the last two screens. Several screens (Ask DIVE, My
+  // Holdings) are reachable from more than one place, which is exactly why
+  // this needs to be a stack and not a fixed hardcoded destination either.
+  const screenHistoryRef = useRef([]);
   const setScreen = useCallback((next) => {
     setScreenState((current) => {
-      if (next !== current) previousScreenRef.current = current;
+      if (next !== current) screenHistoryRef.current.push(current);
       return next;
     });
   }, []);
-  const goBack = useCallback(() => setScreen(previousScreenRef.current), [setScreen]);
+  const goBack = useCallback(() => {
+    setScreenState(() => screenHistoryRef.current.pop() ?? "home");
+  }, []);
   const [authLoading, setAuthLoading] = useState(true);
   const [user, setUser] = useState(null);
 

@@ -35,7 +35,28 @@ export async function fetchCoinGeckoWithRetry<T>(request: () => Promise<T>): Pro
  * refresh job must never crash the app.
  */
 
-// AMFI publishes the full mutual fund scheme master as a public, keyless text file.
+// AMFI publishes the full mutual fund scheme master as a public, keyless text
+// file. Each line is `Scheme Code;ISIN Div Payout/ISIN Growth;ISIN Div
+// Reinvestment;Scheme Name;Plan;Option;NAV;Date` — Plan (Direct/Regular) and
+// Option (Growth/IDCW) are their OWN columns, not part of Scheme Name. A
+// single underlying fund publishes one row per Plan×Option combination (up
+// to 4: Direct/Regular × Growth/IDCW), all sharing the identical Scheme Name
+// string — e.g. AMFI's live feed for "SBI Automotive Opportunities Fund"
+// really does list all 4 with that exact same name, distinguished only by
+// Plan/Option. Previously only scheme code (index 0) and scheme name (index
+// 3) were kept — Plan/Option were silently discarded, so all 4 variants
+// landed in the Instrument collection with byte-identical names and only an
+// opaque numeric scheme code (symbol) to tell them apart, exactly the "4 SBI
+// Automotive fund, same name" report. Folding Plan/Option into the stored
+// name (matching how AMFI-derived names are conventionally written
+// elsewhere, e.g. "... - Direct Plan - Growth") fixes that directly, and
+// also keeps lookthroughService.ts's normalizeFundKey() working as its own
+// comment already assumed ("HDFC Flexi Cap Fund - Direct Plan - Growth, etc.
+// all normalize to the same key") — that assumption silently didn't hold
+// while Plan/Option were being dropped. Also stashed in metadata.plan/
+// metadata.option as structured fields, not just baked into the name string,
+// so the search UI can show them as a distinguishable label/badge rather
+// than parsing them back out of free text.
 export async function fetchAmfiMutualFunds(): Promise<SeedInstrument[]> {
   const { data } = await axios.get<string>("https://www.amfiindia.com/spages/NAVAll.txt", {
     timeout: 10000,
@@ -46,12 +67,16 @@ export async function fetchAmfiMutualFunds(): Promise<SeedInstrument[]> {
   for (const line of lines) {
     const parts = line.split(";");
     if (parts.length < 6) continue;
-    const [schemeCode, , , schemeName] = parts;
+    const [schemeCode, , , schemeName, plan, option] = parts;
     if (!schemeCode || !schemeName || !/^\d+$/.test(schemeCode.trim())) continue;
+    const planTrimmed = plan?.trim();
+    const optionTrimmed = option?.trim();
+    const suffix = [planTrimmed, optionTrimmed].filter((s) => s && s !== "-").join(" - ");
     out.push({
       assetClass: "MUTUAL_FUND",
       symbol: schemeCode.trim(),
-      name: schemeName.trim(),
+      name: suffix ? `${schemeName.trim()} - ${suffix}` : schemeName.trim(),
+      metadata: { ...(planTrimmed && planTrimmed !== "-" ? { plan: planTrimmed } : {}), ...(optionTrimmed && optionTrimmed !== "-" ? { option: optionTrimmed } : {}) },
     });
     // AMFI lists Debt schemes first, Equity schemes only after — a lower cap
     // here was silently excluding every equity fund (including all

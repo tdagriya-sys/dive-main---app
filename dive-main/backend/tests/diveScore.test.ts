@@ -90,6 +90,25 @@ describe("Dive Score v2 breakdown", () => {
     expect(res.body.realDiversificationPct).toBeLessThan(res.body.apparentDiversificationPct);
   });
 
+  // User bug report: added "Reliance Industries" (EQUITY) and its corporate
+  // bond and saw no overlap detected anywhere. Root cause: normalizeIssuer()'s
+  // suffix-stripping regex had "corp"/"corporation" but not "corporate" as a
+  // whole word — `\bcorp\b` doesn't match inside "corporate" — so this
+  // instrument's own seeded name (backend/src/seed/staticInstruments.ts's
+  // REL_BOND: "Reliance Industries Corporate Bonds") normalized to
+  // "reliancecorporate" instead of "reliance", silently missing the exact
+  // real-world case the "same issuer, different class" tier exists for.
+  it("detects the same issuer even when the bond's real name includes the word 'Corporate' (user bug report)", async () => {
+    const token = await signupAndLogin("9700000020", "score-corporate-bond-overlap@example.com");
+    await addHolding(token, { assetClass: "EQUITY", name: "Reliance Industries", investedValue: 100000, currentValue: 100000 });
+    await addHolding(token, { assetClass: "BOND", name: "Reliance Industries Corporate Bonds", investedValue: 100000, currentValue: 100000 });
+
+    const res = await request(app).get("/api/score/breakdown").set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.realDiversificationPct).toBeLessThan(res.body.apparentDiversificationPct);
+    expect(res.body.connections.some((c: { reason: string }) => /same issuer/i.test(c.reason))).toBe(true);
+  });
+
   it("scores a diversified multi-asset-class portfolio with a valid composite and correlation matrix", async () => {
     const token = await signupAndLogin("9700000003", "score-diversified@example.com");
     await addHolding(token, { assetClass: "EQUITY", name: "Reliance Industries", investedValue: 50000, currentValue: 52000 });

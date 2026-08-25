@@ -20,9 +20,7 @@ export default function Home() {
   }, [holdings.length]);
 
   // A blank `return null` looks identical to a crash — every one of these
-  // needs its own visible state, including a logged-out visitor exploring
-  // the demo phone-frame (holdings/holdingsLoading/holdingsError all sit at
-  // their defaults there, landing on the same genuinely-empty case below).
+  // needs its own visible state, not just the happy path.
   if (holdingsLoading) return <HoldingsLoadingState testId="home-loading-state" />;
   // A failed load must not look like a genuinely empty portfolio — those are
   // different states with different fixes (retry vs. go add a holding).
@@ -74,8 +72,8 @@ export default function Home() {
   ].filter(Boolean);
 
   return (
-    <div className="min-h-full dive-app-surface pb-24" data-testid="home-screen">
-      <div className="px-6 pt-8 flex items-center justify-between">
+    <div className="min-h-full dive-app-surface pb-24 lg:pb-10" data-testid="home-screen">
+      <div className="px-6 pt-8 flex items-center justify-between lg:px-8">
         <div>
           <p className="text-sm text-[var(--text-secondary)]">Welcome back</p>
           <h1 className="font-heading font-black text-2xl">Hi {user?.name?.split(" ")[0] || "there"} 👋</h1>
@@ -88,7 +86,7 @@ export default function Home() {
       </div>
 
       {simulating && (
-        <div className="px-6 mt-4">
+        <div className="px-6 mt-4 lg:px-8">
           <div className="flex items-center justify-between bg-[var(--dive-blue-light)] rounded-xl px-4 py-2.5" data-testid="home-sim-banner">
             <span className="text-xs font-bold text-[var(--dive-blue-dark)]">Estimated with your simulated changes</span>
             <button data-testid="home-reset-sims" onClick={resetSims} className="text-xs font-bold text-[var(--dive-blue-dark)] underline">Reset</button>
@@ -96,63 +94,76 @@ export default function Home() {
         </div>
       )}
 
-      <div className="px-6 mt-6">
-        <motion.button data-testid="home-score-ring-btn" onClick={() => setScreen("scoreBreakdown")}
-          initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
-          className="w-full text-left bg-[var(--surface-card)] rounded-3xl p-6 shadow-sm border border-[var(--border)] flex flex-col items-center hover:shadow-md transition-shadow">
-          <ScoreRing score={score} size={160} />
-          <p className="text-xs font-bold text-[var(--dive-blue)] mt-3">See the full breakdown →</p>
-          <div className="grid grid-cols-2 gap-3 w-full mt-6">
-            <div className="rounded-2xl bg-[var(--red)]/10 border border-[var(--red)]/20 p-4 text-center">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--red)]">Apparent div.</p>
-              <AnimatedNumber value={app} format={(v) => `${Math.round(v)}%`} className="font-heading font-black text-2xl text-[var(--red)]" />
-            </div>
-            <div className="rounded-2xl bg-[var(--green)]/10 border border-[var(--green)]/20 p-4 text-center">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--green)]">Real div.</p>
-              <AnimatedNumber value={real} format={(v) => `${Math.round(v)}%`} className="font-heading font-black text-2xl text-[var(--green)]" />
-            </div>
-          </div>
-          <div className="flex justify-between w-full mt-4 text-sm">
-            <span className="text-[var(--text-secondary)]">Total invested</span>
-            <span className="font-bold">{fmtINR(total)}</span>
-          </div>
-          <div className="flex justify-between w-full mt-1 text-sm">
-            <span className="text-[var(--text-secondary)]">Segments</span>
-            <span className="font-bold">{segs.length}</span>
-          </div>
-        </motion.button>
-      </div>
-
-      <div className="px-6 mt-8">
-        <h2 className="font-heading font-bold text-lg mb-3">Insights</h2>
-        <div className="space-y-3">
-          {insights.map((ins, i) => (
-            <motion.button key={i} data-testid={`insight-card-${i}`} onClick={() => setScreen("xray")}
-              initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 + i * 0.08 }}
-              className="w-full flex items-center gap-3 text-left bg-[var(--surface-card)] rounded-2xl p-4 border border-[var(--border)] hover:shadow-md transition-all">
-              <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${ins.type === "danger" ? "bg-[#FEE2E2]" : "bg-[#D1FAE5]"}`}>
-                <ins.icon size={18} className={ins.type === "danger" ? "text-[var(--red)]" : "text-[var(--green)]"} />
+      {/* Below md, this stays exactly the original single stacked column —
+          the lg:grid only activates once the sidebar (DiveShell.jsx) has
+          already freed up real width to use. Score card on the left,
+          Insights + the 3 action buttons on the right, instead of every
+          section fighting for the same narrow mobile-width column.
+          Deliberately no lg:max-w/mx-auto here — a first pass capped this at
+          lg:max-w-5xl centered, which just moved the "dead space on both
+          sides" problem from the page level down to the screen level. This
+          fills whatever width the sidebar layout actually gives it. */}
+      <div className="lg:grid lg:grid-cols-5 lg:gap-6 lg:items-start lg:px-8 lg:mt-8">
+        <div className="px-6 mt-6 lg:px-0 lg:mt-0 lg:col-span-2">
+          <motion.button data-testid="home-score-ring-btn" onClick={() => setScreen("scoreBreakdown")}
+            initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+            className="w-full text-left bg-[var(--surface-card)] rounded-3xl p-6 shadow-sm border border-[var(--border)] flex flex-col items-center hover:shadow-md transition-shadow">
+            <ScoreRing score={score} size={160} />
+            <p className="text-xs font-bold text-[var(--dive-blue)] mt-3">See the full breakdown →</p>
+            <div className="grid grid-cols-2 gap-3 w-full mt-6">
+              <div className="rounded-2xl bg-[var(--red)]/10 border border-[var(--red)]/20 p-4 text-center">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--red)]">Apparent div.</p>
+                <AnimatedNumber value={app} format={(v) => `${Math.round(v)}%`} className="font-heading font-black text-2xl text-[var(--red)]" />
               </div>
-              <span className="text-sm font-semibold flex-1 break-words">{ins.text}</span>
-              <ChevronRight size={18} className="text-[var(--text-tertiary)]" />
-            </motion.button>
-          ))}
+              <div className="rounded-2xl bg-[var(--green)]/10 border border-[var(--green)]/20 p-4 text-center">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--green)]">Real div.</p>
+                <AnimatedNumber value={real} format={(v) => `${Math.round(v)}%`} className="font-heading font-black text-2xl text-[var(--green)]" />
+              </div>
+            </div>
+            <div className="flex justify-between w-full mt-4 text-sm">
+              <span className="text-[var(--text-secondary)]">Total invested</span>
+              <span className="font-bold">{fmtINR(total)}</span>
+            </div>
+            <div className="flex justify-between w-full mt-1 text-sm">
+              <span className="text-[var(--text-secondary)]">Segments</span>
+              <span className="font-bold">{segs.length}</span>
+            </div>
+          </motion.button>
         </div>
-      </div>
 
-      <div className="px-6 mt-6">
-        <button data-testid="home-see-xray-btn" onClick={() => setScreen("xray")}
-          className="w-full gold-btn rounded-full py-4 font-bold flex items-center justify-center gap-2 shadow-lg shadow-[var(--dive-blue)]/25 hover:bg-[var(--dive-blue-hover)] transition-colors">
-          See the Full X-Ray <ChevronRight size={18} />
-        </button>
-        <button data-testid="home-manage-holdings-btn" onClick={() => setScreen("myHoldings")}
-          className="w-full mt-3 bg-[var(--surface-card)] border border-[var(--border)] rounded-full py-3.5 font-bold hover:bg-[var(--surface-card-hover)] transition-colors">
-          Manage holdings
-        </button>
-        <button data-testid="home-add-more-btn" onClick={() => setScreen("chooseMethod")}
-          className="w-full mt-3 bg-[var(--surface-card)] border border-[var(--border)] rounded-full py-3.5 font-bold hover:bg-[var(--surface-card-hover)] transition-colors">
-          Add more investments
-        </button>
+        <div className="lg:col-span-3">
+          <div className="px-6 mt-8 lg:px-0 lg:mt-0">
+            <h2 className="font-heading font-bold text-lg mb-3">Insights</h2>
+            <div className="space-y-3">
+              {insights.map((ins, i) => (
+                <motion.button key={i} data-testid={`insight-card-${i}`} onClick={() => setScreen("xray")}
+                  initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 + i * 0.08 }}
+                  className="w-full flex items-center gap-3 text-left bg-[var(--surface-card)] rounded-2xl p-4 border border-[var(--border)] hover:shadow-md transition-all">
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${ins.type === "danger" ? "bg-[#FEE2E2]" : "bg-[#D1FAE5]"}`}>
+                    <ins.icon size={18} className={ins.type === "danger" ? "text-[var(--red)]" : "text-[var(--green)]"} />
+                  </div>
+                  <span className="text-sm font-semibold flex-1 break-words">{ins.text}</span>
+                  <ChevronRight size={18} className="text-[var(--text-tertiary)]" />
+                </motion.button>
+              ))}
+            </div>
+          </div>
+
+          <div className="px-6 mt-6 lg:px-0">
+            <button data-testid="home-see-xray-btn" onClick={() => setScreen("xray")}
+              className="w-full gold-btn rounded-full py-4 font-bold flex items-center justify-center gap-2 shadow-lg shadow-[var(--dive-blue)]/25 hover:bg-[var(--dive-blue-hover)] transition-colors">
+              See the Full X-Ray <ChevronRight size={18} />
+            </button>
+            <button data-testid="home-manage-holdings-btn" onClick={() => setScreen("myHoldings")}
+              className="w-full mt-3 bg-[var(--surface-card)] border border-[var(--border)] rounded-full py-3.5 font-bold hover:bg-[var(--surface-card-hover)] transition-colors">
+              Manage holdings
+            </button>
+            <button data-testid="home-add-more-btn" onClick={() => setScreen("chooseMethod")}
+              className="w-full mt-3 bg-[var(--surface-card)] border border-[var(--border)] rounded-full py-3.5 font-bold hover:bg-[var(--surface-card-hover)] transition-colors">
+              Add more investments
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

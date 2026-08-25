@@ -55,7 +55,7 @@ describe("uploads", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns a clear AI_NOT_CONFIGURED error for image uploads when no real ANTHROPIC_API_KEY is set", async () => {
+  it("returns a clear AI_NOT_CONFIGURED error for image uploads when no real OPENAI_API_KEY/ANTHROPIC_API_KEY is set", async () => {
     const token = await signupAndLogin("9444444444", "img@example.com");
     // A 1x1 PNG — content doesn't matter, since without a real key the request
     // should be rejected before any AI call is attempted.

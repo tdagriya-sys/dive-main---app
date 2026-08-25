@@ -35,7 +35,7 @@ function TextField({ label, testId, ...props }) {
 }
 
 export default function ManualEntry() {
-  const { setScreen, goBack, loadHoldings, updateHolding, holdings, editingHolding, setEditingHolding, user } = useDive();
+  const { setScreen, goBack, loadHoldings, updateHolding, holdings, editingHolding, setEditingHolding } = useDive();
   const isEditing = !!editingHolding;
   const isEditingFd = isEditing && editingHolding.assetClass === "FD";
 
@@ -80,14 +80,6 @@ export default function ManualEntry() {
   const submit = async (e) => {
     e.preventDefault();
     setError("");
-    // Backstop for ChooseFetchMethod's own gate (which normally keeps a
-    // logged-out visitor from ever reaching this screen) — /holdings/manual
-    // requires auth, so without this a filled-out form would always fail to
-    // save with no warning until this exact moment.
-    if (!user) {
-      setError("Sign up first to save real investments — this preview can't save anything yet.");
-      return;
-    }
     setSaving(true);
     try {
       if (assetClass === "FD") {

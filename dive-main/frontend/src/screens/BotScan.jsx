@@ -16,7 +16,7 @@ function emptyFd() {
 const ASSET_CLASSES = ["EQUITY", "MUTUAL_FUND", "ETF", "BOND", "REIT", "INVIT", "GOLD", "SILVER", "ULIP_INSURANCE", "FD", "CRYPTO"];
 
 export default function BotScan() {
-  const { setScreen, goBack, loadHoldings, holdings, user } = useDive();
+  const { setScreen, goBack, loadHoldings, holdings } = useDive();
   const [phase, setPhase] = useState("idle"); // idle | sharing | analyzing | review
   const [error, setError] = useState("");
   const [framesCaptured, setFramesCaptured] = useState(0);
@@ -31,9 +31,10 @@ export default function BotScan() {
   const intervalRef = useRef(null);
   const framesRef = useRef([]); // captured Blobs for this scan session, decimated to MAX_FRAMES
   const [foundList, setFoundList] = useState([]);
-  // A hung Claude response otherwise has no escape short of waiting out the
-  // full ~60-150s timeout chain (Anthropic SDK timeout x maxRetries, Nginx's
-  // proxy_read_timeout, this request's own axios timeout — see
+  // A hung AI response otherwise has no escape short of waiting out the full
+  // timeout chain (OpenAI/Anthropic SDK timeout x maxRetries — up to TWICE
+  // that if the OpenAI primary call fails and falls back to Claude — plus
+  // Nginx's proxy_read_timeout and this request's own axios timeout, see
   // aiExtractionService.ts) — this lets the user bail out immediately instead.
   const analyzeAbortRef = useRef(null);
   // Backgrounded tabs get their timers throttled by the browser, so if the
@@ -109,15 +110,6 @@ export default function BotScan() {
 
   const startScan = async () => {
     setError("");
-    // Backstop for ChooseFetchMethod's own gate (which normally keeps a
-    // logged-out visitor from ever reaching this screen) — without it, a
-    // scan would fire a REAL OS screen-share prompt only to fail at analyze
-    // time (that endpoint requires auth), asking for something invasive that
-    // was always going to be thrown away.
-    if (!user) {
-      setError("Sign up first to scan and save real investments — this preview can't save anything yet.");
-      return;
-    }
     // Most phone browsers don't implement getDisplayMedia at all — calling it
     // there either throws synchronously (no such function) or rejects
     // instantly without ever showing a system prompt. The old catch-all below

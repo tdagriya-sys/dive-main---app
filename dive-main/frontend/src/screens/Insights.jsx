@@ -73,7 +73,7 @@ export default function Insights() {
               initial={{ width: 0 }} animate={{ width: `${percentile}%` }} transition={{ duration: 0.9, ease: "easeOut" }} />
           </div>
           <button data-testid="leaderboard-share-btn" onClick={() => setShare(true)}
-            className="mt-4 w-full gold-btn rounded-full py-2.5 font-bold text-sm flex items-center justify-center gap-2">
+            className="mt-4 w-full md:max-w-xs md:ml-auto gold-btn rounded-full py-2.5 font-bold text-sm flex items-center justify-center gap-2">
             <Share2 size={16} /> Share your rank
           </button>
         </div>

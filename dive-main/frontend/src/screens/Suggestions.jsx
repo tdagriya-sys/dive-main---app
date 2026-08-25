@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Search, TrendingUp, TrendingDown, Minus, FlaskConical, X, ArrowRight, ChevronRight } from "lucide-react";
 import { useDive } from "../context/DiveContext";
 import { ScoreRing, RangeBar, AnimatedNumber } from "../components/dive/Widgets";
-import { buildSuggestions, personalizeSuggestions, diveScore, topExposure, missingCategories, apparentDiversification, realDiversification, totalInvested, fmtINR, effectiveHoldings } from "../lib/diveEngine";
+import { buildSuggestions, rescaleIdealRanges, personalizeSuggestions, diveScore, topExposure, missingCategories, apparentDiversification, realDiversification, totalInvested, fmtINR, effectiveHoldings } from "../lib/diveEngine";
 import { contextSummaryMessage, isCategoryExpected, deferredIncreaseNote, deferredReduceNote, expectedCoreCategories } from "../lib/contextMessaging";
 import { HoldingsLoadingState, HoldingsLoadErrorState, HoldingsEmptyState } from "../components/dive/HoldingsGateStates";
 
@@ -13,8 +13,7 @@ export default function Suggestions() {
   const [stress, setStress] = useState(false);
 
   // Same reasoning as Home.jsx: a bare `return null` here is indistinguishable
-  // from a crash, including for a logged-out visitor exploring the demo
-  // phone-frame (falls through to the genuinely-empty case below).
+  // from a crash.
   if (holdingsLoading) return <HoldingsLoadingState testId="suggestions-loading-state" />;
   if (!holdings.length && holdingsError) {
     return <HoldingsLoadErrorState onRetry={loadHoldings} testId="suggestions-load-error-state" retryTestId="suggestions-load-error-retry-btn" />;
@@ -22,7 +21,9 @@ export default function Suggestions() {
   if (!holdings.length) {
     return (
       <HoldingsEmptyState setScreen={setScreen} testId="suggestions-empty-state" ctaTestId="suggestions-empty-add-btn"
-        title="No suggestions yet" body="Add your first holding and DIVVE will tell you exactly what to add next." ctaLabel="Add investments" />
+        title="No suggestions yet" body="Add your first holding and DIVVE will tell you exactly what to add next." ctaLabel="Add investments"
+        secondaryLabel="Ask DIVVE about a stock or fund" secondaryTestId="suggestions-empty-ask-btn"
+        onSecondary={() => { setAskInstrument(null); setScreen("ask"); }} />
     );
   }
   const h = effectiveHoldings(holdings, sims);
@@ -38,6 +39,19 @@ export default function Suggestions() {
   // summary instead of a generic "diversify more" push.
   const context = scoreBreakdown?.context;
   const contextMessage = contextSummaryMessage(context);
+  const expectedCategories = expectedCoreCategories(context);
+  // IDEAL_RANGES's per-category bands were authored assuming a portfolio
+  // eventually spread across most/all 9 CORE_CATEGORIES (their hi% values
+  // sum to ~150%, not 100%) — fine for a user expected to hold most of them,
+  // but wrong for an early-stage user Layer D restricts to a small subset
+  // (e.g. 3, for a "Growing" corpus): maxing out every category they're
+  // actually told to hold could fall well short of their real total. This
+  // rescales just the expected categories' bands (on their MIDPOINT, not
+  // their ceiling — see rescaleIdealRanges()'s own comment in diveEngine.js
+  // for why) so a fully-invested user lands near each category's own middle
+  // instead of pinned above every ceiling, while their ceilings still
+  // comfortably cover the whole portfolio between them.
+  const scaledRanges = rescaleIdealRanges(ranges, prefs.risk, expectedCategories);
   // A category flagged "increase" by the generic risk-profile ranges may
   // still not make sense YET for this user's corpus/age — defer it with
   // reassuring copy instead of pushing an unrealistic nudge. A "reduce" nudge
@@ -47,10 +61,10 @@ export default function Suggestions() {
   // since the generic ideal range assumes a multi-class allocation that isn't
   // realistic yet. Once more than one class is expected, "reduce" stays a
   // live signal — rebalancing among classes already expected is fine.
-  const withDeferred = buildSuggestions(h, ranges, prefs.risk)
+  const withDeferred = buildSuggestions(h, scaledRanges, prefs.risk)
     .filter((s) => !prefs.excluded.includes(s.cat))
     .map((s) => {
-      const soleExpectedCategory = expectedCoreCategories(context).size <= 1 && isCategoryExpected(s.cat, context);
+      const soleExpectedCategory = expectedCategories.size <= 1 && isCategoryExpected(s.cat, context);
       const deferred = (s.action === "increase" && !isCategoryExpected(s.cat, context)) || (s.action === "reduce" && soleExpectedCategory);
       return { ...s, deferred };
     });
@@ -156,11 +170,11 @@ export default function Suggestions() {
                 </p>
               ) : (
                 <>
-                  <div className="flex items-center justify-between text-sm mb-2">
-                    <span className="text-[var(--text-secondary)]">Now: <b className="text-[var(--text-primary)]">{fmtINR(s.current)}</b> ({s.currentPct.toFixed(0)}%)</span>
-                    <span className="text-[var(--text-secondary)]">Ideal: <b className="text-[var(--dive-blue)]">{fmtINR(s.loAmt)}–{fmtINR(s.hiAmt)}</b></span>
-                  </div>
                   <RangeBar currentPct={s.currentPct} loPct={s.loPct} hiPct={s.hiPct} />
+                  <div className="flex items-center justify-between text-sm mt-3">
+                    <span className="text-[var(--text-secondary)]">Now: <b className="text-[var(--text-primary)]">{fmtINR(s.current)}</b> ({s.currentPct.toFixed(0)}%)</span>
+                    <span className="text-[var(--text-secondary)]">Ideal: <b className="text-[var(--dive-blue)]">{fmtINR(s.loAmt)}–{fmtINR(s.hiAmt)}</b> ({Math.round(s.loPct)}–{Math.round(s.hiPct)}%)</span>
+                  </div>
                   {effectiveAction === "reduce" && (
                     <p data-testid={`sugg-overexposed-note-${s.cat}`} className="text-xs text-[var(--text-secondary)] leading-relaxed mt-3">
                       {overExposedNote(s.cat)}
@@ -173,13 +187,15 @@ export default function Suggestions() {
                   deprioritized by the diversification-priority setting — the
                   user should never be blocked from previewing "what if I add
                   more here anyway" or asking about a specific fund. */}
-              <div className="mt-4">
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                <button data-testid={`ask-link-${s.cat}`} onClick={() => { setAskInstrument(null); setScreen("ask"); }}
+                  className="flex items-center gap-1.5 text-xs font-bold text-[var(--dive-blue)]">
+                  <Search size={13} /> Ask about a specific fund
+                </button>
                 <button data-testid={`simulate-btn-${s.cat}`} onClick={() => setSim({ cat: s.cat, amount: s.gap || 10000, action: "increase", categoryAction: s.action })}
-                  className="w-full gold-btn rounded-full py-3 font-bold text-sm whitespace-normal break-words">
+                  className="shrink-0 gold-btn rounded-full px-5 py-2.5 font-bold text-sm whitespace-nowrap">
                   Simulate adding more
                 </button>
-                <button data-testid={`ask-link-${s.cat}`} onClick={() => { setAskInstrument(null); setScreen("ask"); }}
-                  className="w-full text-center mt-2 text-xs font-bold text-[var(--dive-blue)]">Ask about a specific fund →</button>
               </div>
             </motion.div>
           );
@@ -188,7 +204,7 @@ export default function Suggestions() {
 
       <div className="px-6 mt-6">
         <button data-testid="stress-test-btn" onClick={() => setStress(true)}
-          className="w-full bg-[var(--surface-card)] border border-[var(--border)] rounded-full py-3.5 font-bold flex items-center justify-center gap-2 hover:bg-[var(--surface-card-hover)] transition-colors">
+          className="w-full md:max-w-xs md:ml-auto bg-[var(--surface-card)] border border-[var(--border)] rounded-full py-3.5 font-bold flex items-center justify-center gap-2 hover:bg-[var(--surface-card-hover)] transition-colors">
           <FlaskConical size={18} className="text-[var(--dive-blue)]" /> Run Stress Test
         </button>
       </div>
@@ -238,10 +254,20 @@ function SimulateSheet({ sim, setSim, baseHoldings, onApply, canonicalScore, sco
   const scoreWasCapped = isCappedCategory && rawDelta > 0;
   const apply = () => { if (sim.action === "increase") onApply(sim.cat, amount); setSim(null); };
   return (
-    <>
-      <motion.div className="absolute inset-0 bg-black/40 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSim(null)} />
-      <motion.div className="absolute bottom-0 inset-x-0 z-50 bg-[var(--surface-card)] rounded-t-3xl p-6 max-h-[85%] overflow-y-auto no-scrollbar"
-        initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }} transition={{ type: "spring", stiffness: 300, damping: 30 }} data-testid="simulate-sheet">
+    // A single full-screen layer doubles as both the dimmed backdrop AND the
+    // centering container — its own onClick closes the modal, and the modal
+    // itself stops that click from bubbling back up, the standard
+    // click-outside-to-close pattern without needing two separate
+    // overlapping full-screen divs (one purely for the dim, one purely for
+    // centering) that would otherwise fight over which one owns the close-
+    // on-click behavior.
+    <motion.div className="absolute inset-0 z-40 bg-black/40 flex items-center justify-center p-4"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSim(null)}>
+      <motion.div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-md bg-[var(--surface-card)] rounded-3xl p-6 max-h-[85vh] overflow-y-auto no-scrollbar"
+        initial={{ opacity: 0, scale: 0.94, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 8 }}
+        transition={{ type: "spring", stiffness: 320, damping: 28 }} data-testid="simulate-sheet">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-heading font-black text-xl">Simulate: {sim.cat}</h2>
           <button data-testid="simulate-close-btn" onClick={() => setSim(null)}><X size={22} className="text-[var(--text-secondary)]" /></button>
@@ -284,7 +310,7 @@ function SimulateSheet({ sim, setSim, baseHoldings, onApply, canonicalScore, sco
           Apply to my portfolio (Demo)
         </button>
       </motion.div>
-    </>
+    </motion.div>
   );
 }
 

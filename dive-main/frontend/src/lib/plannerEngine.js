@@ -202,7 +202,7 @@ export function planLumpsum({ holdings, newAmount, prefs, risk, age }) {
       const existingAmount = existingByCategory[cat] || 0;
       return { cat, existingAmount, targetAmount: 0, newInvestment: 0, finalAmount: existingAmount, finalPct: targetTotal ? (existingAmount / targetTotal) * 100 : 0 };
     });
-    return { error: "ALL_EXCLUDED", targetTotal, rows };
+    return { error: "ALL_EXCLUDED", targetTotal, rows, active: [] };
   }
 
   const weights = computeActiveWeights(active, risk, prefs);
@@ -248,7 +248,12 @@ export function planLumpsum({ holdings, newAmount, prefs, risk, age }) {
     };
   });
 
-  return { targetTotal, rows };
+  // Exposes the resolved active-category list (not just the per-category
+  // rows) so the UI can tell "genuinely part of this plan" apart from
+  // "included in `rows` with a zero weight because CORE_CATEGORIES always
+  // gets a full row" — without it, the screen has no way to distinguish an
+  // eligible category from an ineligible one already in the array.
+  return { targetTotal, rows, active };
 }
 
 // ---------------------------------------------------------------------------

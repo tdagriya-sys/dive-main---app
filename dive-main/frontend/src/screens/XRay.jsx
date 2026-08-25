@@ -39,7 +39,14 @@ function buildSurfaceInsight({ segs, overlaps, missing }) {
 
   if (overlaps.length > 0) {
     const o = overlaps[0];
-    sentences.push(`${o.name} shows up in both your ${o.segments.join(" and ")} — they'll move together, not apart.`);
+    // Deliberately NOT "they'll move together" — that's only true when the
+    // same holding sits behind both segments (e.g. a stock held directly
+    // and via a fund). This overlap can just as easily be an equity + a
+    // bond of the same issuer, which do NOT move together (different
+    // drivers: earnings/sentiment vs. coupon/rates) — what they share is a
+    // single point of failure, not correlated day-to-day returns. Framed
+    // around concentration/fault-risk instead, which holds true either way.
+    sentences.push(`${o.name} shows up in both your ${o.segments.join(" and ")} — that's one company's fortunes riding on two of your holdings, not two separate bets.`);
   }
 
   if (!concentrated && overlaps.length === 0) {
@@ -116,8 +123,7 @@ export default function XRay() {
   }
 
   // Same reasoning as Home.jsx: a bare `return null` here is indistinguishable
-  // from a crash, including for a logged-out visitor exploring the demo
-  // phone-frame (falls through to the genuinely-empty case below).
+  // from a crash.
   if (holdingsLoading) return <HoldingsLoadingState testId="xray-loading-state" />;
   if (!holdings.length && holdingsError) {
     return <HoldingsLoadErrorState onRetry={loadHoldings} testId="xray-load-error-state" retryTestId="xray-load-error-retry-btn" />;
@@ -199,7 +205,7 @@ export default function XRay() {
             {deep ? deepInsight.message : surfaceInsight.message}
           </p>
           <button data-testid="xray-look-deeper-btn" onClick={() => setDeep(!deep)}
-            className={`w-full rounded-full py-3.5 font-bold flex items-center justify-center gap-2 transition-colors ${deep ? "bg-[var(--surface-card)] border border-[var(--border)]" : "gold-btn shadow-lg shadow-[var(--dive-blue)]/25 hover:bg-[var(--dive-blue-hover)]"}`}>
+            className={`w-full md:max-w-xs rounded-full py-3.5 font-bold flex items-center justify-center gap-2 transition-colors ${deep ? "bg-[var(--surface-card)] border border-[var(--border)]" : "gold-btn shadow-lg shadow-[var(--dive-blue)]/25 hover:bg-[var(--dive-blue-hover)]"}`}>
             {deep ? "Back to surface view" : "Look Deeper"} <ChevronDown size={18} className={deep ? "rotate-180" : ""} />
           </button>
         </div>
@@ -209,7 +215,7 @@ export default function XRay() {
           has seen their real exposure, the obvious next step is to act on it. */}
       <div className="px-6 mt-3">
         <button data-testid="xray-go-to-suggestions-btn" onClick={() => setScreen("suggestions")}
-          className="w-full rounded-full py-3.5 font-bold flex items-center justify-center gap-2 bg-[var(--dive-blue-light)] text-[var(--dive-blue-dark)] hover:brightness-105 transition-all">
+          className="w-full md:max-w-xs md:ml-auto rounded-full py-3.5 font-bold flex items-center justify-center gap-2 bg-[var(--dive-blue-light)] text-[var(--dive-blue-dark)] hover:brightness-105 transition-all">
           <Lightbulb size={18} /> See Suggestions For You
         </button>
       </div>

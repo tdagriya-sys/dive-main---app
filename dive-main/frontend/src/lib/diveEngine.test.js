@@ -8,6 +8,7 @@ import {
   normalizeIssuer,
   missingCategories,
   buildSuggestions,
+  rescaleIdealRanges,
   totalInvested,
   IDEAL_RANGES,
 } from "./diveEngine";
@@ -88,6 +89,17 @@ describe("normalizeIssuer", () => {
 
   it("does not merge genuinely different issuers", () => {
     expect(normalizeIssuer("HDFC Bank")).not.toBe(normalizeIssuer("ICICI Bank"));
+  });
+
+  // User bug report: added "Reliance Industries" (equity) and its corporate
+  // bond, saw no overlap anywhere on X-Ray. Root cause: "corp"/"corporation"
+  // were stripped but not "corporate" as its own whole word (\bcorp\b doesn't
+  // match inside "corporate") — so the exact real seeded bond name
+  // (backend/src/seed/staticInstruments.ts's REL_BOND) normalized to
+  // "reliancecorporate" instead of "reliance", missing a real-world instrument
+  // name this function exists specifically to catch.
+  it("strips 'Corporate' so a real corporate bond's full name still matches its equity counterpart", () => {
+    expect(normalizeIssuer("Reliance Industries")).toBe(normalizeIssuer("Reliance Industries Corporate Bonds"));
   });
 });
 
@@ -200,5 +212,74 @@ describe("buildSuggestions", () => {
     const holdings = [{ segment: "Equity", amount: 1000 }];
     const suggestions = buildSuggestions(holdings, IDEAL_RANGES, "NotARealProfile");
     expect(suggestions.length).toBeGreaterThan(0);
+  });
+});
+
+// Regression test for a real user report: a ₹50,000 Balanced-profile
+// portfolio (2 Equity holdings + 1 Mutual Fund), restricted by the Context
+// Engine to 3 expected categories (Equity/Mutual Funds/Gold-Silver), showed
+// ideal ceilings of ₹17,500 + ₹15,000 + ₹6,000 = ₹38,500 — only 77% of the
+// portfolio, even maxing out every category the user was told they need.
+describe("rescaleIdealRanges", () => {
+  it("scales the expected categories' MIDPOINT (not hi/ceiling) to sum to 100%, preserving each band's relative width", () => {
+    const expected = new Set(["Equity", "Mutual Funds", "Gold/Silver"]);
+    const { Balanced } = rescaleIdealRanges(IDEAL_RANGES, "Balanced", expected);
+
+    const midpoint = ([lo, hi]) => (lo + hi) / 2;
+    const midSum = midpoint(Balanced["Equity"]) + midpoint(Balanced["Mutual Funds"]) + midpoint(Balanced["Gold/Silver"]);
+    expect(midSum).toBeCloseTo(100, 6);
+
+    // Original bands: Equity [25,35] mid 30, Mutual Funds [20,30] mid 25,
+    // Gold/Silver [8,12] mid 10 (midpoint sum 65) — scaled by 100/65, so a
+    // user fully invested across exactly these 3 categories lands near each
+    // one's own midpoint on average, not pinned against every ceiling.
+    expect(Balanced["Equity"]).toEqual([25 * (100 / 65), 35 * (100 / 65)]);
+    expect(Balanced["Mutual Funds"]).toEqual([20 * (100 / 65), 30 * (100 / 65)]);
+    expect(Balanced["Gold/Silver"]).toEqual([8 * (100 / 65), 12 * (100 / 65)]);
+  });
+
+  it("leaves non-expected (deferred) categories at their original, unscaled band", () => {
+    const expected = new Set(["Equity"]);
+    const { Balanced } = rescaleIdealRanges(IDEAL_RANGES, "Balanced", expected);
+    expect(Balanced["Bonds"]).toEqual(IDEAL_RANGES.Balanced["Bonds"]);
+    expect(Balanced["Crypto"]).toEqual(IDEAL_RANGES.Balanced["Crypto"]);
+  });
+
+  it("returns the original unscaled band when there are no expected categories yet (context not loaded)", () => {
+    const result = rescaleIdealRanges(IDEAL_RANGES, "Balanced", new Set());
+    expect(result.Balanced).toEqual(IDEAL_RANGES.Balanced);
+    const resultUndefined = rescaleIdealRanges(IDEAL_RANGES, "Balanced", undefined);
+    expect(resultUndefined.Balanced).toEqual(IDEAL_RANGES.Balanced);
+  });
+
+  it("falls back to Balanced for an unrecognized risk profile, same as buildSuggestions", () => {
+    const result = rescaleIdealRanges(IDEAL_RANGES, "NotARealProfile", new Set(["Equity"]));
+    expect(result.Balanced).toBeDefined();
+    const [lo, hi] = result.Balanced["Equity"];
+    expect((lo + hi) / 2).toBeCloseTo(100, 6);
+  });
+
+  it("end-to-end: a fully-invested user lands with real headroom below each category's ceiling, not pinned above it", () => {
+    // The exact reported scenario: ₹50,000 total, 3 expected categories,
+    // Equity/Mutual Funds already funded, Gold/Silver still at zero.
+    const expected = new Set(["Equity", "Mutual Funds", "Gold/Silver"]);
+    const scaledRanges = rescaleIdealRanges(IDEAL_RANGES, "Balanced", expected);
+    const holdings = [
+      { segment: "Equity", amount: 30000 },
+      { segment: "Mutual Funds", amount: 20000 },
+    ];
+    const suggestions = buildSuggestions(holdings, scaledRanges, "Balanced");
+    const [equity, mf, gold] = ["Equity", "Mutual Funds", "Gold/Silver"].map((cat) => suggestions.find((s) => s.cat === cat));
+
+    // Midpoint amounts (the new "fully invested, on-target" anchor) sum to
+    // the full portfolio total.
+    const midAmt = (s) => (s.loAmt + s.hiAmt) / 2;
+    expect(midAmt(equity) + midAmt(mf) + midAmt(gold)).toBeCloseTo(50000, 6);
+
+    // Ceilings now sum to MORE than the total (real headroom), unlike the
+    // old hi-sum-to-100% version where they summed to exactly the total and
+    // Mutual Funds (₹20,000, 40%) read as "over" a ceiling of just ₹19,481.
+    expect(equity.hiAmt + mf.hiAmt + gold.hiAmt).toBeGreaterThan(50000);
+    expect(mf.action).not.toBe("reduce");
   });
 });

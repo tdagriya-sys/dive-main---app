@@ -89,11 +89,31 @@ From that point on, real OTP emails will deliver to **any** signup email address
 
 ---
 
-## 3. Claude (Anthropic) API key — for Bot Scan and file/screenshot upload
+## 3. AI extraction keys — for Bot Scan and file/screenshot upload
 
-**What this does today without a key:** Bot Scan and uploading a screenshot or PDF need this key to work at all — without it, both return a clear "not configured" message instead of guessing. (CSV/XLSX/JSON uploads don't need this key — they're parsed directly since there's no ambiguity in structured data.) This is what actually reads your screenshots/documents: it finds every real holding, filters out watchlists/indices/summary cards, sorts each one into the right asset class, and figures out whether a repeated instrument is the same holding seen twice or a genuinely separate holding in a different account.
+**What this does today without either key:** Bot Scan and uploading a screenshot or PDF need at least one of these two keys to work at all — without either, both return a clear "not configured" message instead of guessing. (CSV/XLSX/JSON uploads don't need this — they're parsed directly since there's no ambiguity in structured data.) This is what actually reads your screenshots/documents: it finds every real holding, filters out watchlists/indices/summary cards, sorts each one into the right asset class, and figures out whether a repeated instrument is the same holding seen twice or a genuinely separate holding in a different account.
 
-**How to get a key:**
+There are two keys because there are two providers, used in a **primary + fallback** order — you don't have to set up both, but setting up both is the most reliable option:
+
+- **`OPENAI_API_KEY` (OpenAI, model GPT-5.6 Terra) — PRIMARY.** Every scan/upload tries this one first.
+- **`ANTHROPIC_API_KEY` (Claude Sonnet 5) — FALLBACK.** If the OpenAI call fails for any reason (outage, rate limit, timeout, an unreadable response), the app automatically retries the same scan/upload with Claude instead — the user never sees the OpenAI failure, they just get a result (possibly a few seconds slower on that one retry). If `OPENAI_API_KEY` is left blank, every scan/upload goes straight to Claude instead, and it behaves as the only engine.
+
+Set up section 3a below at minimum; add 3b too if you want the automatic fallback.
+
+### 3a. OpenAI API key (primary)
+
+1. Open a web browser and go to **platform.openai.com**.
+2. Sign up or log in.
+3. Click your account/organization name (top-right), then **"API keys"** in the menu (or go directly to **platform.openai.com/api-keys**).
+4. Click the button that says **"Create new secret key"**, give it any name like "dive-dev", and click **"Create secret key"**.
+5. Copy the key that appears — it starts with `sk-`. You won't be able to see it again after leaving this page.
+6. Open the file `backend/.env` on your computer.
+7. Find the line `OPENAI_API_KEY=REPLACE_WITH_YOUR_KEY`, delete `REPLACE_WITH_YOUR_KEY`, and paste your key in its place.
+8. Save the file and restart the backend server.
+
+You'll need a small amount of prepaid credit on the OpenAI account for this to work (a few dollars covers a lot of scans/uploads) — add it under **"Billing"** in the same platform dashboard. The app calls the `gpt-5.6-terra` model specifically; if your account doesn't yet have access to it, the OpenAI call will fail and every request will silently fall back to Claude (3b) instead — set up 3b too so this doesn't leave you stuck.
+
+### 3b. Claude (Anthropic) API key (fallback)
 
 1. Open a web browser and go to **console.anthropic.com**.
 2. Sign up or log in.
@@ -132,7 +152,8 @@ You'll need a small amount of prepaid credit on the Anthropic account for this t
 |---|---|
 | Email/OTP provider | `EMAIL_API_KEY=...` (optional: `EMAIL_FROM=...`) |
 | Finvu Account Aggregator | `FINVU_CLIENT_ID=...`, `FINVU_CLIENT_SECRET=...`, `FINVU_CERT_PATH=...` |
-| Claude (Bot Scan + file/screenshot upload) | `ANTHROPIC_API_KEY=...` |
+| OpenAI GPT-5.6 Terra — PRIMARY (Bot Scan + file/screenshot upload) | `OPENAI_API_KEY=...` |
+| Claude Sonnet 5 — FALLBACK (Bot Scan + file/screenshot upload) | `ANTHROPIC_API_KEY=...` |
 | Crypto/market data (optional) | `CRYPTO_PRICE_API_KEY=...` |
 
 After changing anything in `backend/.env`, stop the backend server (close its terminal window or press `Ctrl+C`) and start it again so it picks up the new values.

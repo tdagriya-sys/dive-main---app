@@ -15,6 +15,7 @@ import uploadRoutes from "./routes/upload.routes";
 import botscanRoutes from "./routes/botscan.routes";
 import aaRoutes from "./routes/aa.routes";
 import scoreRoutes from "./routes/score.routes";
+import contactRoutes from "./routes/contact.routes";
 
 export function createApp() {
   const app = express();
@@ -86,6 +87,7 @@ export function createApp() {
   api.use("/botscan", botscanRoutes);
   api.use("/aa", aaRoutes);
   api.use("/score", scoreRoutes);
+  api.use("/contact", contactRoutes);
   api.use("/admin", adminInstrumentsRouter);
 
   app.use("/api", api);

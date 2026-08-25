@@ -110,33 +110,6 @@ describe("BotScan — \"Nothing was detected\" must not show after a successful 
   });
 });
 
-// Bug report: the marketing landing page's interactive phone demo lets a
-// logged-out visitor reach Bot Scan and tap Start Scan, firing a REAL OS
-// screen-share permission prompt for something guaranteed to fail (analyze
-// requires auth). ChooseFetchMethod normally blocks navigating in at all,
-// but this is the backstop inside BotScan itself.
-describe("BotScan — blocks starting a scan when logged out", () => {
-  it("never calls getDisplayMedia and shows a sign-up prompt instead", async () => {
-    jest.clearAllMocks();
-    const getDisplayMedia = jest.fn();
-    global.navigator.mediaDevices = { getDisplayMedia };
-    useDive.mockReturnValue({
-      setScreen: jest.fn(),
-      goBack: jest.fn(),
-      loadHoldings: jest.fn().mockResolvedValue([]),
-      holdings: [],
-      user: null,
-    });
-    const user = userEvent.setup();
-    render(<BotScan />);
-
-    await user.click(screen.getByTestId("bot-scan-start-btn"));
-
-    expect(getDisplayMedia).not.toHaveBeenCalled();
-    expect(screen.getByText(/sign up first to scan and save/i)).toBeInTheDocument();
-  });
-});
-
 // Bug report: on mobile, Bot Scan said "permission was denied" without the
 // browser ever showing a prompt. Root cause: getDisplayMedia doesn't exist on
 // most phone browsers at all, so calling it fails immediately for a reason

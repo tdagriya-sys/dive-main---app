@@ -265,7 +265,7 @@ export function normalizeIssuer(name) {
   return (name || "")
     .toLowerCase()
     .replace(
-      /\b(ltd|limited|inc|incorporated|industries|industry|banks?|corp|corporation|bonds?|ncds?|funds?|etfs?|schemes?|plans?|trusts?|reits?|invits?|fds?|deposits?|sgbs?|bees)\b/g,
+      /\b(ltd|limited|inc|incorporated|industries|industry|banks?|corp|corporate|corporation|bonds?|ncds?|debentures?|funds?|etfs?|schemes?|plans?|trusts?|reits?|invits?|fds?|deposits?|sgbs?|bees)\b/g,
       ""
     )
     .replace(/[^a-z0-9]/g, "")
@@ -361,6 +361,71 @@ export function scoreLabel(score) {
   if (score >= 50) return "Decent start";
   if (score >= 35) return "Needs work";
   return "Risky";
+}
+
+// IDEAL_RANGES above was authored per-category, independently, on the
+// implicit assumption that a mature portfolio eventually spreads across
+// most/all 9 CORE_CATEGORIES — summed across all 9, a risk profile's hi%
+// values land around 147-153%, not 100%. That's fine for a user who's
+// expected to hold most of them, but Layer D (the Context Engine, see
+// backend/src/services/contextEngine.ts) deliberately tells an early-stage
+// user they only need a SMALL SUBSET of categories right now (e.g. 3, for a
+// "Growing" ₹25k-2L corpus) — and nobody rescales the bands to match that
+// narrower promise. The result: maxing out every category Context Engine
+// says you need can mathematically fall well short of 100% of the user's
+// actual portfolio (e.g. a real report — ₹50,000 across Equity/Mutual
+// Funds/Gold-Silver, Balanced profile — capped out at ₹38,500, 77%, even
+// fully invested in all three), which contradicts the "these categories are
+// genuinely all you need at this stage" message the app is otherwise
+// making.
+//
+// This rescales ONLY the categories in `expectedCategories` (a Set of
+// CORE_CATEGORIES labels — pass `expectedCoreCategories(context)` from
+// contextMessaging.js) by a single multiplicative factor, so every other
+// (non-expected/deferred) category keeps its original, unscaled band, since
+// those aren't part of "your budget for now" and shouldn't be compressed to
+// make room for categories the user isn't being actively asked to hold.
+// Same factor is applied to lo and hi together, so each expected category's
+// band keeps its original WIDTH relative to the others — only the overall
+// scale shifts.
+//
+// The factor is derived from the sum of each expected category's own
+// MIDPOINT (average of lo/hi), not its hi (ceiling) — scaling so the
+// ceilings summed to 100% instead pins the band's own upper edge at exactly
+// "fully invested," which mathematically forces at least one category's
+// dot above its ceiling for any user who's actually fully invested across
+// just their expected categories (the normal case), reading as
+// perpetually "over-exposed" everywhere even when reasonably on track.
+// Scaling on the midpoint sum instead means "fully invested, roughly
+// on-target" lands near each category's own middle, leaving real headroom
+// above it before a holding reads as genuinely over-exposed — while still
+// guaranteeing that funding every expected category to its own ceiling
+// covers the whole portfolio (ceilings necessarily land above their own
+// midpoint, so their sum lands above 100%, not below it).
+//
+// Returns a full `ranges`-shaped table (keyed by the resolved risk profile)
+// so the result can be passed straight into buildSuggestions() below
+// unchanged — see its own `ranges[risk] || ranges["Balanced"]` fallback,
+// which this mirrors so an unrecognized `risk` still resolves correctly.
+export function rescaleIdealRanges(ranges, risk, expectedCategories) {
+  const resolvedRisk = ranges[risk] ? risk : "Balanced";
+  const ideal = ranges[resolvedRisk];
+  if (!expectedCategories || expectedCategories.size === 0) {
+    return { [resolvedRisk]: ideal };
+  }
+  const midSum = CORE_CATEGORIES.reduce((sum, cat) => {
+    if (!expectedCategories.has(cat)) return sum;
+    const [lo, hi] = ideal[cat] || [0, 0];
+    return sum + (lo + hi) / 2;
+  }, 0);
+  if (!midSum) return { [resolvedRisk]: ideal };
+  const factor = 100 / midSum;
+  const scaled = {};
+  CORE_CATEGORIES.forEach((cat) => {
+    const [lo, hi] = ideal[cat] || [0, 0];
+    scaled[cat] = expectedCategories.has(cat) ? [lo * factor, hi * factor] : [lo, hi];
+  });
+  return { [resolvedRisk]: scaled };
 }
 
 // Suggestions: category-level, quantified vs ideal range

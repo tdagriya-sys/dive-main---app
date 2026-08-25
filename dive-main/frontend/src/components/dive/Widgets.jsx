@@ -116,19 +116,26 @@ export function Legend({ data, valueFn }) {
 }
 
 // Before/after mini bar for suggestions (current vs ideal band)
+// A thin track with the ideal range as a filled green segment (positioned
+// at its real loPct-hiPct location, not just "somewhere in the middle") and
+// current allocation as a small gold dot at its own position — reads at a
+// glance whether the dot sits inside, short of, or past the green range,
+// which the old design's two overlapping bars + baked-in text didn't make
+// nearly as immediate. Purely visual now (no text of its own); callers
+// render their own "Now X% / Ideal Y-Z%" caption alongside it, since only
+// they know whether that should be a percentage, a rupee amount, or both.
 export function RangeBar({ currentPct, loPct, hiPct }) {
   const max = Math.max(currentPct, hiPct, 30) * 1.15;
   return (
-    <div className="relative h-8 w-full rounded-full bg-[#F4F4F5] overflow-hidden">
-      <div className="absolute top-0 bottom-0 bg-[var(--dive-blue)]/25"
+    <div className="relative h-2 w-full rounded-full bg-[var(--border)]">
+      <div className="absolute top-0 bottom-0 rounded-full bg-[var(--green)]"
         style={{ left: `${(loPct / max) * 100}%`, width: `${((hiPct - loPct) / max) * 100}%` }} />
-      <motion.div className="absolute top-0 bottom-0 left-0 rounded-full bg-[var(--dive-blue)]/80"
-        initial={{ width: 0 }} animate={{ width: `${(currentPct / max) * 100}%` }}
-        transition={{ duration: 0.7 }} />
-      <div className="absolute inset-0 flex items-center justify-between px-3 text-[11px] font-bold">
-        <span className="text-[#1A1400]">Now {currentPct.toFixed(0)}%</span>
-        <span className="text-[var(--dive-blue-dark)]">Ideal {loPct}–{hiPct}%</span>
-      </div>
+      <motion.div
+        className="absolute top-1/2 w-4 h-4 rounded-full bg-[var(--dive-blue)] shadow-[0_0_0_4px_rgba(227,184,86,0.22)]"
+        style={{ marginTop: "-8px", marginLeft: "-8px" }}
+        initial={{ left: 0 }} animate={{ left: `${(currentPct / max) * 100}%` }}
+        transition={{ duration: 0.7 }}
+      />
     </div>
   );
 }

@@ -133,7 +133,14 @@ function FitForYouCard({ selected, holdings, sims, simAmount, setSimAmount, scor
   const baseTop = topExposure(baseHoldings);
   const newTop = topExposure(baseHoldings, extra);
   const issuerLc = issuerName.toLowerCase();
-  const wouldBeTopHolding = newTop.pct > 0 && newTop.name &&
+  // With zero existing holdings, ANYTHING simulated is trivially 100% of the
+  // (otherwise-empty) portfolio — "this would become your single largest
+  // exposure" is mathematically true of literally every instrument someone
+  // just starting out could search for, so it's not a meaningful
+  // concentration signal here the way it is once there's an actual
+  // portfolio to be concentrated relative to. Only shown once there's at
+  // least one real holding for the new one to be concentrated against.
+  const wouldBeTopHolding = baseHoldings.length > 0 && newTop.pct > 0 && newTop.name &&
     (newTop.name.toLowerCase() === issuerLc || newTop.name.toLowerCase().includes(issuerLc) || issuerLc.includes(newTop.name.toLowerCase()));
 
   const issuerKey = normalizeIssuer(issuerName) || issuerLc;
@@ -192,7 +199,7 @@ function FitForYouCard({ selected, holdings, sims, simAmount, setSimAmount, scor
 }
 
 export default function AskDive() {
-  const { goBack, holdings, sims, scoreBreakdown, user } = useDive();
+  const { goBack, holdings, sims, scoreBreakdown } = useDive();
   const [list, setList] = useState([]);
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState(null);
@@ -202,16 +209,11 @@ export default function AskDive() {
 
   useEffect(() => {
     if (!q || q.length < 2) { setList([]); return; }
-    // /instruments/search requires auth — for a logged-out demo visitor this
-    // would 401 on every keystroke and land on the generic "no instruments
-    // match" message below, which reads as a real empty result rather than
-    // what it actually is (search was never allowed to run at all).
-    if (!user) { setList([]); return; }
     const t = setTimeout(() => {
       api.get("/instruments/search", { params: { q } }).then((r) => setList(r.data.instruments || [])).catch(() => setList([]));
     }, 300);
     return () => clearTimeout(t);
-  }, [q, user]);
+  }, [q]);
 
   useEffect(() => {
     if (!selected) return;
@@ -294,12 +296,7 @@ export default function AskDive() {
               <span className="text-[var(--dive-blue)] font-bold text-sm">Ask →</span>
             </button>
           ))}
-          {q.length >= 2 && !user && (
-            <p className="text-sm text-[var(--text-secondary)] text-center py-6" data-testid="ask-signup-required">
-              Sign up to search real stocks, funds, and bonds — this preview can't look them up yet.
-            </p>
-          )}
-          {q.length >= 2 && user && list.length === 0 && <p className="text-sm text-[var(--text-secondary)] text-center py-6">No instruments match "{q}".</p>}
+          {q.length >= 2 && list.length === 0 && <p className="text-sm text-[var(--text-secondary)] text-center py-6">No instruments match "{q}".</p>}
           {q.length < 2 && <p className="text-sm text-[var(--text-secondary)] text-center py-6">Type at least 2 characters to search.</p>}
         </div>
       </div>

@@ -4,8 +4,7 @@ import { AlertTriangle, RefreshCw, Loader2 } from "lucide-react";
 // Shared across every bottom-nav screen that can't render without holdings
 // (Home, Suggestions, X-Ray) — three distinct states, not one blank screen:
 // actively loading, failed to load (retryable), or genuinely empty (nothing
-// saved yet, including a logged-out visitor exploring the demo phone-frame,
-// where holdings/holdingsLoading/holdingsError all start at their defaults).
+// saved yet — e.g. a freshly signed-up account before its first holding).
 // A bare `return null` looks identical to a broken app in every one of these
 // cases — there's no way to tell "still working" from "dead end" from "this
 // screen crashed" without some visible content.
@@ -43,15 +42,26 @@ export function HoldingsLoadErrorState({ onRetry, testId, retryTestId }) {
   );
 }
 
-export function HoldingsEmptyState({ setScreen, title, body, ctaLabel, testId, ctaTestId }) {
+// `secondaryLabel`/`onSecondary`/`secondaryTestId` are optional — only
+// Suggestions.jsx passes them (for its "Ask DIVVE about a stock or fund"
+// escape hatch, so a zero-holdings user can still look something up without
+// adding a holding first); Home.jsx/XRay.jsx call this without them and get
+// the plain single-CTA layout unchanged.
+export function HoldingsEmptyState({ setScreen, title, body, ctaLabel, testId, ctaTestId, secondaryLabel, secondaryTestId, onSecondary }) {
   return (
     <div className="flex flex-col h-full px-7 items-center justify-center text-center dive-app-surface" data-testid={testId}>
       <h1 className="font-heading font-black text-2xl mb-3">{title}</h1>
       <p className="text-[var(--text-secondary)] mb-8">{body}</p>
       <button data-testid={ctaTestId} onClick={() => setScreen("chooseMethod")}
-        className="w-full gold-btn rounded-full py-4 font-bold hover:bg-[var(--dive-blue-hover)] transition-colors">
+        className="w-full md:max-w-xs gold-btn rounded-full py-4 font-bold hover:bg-[var(--dive-blue-hover)] transition-colors">
         {ctaLabel}
       </button>
+      {secondaryLabel && (
+        <button data-testid={secondaryTestId} onClick={onSecondary}
+          className="w-full md:max-w-xs mt-3 rounded-full py-4 font-bold border border-[var(--border)] hover:bg-[var(--surface-card)] transition-colors">
+          {secondaryLabel}
+        </button>
+      )}
     </div>
   );
 }

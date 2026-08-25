@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { Wallet, CalendarClock, ChevronDown, AlertTriangle, ArrowLeft } from "lucide-react";
 import { useDive } from "../context/DiveContext";
 import { planLumpsum, planSip } from "../lib/plannerEngine";
-import { fmtINR, SEGMENT_COLORS, IDEAL_RANGES } from "../lib/diveEngine";
+import { fmtINR, SEGMENT_COLORS, IDEAL_RANGES, rescaleIdealRanges } from "../lib/diveEngine";
 import { RangeBar, AnimatedNumber } from "../components/dive/Widgets";
 
 export default function Planner() {
@@ -86,8 +86,8 @@ function EmptyExcludedState() {
   );
 }
 
-function CategoryRow({ cat, risk, existingAmount, finalAmount, finalPct, newInvestment }) {
-  const [lo, hi] = (IDEAL_RANGES[risk] || IDEAL_RANGES.Balanced)[cat] || [0, 0];
+function CategoryRow({ cat, band, existingAmount, finalAmount, finalPct, newInvestment }) {
+  const [lo, hi] = band || [0, 0];
   return (
     <div className="bg-[var(--surface-card)] rounded-2xl p-4 border border-[var(--border)]" data-testid={`planner-cat-${cat}`}>
       <div className="flex items-center justify-between mb-2 gap-2">
@@ -103,6 +103,7 @@ function CategoryRow({ cat, risk, existingAmount, finalAmount, finalPct, newInve
         <p className="text-xs text-[var(--dive-blue)] font-semibold mb-2">+{fmtINR(newInvestment)} new</p>
       )}
       <RangeBar currentPct={finalPct} loPct={lo} hiPct={hi} />
+      <p className="text-[10px] text-[var(--text-tertiary)] font-semibold mt-1.5">Ideal {Math.round(lo)}–{Math.round(hi)}%</p>
     </div>
   );
 }
@@ -113,6 +114,23 @@ function LumpsumPlanner({ holdings, prefs, age, onBack, amount, setAmount }) {
     () => planLumpsum({ holdings, newAmount: amount, prefs, risk, age }),
     [holdings, amount, prefs, risk, age]
   );
+  // `result.rows` always has all 9 CORE_CATEGORIES (planLumpsum's own
+  // internal shape), including ones plannerEngine assigned zero weight to
+  // because they're not eligible for this corpus tier/persona right now —
+  // shown here only if the user already holds something there (so existing
+  // money isn't hidden), otherwise dropped rather than displaying an empty,
+  // irrelevant row. The bands shown for what IS visible are rescaled the
+  // same way Suggestions.jsx's are, on each category's MIDPOINT rather than
+  // its ceiling (see rescaleIdealRanges in diveEngine.js) — IDEAL_RANGES's
+  // raw per-category bands assume a ~9-category portfolio, so left unscaled
+  // they'd show a ceiling far below where plannerEngine's own
+  // (already-normalized-to-100%-among-active-categories) weights actually
+  // place the money, making a correct allocation look "over" its own ideal
+  // range even when it's landing right around where it should.
+  const activeSet = new Set(result.active || []);
+  const rescaled = rescaleIdealRanges(IDEAL_RANGES, risk, activeSet);
+  const scaledBands = rescaled[risk] || rescaled.Balanced;
+  const visibleRows = result.rows.filter((row) => activeSet.has(row.cat) || row.existingAmount > 0);
 
   return (
     <div data-testid="planner-lumpsum-view">
@@ -142,8 +160,8 @@ function LumpsumPlanner({ holdings, prefs, age, onBack, amount, setAmount }) {
           <EmptyExcludedState />
         ) : (
           <div className="space-y-3">
-            {result.rows.map((row) => (
-              <CategoryRow key={row.cat} cat={row.cat} risk={risk} existingAmount={row.existingAmount}
+            {visibleRows.map((row) => (
+              <CategoryRow key={row.cat} cat={row.cat} band={scaledBands[row.cat]} existingAmount={row.existingAmount}
                 finalAmount={row.finalAmount} finalPct={row.finalPct} newInvestment={row.newInvestment} />
             ))}
           </div>

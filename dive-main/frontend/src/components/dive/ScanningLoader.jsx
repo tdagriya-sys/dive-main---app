@@ -262,9 +262,10 @@ export default function ScanningLoader({ title, subtitle, messages = DEFAULT_MES
       </div>
       {onCancel && (
         // A hung AI response otherwise has no escape short of waiting out the
-        // full timeout chain (Anthropic SDK timeout x retries, Nginx's
-        // proxy_read_timeout, this request's own axios timeout) — this is
-        // the only way to bail out immediately instead.
+        // full timeout chain (OpenAI/Anthropic SDK timeout x retries — up to
+        // TWICE that if the OpenAI primary call fails and falls back to
+        // Claude — plus Nginx's proxy_read_timeout and this request's own
+        // axios timeout) — this is the only way to bail out immediately instead.
         <button data-testid="scanning-loader-cancel-btn" onClick={onCancel}
           className="mt-8 text-sm font-bold text-[var(--text-secondary)] underline">
           Cancel

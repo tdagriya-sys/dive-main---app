@@ -79,20 +79,51 @@ describe("AskDive — Fit for you diversification figures (bug report: real show
   });
 });
 
-// Bug report: the marketing landing page's interactive phone demo lets a
-// logged-out visitor reach Ask DIVVE and search — /instruments/search
-// requires auth, so every search 401ed and silently showed "no instruments
-// match", which reads as a real (if unlucky) empty result rather than what
-// it actually was (search was never allowed to run at all).
-describe("AskDive — blocks searching when logged out", () => {
-  it("never calls /instruments/search and shows a sign-up prompt instead", async () => {
+// Bug report: a brand-new user with zero holdings searching any instrument
+// got a red "this would become your single largest exposure" warning — true
+// of literally every instrument when there's nothing else to be concentrated
+// against, so it's not a meaningful signal for someone just starting out.
+describe("AskDive — 'top holding' concentration warning", () => {
+  beforeEach(() => {
     jest.clearAllMocks();
-    useDive.mockReturnValue({ goBack: jest.fn(), holdings: [], sims: [], scoreBreakdown: null, user: null });
+    diveEngine.apparentDiversification.mockImplementation(() => 0);
+    diveEngine.realDiversification.mockImplementation(() => 0);
+    api.get.mockImplementation((url) => {
+      if (url === "/instruments/search") {
+        return Promise.resolve({ data: { instruments: [{ _id: "eq1", name: "Reliance Industries", assetClass: "EQUITY", symbol: "RELIANCE" }] } });
+      }
+      if (url === "/instruments/eq1/detail") {
+        return Promise.resolve({ data: { detail: { available: false } } });
+      }
+      return Promise.reject(new Error("unexpected url " + url));
+    });
+  });
 
+  async function searchAndSelect() {
     render(<AskDive />);
-    await userEvent.type(screen.getByTestId("ask-search-input"), "Bitcoin");
+    await userEvent.type(screen.getByTestId("ask-search-input"), "Reliance");
+    await waitFor(() => expect(screen.getByTestId("ask-item-eq1")).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId("ask-item-eq1"));
+    await waitFor(() => expect(screen.getByTestId("ask-fit-for-you-card")).toBeInTheDocument());
+  }
 
-    await waitFor(() => expect(screen.getByTestId("ask-signup-required")).toBeInTheDocument());
-    expect(api.get).not.toHaveBeenCalled();
+  it("does NOT show the warning for a user with zero existing holdings — everything is trivially 100% otherwise", async () => {
+    useDive.mockReturnValue({
+      goBack: jest.fn(), holdings: [], sims: [], user: { id: "u1", name: "Test", age: 30 },
+      scoreBreakdown: { hasHoldings: false },
+    });
+    await searchAndSelect();
+    expect(screen.queryByTestId("ask-fit-concentration-warning")).not.toBeInTheDocument();
+  });
+
+  it("still shows the warning once the user has a real portfolio for the new pick to be concentrated against", async () => {
+    useDive.mockReturnValue({
+      goBack: jest.fn(),
+      holdings: [{ id: "h1", name: "Reliance Industries", segment: "Equity", amount: 50000, source: "MANUAL", lookthrough: [] }],
+      sims: [], user: { id: "u1", name: "Test", age: 30 },
+      scoreBreakdown: { hasHoldings: true, compositeScore: 60, weights: { concentration: 0.17 }, apparentDiversificationPct: 100, realDiversificationPct: 100 },
+    });
+    await searchAndSelect();
+    expect(screen.getByTestId("ask-fit-concentration-warning")).toBeInTheDocument();
   });
 });

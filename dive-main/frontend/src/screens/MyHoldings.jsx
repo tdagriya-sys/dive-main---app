@@ -70,7 +70,7 @@ export default function MyHoldings() {
 
       <div className="px-6 mt-6">
         <button data-testid="my-holdings-add-btn" onClick={() => setScreen("chooseMethod")}
-          className="w-full gold-btn rounded-full py-4 font-bold flex items-center justify-center gap-2 hover:bg-[var(--dive-blue-hover)] transition-colors">
+          className="w-full md:max-w-xs md:ml-auto gold-btn rounded-full py-4 font-bold flex items-center justify-center gap-2 hover:bg-[var(--dive-blue-hover)] transition-colors">
           <Plus size={18} /> Add an investment
         </button>
       </div>

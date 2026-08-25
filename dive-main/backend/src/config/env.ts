@@ -57,10 +57,16 @@ export const env = {
   emailFrom: process.env.EMAIL_FROM || "Divve <onboarding@resend.dev>",
 
   // Powers AI-based holdings extraction (bot scan screenshots + uploaded
-  // documents/screenshots) via the Claude API — see services/aiExtractionService.ts.
-  // Without a real key, those two ingestion paths return a clear
-  // "AI extraction not configured" error instead of falling back to the old
-  // regex/OCR heuristics, which is exactly what this feature was built to replace.
+  // documents/screenshots) — see services/aiExtractionService.ts. OpenAI
+  // (GPT-5.6 Terra) is the PRIMARY extraction call; the Claude key below is
+  // the FALLBACK, used only if the OpenAI call fails or OPENAI_API_KEY isn't
+  // set. Without a real key for either, those two ingestion paths return a
+  // clear "AI extraction not configured" error instead of falling back to the
+  // old regex/OCR heuristics, which is exactly what this feature was built to
+  // replace.
+  openaiApiKey: process.env.OPENAI_API_KEY,
+  openaiApiKeyIsPlaceholder: isPlaceholder(process.env.OPENAI_API_KEY),
+
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
   anthropicApiKeyIsPlaceholder: isPlaceholder(process.env.ANTHROPIC_API_KEY),
 
