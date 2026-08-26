@@ -17,6 +17,7 @@ export default function Onboarding() {
   if (screen === "splash") return <Splash setScreen={setScreen} />;
   if (screen === "signup") return <SignUp setScreen={setScreen} />;
   if (screen === "login") return <Login setScreen={setScreen} />;
+  if (screen === "forgotPassword") return <ForgotPassword setScreen={setScreen} />;
   if (screen === "reveal") return <Reveal setScreen={setScreen} holdings={holdings} />;
   return null;
 }
@@ -218,6 +219,10 @@ function Login({ setScreen }) {
       <form onSubmit={submit}>
         <TextField label="Email or mobile number" testId="login-identifier-input" value={identifier} onChange={(e) => setIdentifier(e.target.value)} required />
         <TextField label="Password" testId="login-password-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        <button type="button" data-testid="forgot-password-link" onClick={() => setScreen("forgotPassword")}
+          className="text-sm font-bold text-[var(--dive-blue)] mb-4 -mt-2 self-start">
+          Forgot password?
+        </button>
         {notFound && (
           <div className="mb-4 bg-[var(--dive-blue-light)] rounded-xl px-4 py-3" data-testid="user-not-found-banner">
             <p className="text-sm font-semibold text-[var(--dive-blue-dark)] mb-2">
@@ -237,6 +242,147 @@ function Login({ setScreen }) {
       <button data-testid="login-to-signup-link" onClick={() => setScreen("signup")} className="w-full text-center mt-4 text-sm font-bold text-[var(--dive-blue)]">
         New to DIVVE? Sign up
       </button>
+    </div>
+  );
+}
+
+function ForgotPassword({ setScreen }) {
+  const { forgotPasswordStart, forgotPasswordVerify, resetPassword, goBack } = useDive();
+  const [step, setStep] = useState("identifier"); // identifier | otp | newPassword | done
+  const [identifier, setIdentifier] = useState("");
+  const [mobile, setMobile] = useState("");
+  const [otp, setOtp] = useState("");
+  const [devOtp, setDevOtp] = useState(null);
+  const [resetToken, setResetToken] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [showPw, setShowPw] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const submitIdentifier = async (e) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      const res = await forgotPasswordStart(identifier);
+      setMobile(res.mobile);
+      setDevOtp(res.devOtp || null);
+      setStep("otp");
+    } catch (err) {
+      const data = err?.response?.data;
+      setError(data?.message || data?.issues?.[0]?.message || "Couldn't find that account.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitOtp = async () => {
+    setError("");
+    setLoading(true);
+    try {
+      const token = await forgotPasswordVerify(mobile, otp);
+      setResetToken(token);
+      setStep("newPassword");
+    } catch (err) {
+      setError(err?.response?.data?.message || "That OTP didn't work.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitNewPassword = async (e) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      await resetPassword(resetToken, newPassword, confirmNewPassword);
+      setStep("done");
+    } catch (err) {
+      const data = err?.response?.data;
+      setError(data?.message || data?.issues?.[0]?.message || "Couldn't reset your password.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (step === "done") {
+    return (
+      <div className="flex flex-col h-full px-7 py-10 dive-app-surface items-center justify-center text-center" data-testid="forgot-password-done-screen">
+        <h1 className="font-heading font-black text-2xl mb-3">Password updated</h1>
+        <p className="text-[var(--text-secondary)] mb-8">You can now log in with your new password.</p>
+        <button data-testid="forgot-password-done-login-btn" onClick={() => setScreen("login")}
+          className="w-full gold-btn rounded-full py-4 font-bold hover:bg-[var(--dive-blue-hover)] transition-colors">
+          Back to log in
+        </button>
+      </div>
+    );
+  }
+
+  if (step === "newPassword") {
+    return (
+      <div className="flex flex-col h-full px-7 py-10 dive-app-surface" data-testid="forgot-password-new-screen">
+        <button data-testid="forgot-password-new-back-btn" onClick={() => setStep("otp")} className="mb-3 -ml-1 p-1 self-start"><ChevronLeft size={22} /></button>
+        <h1 className="font-heading font-black text-3xl mb-2">Set a new password</h1>
+        <p className="text-[var(--text-secondary)] mb-6">Choose a new password for your account.</p>
+        <form onSubmit={submitNewPassword}>
+          <div className="mb-4">
+            <label className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)] mb-2 block">New password</label>
+            <div className="flex items-center rounded-xl border border-[var(--border)] bg-[var(--surface-card)] px-4 py-3">
+              <input data-testid="forgot-password-new-input" type={showPw ? "text" : "password"} value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
+                className="flex-1 outline-none font-semibold bg-transparent text-[var(--text-primary)]" required />
+              <button type="button" onClick={() => setShowPw((s) => !s)} className="text-[var(--text-tertiary)]">
+                {showPw ? <EyeOff size={18} /> : <EyeIcon size={18} />}
+              </button>
+            </div>
+          </div>
+          <TextField label="Confirm new password" testId="forgot-password-confirm-input" type={showPw ? "text" : "password"} value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} required />
+          <FieldError msg={error} />
+          <button data-testid="forgot-password-reset-btn" type="submit" disabled={loading}
+            className="w-full gold-btn rounded-full py-4 font-bold disabled:opacity-40 hover:bg-[var(--dive-blue-hover)] transition-colors flex items-center justify-center gap-2">
+            {loading && <Loader2 size={16} className="animate-spin" />} Set new password
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  if (step === "otp") {
+    return (
+      <div className="flex flex-col h-full px-7 py-10 dive-app-surface" data-testid="forgot-password-otp-screen">
+        <button data-testid="forgot-password-otp-back-btn" onClick={() => setStep("identifier")} className="mb-3 -ml-1 p-1 self-start"><ChevronLeft size={22} /></button>
+        <h1 className="font-heading font-black text-3xl mb-2">Verify your email</h1>
+        <p className="text-[var(--text-secondary)] mb-8">We sent a 6-digit code to the email on your account.</p>
+        <label className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)] mb-2">Enter 6-digit OTP</label>
+        <input data-testid="forgot-password-otp-input" value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+          placeholder="••••••" className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-card)] px-4 py-3 mb-3 outline-none tracking-[0.5em] font-bold text-center text-lg text-[var(--text-primary)]" inputMode="numeric" />
+        {devOtp && (
+          <button data-testid="forgot-password-autofill-otp-btn" onClick={() => setOtp(devOtp)} className="text-sm font-bold text-[var(--dive-blue)] mb-4 self-start">
+            Dev mode — use test OTP {devOtp}
+          </button>
+        )}
+        <FieldError msg={error} />
+        <button data-testid="forgot-password-verify-otp-btn" disabled={otp.length < 6 || loading} onClick={submitOtp}
+          className="w-full gold-btn rounded-full py-4 font-bold disabled:opacity-40 hover:bg-[var(--dive-blue-hover)] transition-colors flex items-center justify-center gap-2">
+          {loading && <Loader2 size={16} className="animate-spin" />} Verify & Continue
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full px-7 py-10 dive-app-surface" data-testid="forgot-password-screen">
+      <button data-testid="forgot-password-back-btn" onClick={goBack} className="mb-3 -ml-1 p-1 self-start"><ChevronLeft size={22} /></button>
+      <h1 className="font-heading font-black text-3xl mb-2">Reset your password</h1>
+      <p className="text-[var(--text-secondary)] mb-6">Enter the email or mobile number on your account and we'll send a verification code.</p>
+      <form onSubmit={submitIdentifier}>
+        <TextField label="Email or mobile number" testId="forgot-password-identifier-input" value={identifier} onChange={(e) => setIdentifier(e.target.value)} required />
+        <FieldError msg={error} />
+        <button data-testid="forgot-password-send-otp-btn" type="submit" disabled={loading}
+          className="w-full gold-btn rounded-full py-4 font-bold disabled:opacity-40 hover:bg-[var(--dive-blue-hover)] transition-colors flex items-center justify-center gap-2">
+          {loading && <Loader2 size={16} className="animate-spin" />} Send OTP
+        </button>
+      </form>
     </div>
   );
 }

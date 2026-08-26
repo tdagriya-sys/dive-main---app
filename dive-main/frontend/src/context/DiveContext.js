@@ -252,6 +252,27 @@ export function DiveProvider({ children }) {
     return data.user;
   };
 
+  // Forgot-password: three separate calls, mirroring the three backend steps
+  // (send OTP -> verify OTP -> reset). None of these authenticate the user —
+  // like changePassword, a reset just changes the stored password and routes
+  // back to the normal login screen, rather than logging the user straight
+  // in. Errors are left to the caller's own try/catch (same convention as
+  // every other context function here) rather than swallowed here.
+  const forgotPasswordStart = async (identifier) => {
+    const { data } = await api.post("/auth/forgot-password/start", { identifier });
+    return data; // { message, mobile, devOtp? }
+  };
+
+  const forgotPasswordVerify = async (mobile, otp) => {
+    const { data } = await api.post("/auth/forgot-password/verify", { mobile, otp });
+    return data.resetToken;
+  };
+
+  const resetPassword = async (resetToken, newPassword, confirmNewPassword) => {
+    const { data } = await api.post("/auth/forgot-password/reset", { resetToken, newPassword, confirmNewPassword });
+    return data.message;
+  };
+
   const logout = async () => {
     try { await api.post("/auth/logout"); } catch (e) { /* ignore */ }
     setAccessToken(null);
@@ -318,6 +339,7 @@ export function DiveProvider({ children }) {
   const value = {
     screen, setScreen, goBack, authLoading, user,
     signupStart, signupVerify, login, logout, deleteAccount,
+    forgotPasswordStart, forgotPasswordVerify, resetPassword,
     updateProfile, changePassword,
     holdings, holdingsLoading, holdingsError, loadHoldings, deleteHolding, updateHolding,
     scoreBreakdown, loadScoreBreakdown,

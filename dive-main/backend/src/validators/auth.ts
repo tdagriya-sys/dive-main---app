@@ -33,6 +33,34 @@ export const loginSchema = z.object({
   password: z.string().min(1, "Password is required"),
 });
 
+export const forgotPasswordStartSchema = z.object({
+  identifier: z.string().trim().min(3, "Enter your email or mobile number"),
+});
+
+export const forgotPasswordVerifySchema = z.object({
+  mobile: z.string().regex(INDIAN_MOBILE_REGEX),
+  otp: z.string().regex(/^\d{6}$/, "OTP must be 6 digits"),
+});
+
+export const resetPasswordSchema = z
+  .object({
+    resetToken: z.string().min(1, "Missing reset token"),
+    newPassword: z
+      .string()
+      .min(8, "Password must be at least 8 characters")
+      .regex(/[A-Z]/, "Password must include an uppercase letter")
+      .regex(/[a-z]/, "Password must include a lowercase letter")
+      .regex(/[0-9]/, "Password must include a number"),
+    confirmNewPassword: z.string(),
+  })
+  .refine((data) => data.newPassword === data.confirmNewPassword, {
+    message: "Passwords do not match",
+    path: ["confirmNewPassword"],
+  });
+
 export type SignupStartInput = z.infer<typeof signupStartSchema>;
 export type SignupVerifyInput = z.infer<typeof signupVerifySchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+export type ForgotPasswordStartInput = z.infer<typeof forgotPasswordStartSchema>;
+export type ForgotPasswordVerifyInput = z.infer<typeof forgotPasswordVerifySchema>;
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;

@@ -20,7 +20,7 @@ import AAConsent from "../screens/AAConsent";
 import MyHoldings from "../screens/MyHoldings";
 
 // Screens rendered via the <Onboarding/> switch (no bottom nav).
-const ONBOARDING = ["splash", "signup", "login", "reveal"];
+const ONBOARDING = ["splash", "signup", "login", "forgotPassword", "reveal"];
 // Full-screen flows that also hide the bottom nav but render from SCREENS below.
 const NO_NAV_EXTRA = ["chooseMethod", "manualEntry", "fileUpload", "botScan", "aaConsent"];
 const NAV = [

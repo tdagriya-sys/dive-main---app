@@ -4,9 +4,16 @@ import bcrypt from "bcryptjs";
 import { User } from "../models/User";
 import { PendingSignup } from "../models/PendingSignup";
 import { RefreshToken } from "../models/RefreshToken";
-import { signupStartSchema, signupVerifySchema, loginSchema } from "../validators/auth";
+import {
+  signupStartSchema,
+  signupVerifySchema,
+  loginSchema,
+  forgotPasswordStartSchema,
+  forgotPasswordVerifySchema,
+  resetPasswordSchema,
+} from "../validators/auth";
 import { requestOtp, verifyOtp } from "../services/otpService";
-import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../utils/jwt";
+import { signAccessToken, signRefreshToken, verifyRefreshToken, signPasswordResetToken, verifyPasswordResetToken } from "../utils/jwt";
 import { env } from "../config/env";
 import { AuthedRequest } from "../middleware/auth";
 import { REFRESH_COOKIE_NAME as REFRESH_COOKIE } from "../config/constants";
@@ -153,6 +160,91 @@ export async function login(req: Request, res: Response) {
     user: publicUser(user),
     ...(wantsRefreshTokenInBody(req) ? { refreshToken } : {}),
   });
+}
+
+// Step 1 of 3: identify the account and send it a "password_reset"-purpose
+// OTP (same Otp collection/purpose enum signup already uses — see
+// otpService.ts, deliberately purpose-generic). Deliberately reveals
+// USER_NOT_FOUND rather than a vague "if an account exists..." message —
+// this codebase's login/signup already reveal account existence the same
+// way (404 USER_NOT_FOUND / 409 USER_EXISTS), so there's no established
+// enumeration-hardening precedent here to break by being equally direct.
+export async function forgotPasswordStart(req: Request, res: Response) {
+  const data = forgotPasswordStartSchema.parse(req.body);
+  const identifier = data.identifier.includes("@") ? data.identifier.trim().toLowerCase() : normalizeMobile(data.identifier);
+
+  const user = await User.findOne(data.identifier.includes("@") ? { email: identifier } : { mobile: identifier });
+  if (!user) {
+    return res.status(404).json({ error: "USER_NOT_FOUND", message: "We couldn't find an account with these details." });
+  }
+
+  // OTP identifier is always the account's mobile number, regardless of
+  // whether the user typed their email or mobile above — same convention
+  // signupStart/signupVerify use.
+  const result = await requestOtp(user.mobile, "password_reset", user.email);
+
+  if (!result.delivered) {
+    return res.status(502).json({
+      error: "OTP_DELIVERY_FAILED",
+      message: "Couldn't send your verification code right now. Please try again shortly.",
+    });
+  }
+
+  return res.status(200).json({
+    message: "OTP sent to your email address.",
+    mobile: user.mobile,
+    ...(result.devOtp ? { devOtp: result.devOtp } : {}), // DEV ONLY — remove/gate before production
+  });
+}
+
+// Step 2 of 3: verify the OTP, then hand back a short-lived, single-purpose
+// resetToken instead of making the frontend hold onto (or resend) the raw
+// OTP for the final step — see signPasswordResetToken's own comment in
+// utils/jwt.ts for why this is safe even if the token leaked.
+export async function forgotPasswordVerify(req: Request, res: Response) {
+  const data = forgotPasswordVerifySchema.parse(req.body);
+  const mobile = normalizeMobile(data.mobile);
+
+  const ok = await verifyOtp(mobile, "password_reset", data.otp);
+  if (!ok) {
+    return res.status(400).json({ error: "INVALID_OTP", message: "That OTP is incorrect or has expired." });
+  }
+
+  const user = await User.findOne({ mobile });
+  if (!user) {
+    return res.status(404).json({ error: "USER_NOT_FOUND", message: "Account no longer exists." });
+  }
+
+  const resetToken = signPasswordResetToken(user._id.toString());
+  return res.status(200).json({ resetToken });
+}
+
+// Step 3 of 3: identity was already proven via OTP in step 2 (the resetToken
+// IS that proof), so — unlike changePassword in userController.ts — there's
+// no currentPassword to check here. Revokes every live session the same way
+// changePassword does: a password someone forgot enough to need this flow
+// for is exactly the kind that might also be compromised, so every existing
+// session (not just future ones) should require a fresh login.
+export async function resetPassword(req: Request, res: Response) {
+  const data = resetPasswordSchema.parse(req.body);
+
+  let payload;
+  try {
+    payload = verifyPasswordResetToken(data.resetToken);
+  } catch {
+    return res.status(401).json({ error: "INVALID_RESET_TOKEN", message: "This reset link has expired. Please start again." });
+  }
+
+  const user = await User.findById(payload.sub);
+  if (!user) {
+    return res.status(404).json({ error: "USER_NOT_FOUND", message: "Account no longer exists." });
+  }
+
+  user.passwordHash = await bcrypt.hash(data.newPassword, 10);
+  await user.save();
+  await RefreshToken.updateMany({ userId: user._id, revokedAt: null }, { revokedAt: new Date() });
+
+  return res.status(200).json({ message: "Password updated. Please log in with your new password." });
 }
 
 export async function refresh(req: Request, res: Response) {

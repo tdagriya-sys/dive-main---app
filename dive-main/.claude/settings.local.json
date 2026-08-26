@@ -303,7 +303,10 @@
       "Bash(curl -s -o /dev/null -w \"markets no-key: http_status=%{http_code}\\\\n\" \"https://api.coingecko.com/api/v3/coins/markets?vs_currency=inr&ids=bitcoin&price_change_percentage=24h,7d\" --max-time 10)",
       "Bash(taskkill //PID 27708 //F)",
       "Bash(taskkill //PID 23312 //F)",
-      "Bash(taskkill //PID 27172 //F)"
+      "Bash(taskkill //PID 27172 //F)",
+      "Bash(tasklist //FI \"IMAGENAME eq node.exe\")",
+      "Bash(taskkill //PID 23224 //F)",
+      "Bash(taskkill //PID 32408 //F)"
     ]
   }
 }
