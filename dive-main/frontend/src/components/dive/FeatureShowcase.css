@@ -271,12 +271,28 @@
 .fs-fetch-card.span2{ grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; }
 .fs-fetch-card.span2 .fs-fetch-ic{ margin-bottom: 0; }
 
+.fs-scrolly-mobile-list{ display: none; }
+
 @media (max-width: 900px){
   .fs-scrolly-track{ height: auto; }
-  .fs-stage{ position: static; height: auto; padding: 60px 0; }
-  .fs-stage-inner{ flex-direction: column; gap: 36px; }
-  .fs-flip-3d{ height: 380px; }
-  .fs-dots{ position: static; transform: none; justify-content: center; margin-top: 24px; }
+  /* The flip-3d stage is scroll-linked against `.fs-scrolly-track`'s tall
+     (420vh) height, which collapses to auto above — no scroll range left
+     to drive a flip through the four features, so it was permanently
+     stuck showing only the first one. Hidden here in favor of
+     `.fs-scrolly-mobile-list`, a plain stacked list of all four. */
+  .fs-stage{ display: none; }
+  .fs-scrolly-mobile-list{
+    display: flex; flex-direction: column; gap: 48px;
+    padding: 60px 6vw 20px;
+  }
+  .fs-mobile-feature-card .fs-content-body{ max-width: none; }
+  .fs-mobile-feature-card .fs-image-pane{ margin-top: 24px; justify-content: center; }
+  .fs-mobile-static-face{
+    width: 100%; max-width: 380px; min-height: 280px;
+    background: var(--surface-card); border: 1px solid var(--border-light); border-radius: 22px;
+    padding: 22px; box-shadow: 0 40px 90px -30px rgba(0,0,0,.75);
+    display: flex; flex-direction: column;
+  }
 }
 
 /* =========================================================

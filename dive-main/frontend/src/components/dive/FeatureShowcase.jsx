@@ -375,7 +375,7 @@ function FeatureShowcaseScrolly() {
       <div className="fs-scrolly-track" ref={trackRef}>
         <div className="fs-stage">
           <div className="fs-stage-inner">
-            <div className="fs-content-pane">
+            <div className="fs-content-pane" data-testid="scrolly-content-pane">
               <span className="fs-feat-index" data-testid="scrolly-feat-index">{String(textIdx + 1).padStart(2, "0")} / 0{SCROLLY_FEATURES.length}</span>
               <h3 className="fs-content-title">{current.title}</h3>
               <p className="fs-content-body">{current.body}</p>
@@ -392,6 +392,25 @@ function FeatureShowcaseScrolly() {
               <span key={i} className={`fs-dot ${i === textIdx ? "active" : ""}`} />
             ))}
           </div>
+        </div>
+
+        {/* Mobile-only fallback: the scroll-jacked 3D flip above needs a
+            tall track (`.fs-scrolly-track` at 420vh) to compute rotation
+            against, which collapses to `height: auto` on mobile (see CSS),
+            so there's no scroll range left to flip through. Below 901px
+            `.fs-stage` renders display:none and this static stacked list of
+            all four features (no flip, no scroll-linking) takes over. */}
+        <div className="fs-scrolly-mobile-list" data-testid="scrolly-mobile-list">
+          {SCROLLY_FEATURES.map((f, i) => (
+            <div className="fs-mobile-feature-card" data-testid={`scrolly-mobile-card-${i}`} key={f.title}>
+              <span className="fs-feat-index">{String(i + 1).padStart(2, "0")} / 0{SCROLLY_FEATURES.length}</span>
+              <h3 className="fs-content-title">{f.title}</h3>
+              <p className="fs-content-body">{f.body}</p>
+              <div className="fs-image-pane">
+                <div className="fs-mobile-static-face"><f.Mock /></div>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </section>
