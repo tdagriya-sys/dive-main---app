@@ -91,17 +91,17 @@ function CategoryRow({ cat, band, existingAmount, finalAmount, finalPct, newInve
   return (
     <div className="bg-[var(--surface-card)] rounded-2xl p-4 border border-[var(--border)]" data-testid={`planner-cat-${cat}`}>
       <div className="flex items-center justify-between mb-2 gap-2">
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-center gap-2 min-w-0 shrink-0">
           <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: SEGMENT_COLORS[cat] || "#A1A1AA" }} />
           <span className="font-bold text-sm truncate">{cat}</span>
         </div>
+        {newInvestment > 0 && (
+          <span className="flex-1 text-center text-base text-[var(--dive-blue)] font-extrabold whitespace-nowrap">+{fmtINR(newInvestment)} new</span>
+        )}
         <span className="text-sm font-bold shrink-0">
           {existingAmount > 0 ? `${fmtINR(existingAmount)} → ` : ""}{fmtINR(finalAmount)}
         </span>
       </div>
-      {newInvestment > 0 && (
-        <p className="text-xs text-[var(--dive-blue)] font-semibold mb-2">+{fmtINR(newInvestment)} new</p>
-      )}
       <RangeBar currentPct={finalPct} loPct={lo} hiPct={hi} />
       <p className="text-[10px] text-[var(--text-tertiary)] font-semibold mt-1.5">Ideal {Math.round(lo)}–{Math.round(hi)}%</p>
     </div>

@@ -1,11 +1,95 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, TrendingUp, TrendingDown, Minus, FlaskConical, X, ArrowRight, ChevronRight } from "lucide-react";
+import { Search, TrendingUp, TrendingDown, Minus, FlaskConical, X, ArrowRight, ChevronRight, Landmark } from "lucide-react";
 import { useDive } from "../context/DiveContext";
 import { ScoreRing, RangeBar, AnimatedNumber } from "../components/dive/Widgets";
 import { buildSuggestions, rescaleIdealRanges, personalizeSuggestions, diveScore, topExposure, missingCategories, apparentDiversification, realDiversification, totalInvested, fmtINR, effectiveHoldings } from "../lib/diveEngine";
 import { contextSummaryMessage, isCategoryExpected, deferredIncreaseNote, deferredReduceNote, expectedCoreCategories } from "../lib/contextMessaging";
 import { HoldingsLoadingState, HoldingsLoadErrorState, HoldingsEmptyState } from "../components/dive/HoldingsGateStates";
+
+// One tax fact per CORE_CATEGORIES entry (diveEngine.js) — the rate/threshold
+// numbers below, and the specific instruments each category maps to
+// (ASSET_CLASS_LABELS in diveEngine.js), were verified against multiple
+// sources as of Aug 2026 rather than assumed from general knowledge, since
+// this is exactly the kind of figure that goes stale silently:
+//   - Equity/equity-oriented MF/ETF/REIT-InvIT capital gains: 20% STCG
+//     (≤12 months) and 12.5% LTCG above a ₹1.25L/year exemption (equity/MF/
+//     ETF) took effect 23 Jul 2024 (Budget 2024, ex-Sec 111A/112A) and are
+//     unchanged by Budget 2025/2026. REIT/InvIT units get the same STCG/LTCG
+//     RATES but not the ₹1.25L exemption — that's Sec 112, not 112A, per
+//     PrimeInvestor's and Tax Garden's REIT/InvIT-specific breakdowns, not
+//     the generic equity one.
+//   - "Mutual Funds" here is diveEngine's generic MUTUAL_FUND bucket (equity
+//     AND debt orientation both land here — there's no per-holding
+//     equity/debt split surfaced to this engine), so the note has to cover
+//     both branches rather than assume one.
+//   - Debt-oriented MFs bought on/after 1 Apr 2023 lost LTCG treatment
+//     entirely in the 2023 Budget — taxed at slab regardless of holding
+//     period (cleartax.in/s/tax-on-debt-funds, bajajfinserv.in).
+//   - FD TDS thresholds (₹50,000 general / ₹1,00,000 senior citizen, up from
+//     ₹40,000/₹50,000) took effect 1 Apr 2025 (Budget 2025, Sec 194A) — the
+//     interest itself was and remains fully taxable regardless; TDS is only
+//     a withholding mechanic, never mentioned as if it were the exemption.
+//   - Gold/Silver here also covers gold ETFs and gold mutual funds (per
+//     diveEngine.js's own categorizeInstrument comment — "ETF" the CORE
+//     CATEGORY excludes gold ETFs specifically), each with its own LTCG
+//     holding-period threshold (12 months listed ETFs vs 24 months physical/
+//     fund units) per Budget 2024's gold/silver simplification.
+//   - Sovereign Gold Bonds' "held to maturity = fully tax-free" rule was
+//     narrowed by the Income-tax Act, 2025/Budget 2026 (effective 1 Apr
+//     2026) to ONLY the original subscriber holding since issue — a
+//     secondary-market buyer no longer gets it. Getting this wrong would
+//     overstate a real tax benefit, so it's phrased as conditional, not
+//     absolute.
+//   - Bonds' Section 10(15) full interest exemption applies only to specific
+//     legacy PSU tax-free bond issues (NHAI/IRFC/PFC/REC/HUDCO, none issued
+//     fresh since FY 2015-16) — regular corporate bonds/NCDs/G-Secs in the
+//     same category don't get it, hence "specific ... bonds", not a blanket
+//     category-wide claim.
+//   - Insurance here is diveEngine's ULIP_INSURANCE bucket specifically (not
+//     term/traditional insurance), so the note is scoped to ULIP's own
+//     Sec 10(10D) ₹2.5L/year premium cap (Budget 2021) rather than the
+//     ₹5L/year non-ULIP cap (Budget 2023), which is a different, unrelated
+//     threshold for a policy type this category doesn't represent. The cap
+//     is a cliff, not a marginal exemption — cross ₹2.5L (aggregated across
+//     ALL of a person's ULIPs, not per-policy) in even one policy year and
+//     that policy's Sec 10(10D) exemption is lost entirely, not just on the
+//     excess; what then gets taxed is the GAIN (proceeds minus premiums),
+//     treated like an equity-oriented fund — 20% STCG (≤12 months) or 12.5%
+//     LTCG above its own ₹1.25L/year exemption (cleartax.in/s/unit-linked-
+//     insurance-plan-taxation-rules, kotaklife.com/ulip-plans/ulip-taxation).
+//   - Crypto's flat 30% (Sec 115BBH), no loss set-off, and 1% TDS
+//     (₹10,000/₹50,000 threshold, Sec 194S) are unchanged since their 2022
+//     introduction.
+//
+// Section numbers cited are the long-standing Income-tax Act, 1961 ones —
+// still how virtually every source (and the user's own request) refers to
+// them day-to-day — with a single shared disclaimer below (not repeated on
+// every card) noting the Income-tax Act, 2025 recodified them without
+// changing the rates/thresholds themselves.
+const TAX_NOTES = {
+  Equity: "Sell within 12 months and gains are taxed at 20% (STCG, Sec 111A). Hold longer and the first ₹1.25 lakh of gains each year is tax-free — anything above that is a flat 12.5% (LTCG, Sec 112A), with no indexation benefit.",
+  "Mutual Funds": "Equity-oriented funds (≥65% in equity) are taxed exactly like stocks — 20% STCG within 12 months, or 12.5% LTCG above a ₹1.25 lakh/year exemption. Debt-oriented funds bought after 1 Apr 2023 get no long-term concession at all — every gain is taxed at your income slab rate.",
+  Bonds: "Interest is added to your income and taxed at your slab rate. Capital gains on listed bonds held over 12 months are taxed at a flat 12.5% (no indexation). Exception: specific government-backed bonds (NHAI, IRFC, PFC, REC, HUDCO) pay interest that's fully tax-exempt under Section 10(15).",
+  "Gold/Silver": "Physical gold, gold funds, and gold ETFs are taxed at 12.5% LTCG (24 months for physical/funds, 12 for ETFs) — under that, it's your slab rate. Sovereign Gold Bonds redeem fully tax-free only for the original buyer holding to maturity; the 2.5%/year interest along the way is still taxable.",
+  "REIT/InvIT": "Capital gains work like equity — 20% STCG within 12 months, or 12.5% LTCG beyond that — but without the ₹1.25 lakh exemption equity shares get. The interest and rental portion of every payout is taxed at your slab rate; the dividend/capital-return portion is often tax-free, depending on how the trust is structured.",
+  FD: "Interest is fully taxable at your income slab rate, with no exemption. Banks deduct 10% TDS once your interest from them crosses ₹50,000 in a year (₹1,00,000 if you're a senior citizen) — that's a withholding rule, not a tax break.",
+  ETF: "Index and equity ETFs are taxed exactly like stocks: 20% STCG if sold within 12 months, or a flat 12.5% LTCG on gains above ₹1.25 lakh a year if held longer.",
+  Insurance: "ULIP maturity proceeds are tax-free under Section 10(10D) — but only if your total annual premium across all your ULIPs stays at ₹2.5 lakh or less. Cross that in even one policy year and the exemption is lost entirely, not just on the excess: the gain (proceeds minus premiums paid) is then taxed like an equity fund instead — 20% if held ≤12 months, or 12.5% above a ₹1.25 lakh/year exemption if held longer. The death benefit stays 100% tax-free regardless of premium.",
+  Crypto: "Every gain is taxed at a flat 30% (Section 115BBH) no matter how long you held it, and losses can't be set off against any other gains. A 1% TDS is also deducted on most sell transactions above ₹10,000–₹50,000 a year.",
+};
+
+// Which TAX_NOTES entries get the green "tax benefit" card border vs stay
+// unhighlighted as a plain tax liability — a judgment call on each note's
+// actual content, not every category that merely MENTIONS an exemption.
+// Equity/Mutual Funds/ETF/REIT-InvIT all reference the standard ₹1.25L LTCG
+// exemption, but that's boilerplate available to nearly any capital asset,
+// not a distinctive feature of the category — those stay liability-framed.
+// These three each have a genuine, standout tax-free outcome that's the
+// headline of their own note: ULIP maturity under Sec 10(10D) (Insurance),
+// specific tax-free PSU bonds under Sec 10(15) (Bonds), and Sovereign Gold
+// Bond tax-free redemption at maturity (Gold/Silver).
+const TAX_BENEFIT_CATEGORIES = new Set(["Insurance", "Bonds", "Gold/Silver"]);
 
 export default function Suggestions() {
   const { holdings, holdingsLoading, holdingsError, loadHoldings, ranges, prefs, setScreen, setAskInstrument, sims, addSim, resetSims, scoreBreakdown } = useDive();
@@ -116,6 +200,11 @@ export default function Suggestions() {
           <button data-testid="sugg-reset-sims" onClick={resetSims}
             className="mt-2 text-xs font-bold text-[var(--dive-blue)] underline">Reset simulated changes</button>
         )}
+        {/* Shared once, not repeated on every card's tax strip below — see
+            TAX_NOTES' own header comment for how each figure was verified. */}
+        <p data-testid="sugg-tax-disclaimer" className="mt-2 text-[10px] text-[var(--text-tertiary)] leading-relaxed">
+          Tax notes below reflect Budget 2024–2026 rules for resident individuals. Section references follow the long-standing Income-tax Act, 1961 numbering; the Income-tax Act, 2025 (effective 1 Apr 2026) recodified these under new section numbers without changing the rates or thresholds. Not tax advice — confirm specifics with a tax professional before acting.
+        </p>
       </div>
 
       <div className="px-6 mt-5">
@@ -147,7 +236,14 @@ export default function Suggestions() {
             : labelFor(s.action, s.cat);
           return (
             <motion.div key={s.cat} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06 }}
-              className={`bg-[var(--surface-card)] rounded-2xl p-5 border shadow-sm ${s.prioritized ? "border-[var(--dive-blue)]" : "border-[var(--border)]"}`} data-testid={`sugg-card-${s.cat}`}>
+              className={`bg-[var(--surface-card)] rounded-2xl p-5 border shadow-sm ${
+                // s.prioritized (the user's own explicit "preferred category"
+                // setting) wins over the tax-benefit highlight when both are
+                // true — it's a direct, active user preference, vs. this
+                // being a passive, always-the-same-for-everyone fact about
+                // the category's tax treatment.
+                s.prioritized ? "border-[var(--dive-blue)]" : TAX_BENEFIT_CATEGORIES.has(s.cat) ? "border-[var(--green)]" : "border-[var(--border)]"
+              }`} data-testid={`sugg-card-${s.cat}`}>
               <div className="flex items-center gap-2 mb-1">
                 <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${effectiveAction === "increase" ? "bg-[var(--dive-blue-light)]" : effectiveAction === "reduce" ? "bg-[#FEF3C7]" : "bg-[#D1FAE5]"}`}>
                   <Icon size={16} className={effectiveAction === "increase" ? "text-[var(--dive-blue)]" : effectiveAction === "reduce" ? "text-[var(--amber)]" : "text-[var(--green)]"} />
@@ -181,6 +277,18 @@ export default function Suggestions() {
                     </p>
                   )}
                 </>
+              )}
+              {/* Tax profile is a fact about the category itself, not about
+                  whether Divve is actively pushing it right now — shown
+                  regardless of deferred/capped/on-track/over-exposed state.
+                  See TAX_NOTES above for sourcing on every number here. */}
+              {TAX_NOTES[s.cat] && (
+                <div data-testid={`sugg-tax-note-${s.cat}`} className="mt-3 bg-[var(--surface-card-hover)] rounded-xl px-3 py-2.5 flex items-start gap-2">
+                  <Landmark size={14} className="text-[var(--text-tertiary)] shrink-0 mt-0.5" />
+                  <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+                    <span className="font-bold text-[var(--text-primary)]">Tax: </span>{TAX_NOTES[s.cat]}
+                  </p>
+                </div>
               )}
               {/* Simulate/Ask are always available, regardless of whether this
                   category is over-exposed, on track, not needed yet, or

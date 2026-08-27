@@ -306,7 +306,10 @@
       "Bash(taskkill //PID 27172 //F)",
       "Bash(tasklist //FI \"IMAGENAME eq node.exe\")",
       "Bash(taskkill //PID 23224 //F)",
-      "Bash(taskkill //PID 32408 //F)"
+      "Bash(taskkill //PID 32408 //F)",
+      "WebSearch",
+      "Bash(node -e \"const icons=require\\('lucide-react'\\); console.log\\('Landmark' in icons, 'Percent' in icons, 'ReceiptText' in icons, 'Scale' in icons\\)\")",
+      "Bash(powershell -Command \"Get-Process node,tsx -ErrorAction SilentlyContinue | Stop-Process -Force\")"
     ]
   }
 }

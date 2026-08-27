@@ -15,8 +15,8 @@ const DEFAULT_PLANNER_STATE = {
 // Mirrors DiveContext.js's real setPlannerState exactly (merge-patch, with
 // support for a functional patch of the whole state) — the bug only shows up
 // against this real merge behavior, not a naive test double.
-function PlannerHarness() {
-  const [plannerState, setPlannerStateRaw] = React.useState(DEFAULT_PLANNER_STATE);
+function PlannerHarness({ initialState } = {}) {
+  const [plannerState, setPlannerStateRaw] = React.useState({ ...DEFAULT_PLANNER_STATE, ...initialState });
   const setPlannerState = (patch) =>
     setPlannerStateRaw((p) => ({ ...p, ...(typeof patch === "function" ? patch(p) : patch) }));
   useDive.mockReturnValue({
@@ -52,5 +52,46 @@ describe("Planner — SIP yearly/monthly toggle", () => {
     expect(screen.getByTestId("planner-expand-monthly-btn")).toHaveTextContent("Show monthly");
     expect(screen.getByTestId("planner-row-y-1")).toBeInTheDocument();
     expect(screen.queryByTestId("planner-row-m-1")).not.toBeInTheDocument();
+  });
+});
+
+// Bug report: in the Lumpsum planner, each category row's "+₹X new" badge
+// rendered as its own line below the category name (left-aligned), instead
+// of sitting centered between the category name and the post-investment
+// amount on the same line. Fixed by moving it into the row's own flex
+// header as a `flex-1 text-center` middle child — asserted here via DOM
+// order (name+dot group, then the badge, then the amount) since that sibling
+// order is what actually produces the centered position in a
+// `justify-between` flex row, plus a bump from text-xs to text-base to
+// "highlight" it per the request.
+describe("Planner — lumpsum CategoryRow '+amount new' badge", () => {
+  it("centers the badge between the category name and the post-investment amount, only for categories actually getting new money", () => {
+    render(<PlannerHarness initialState={{ mode: "lumpsum", lumpsumAmount: 100000 }} />);
+
+    // A brand-new investor (holdings: [] from the harness) puts every active
+    // category's newInvestment > 0 — Equity is active for every risk/persona
+    // tier, so its row is a reliable case to assert the fix against.
+    const row = screen.getByTestId("planner-cat-Equity");
+    const header = row.firstElementChild; // the `.flex.items-center.justify-between` row
+    expect(header.children).toHaveLength(3);
+
+    const [nameGroup, badge, amount] = header.children;
+    expect(nameGroup).toHaveTextContent("Equity");
+    expect(badge).toHaveTextContent(/^\+₹[\d,]+ new$/);
+    expect(badge.className).toContain("text-center");
+    expect(badge.className).toContain("text-base"); // bumped up from text-xs
+
+    // plannerEngine's planLumpsum sets finalAmount = existingAmount +
+    // newInvestment (Planner.jsx:240) — for a fresh investor existingAmount
+    // is 0 for every row, so the badge's figure must exactly match the
+    // right-hand amount (which has no "existing → " prefix in that case).
+    const badgeFigure = badge.textContent.match(/₹[\d,]+/)[0];
+    expect(amount).toHaveTextContent(badgeFigure);
+    expect(amount.textContent).not.toContain("→");
+
+    // Order matters for the fix: the badge must be the middle DOM child so
+    // justify-between's flex-1 middle item actually lands between the two
+    // anchored ends, not appended after them.
+    expect(Array.from(header.children).indexOf(badge)).toBe(1);
   });
 });
