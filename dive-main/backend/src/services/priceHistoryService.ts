@@ -265,6 +265,22 @@ function generateSyntheticReturns(
 //     should NOT be treated as a "free" diversifier despite this low
 //     correlation, because its own volatility (60% annualized here) dominates
 //     any diversification benefit on the volatility axis.
+//   - PF (PPF/EPF/VPF): beta 0, same as FD — no market co-movement visible
+//     to the account holder (EPFO's own internal ~15%-into-equity-ETF
+//     allocation since 2015 is smoothed away entirely before the annual
+//     rate is declared to members, so it isn't a real per-holding beta
+//     signal). vol deliberately set ABOVE FD's 0.003, not equal to it: FD's
+//     near-zero vol reflects a rate locked for the deposit's whole tenure at
+//     issuance (genuinely fixed once opened); PF's government-declared rate
+//     is instead periodically revised for the WHOLE balance going forward —
+//     PPF has moved from 8.7% (FY2015-16) down to a 7.1% floor unchanged
+//     since Apr-Jun 2020 (Ministry of Finance), EPF from 8.1%-8.65% over the
+//     last 6 years (EPFO Central Board of Trustees) — real, if slow,
+//     rate-revision variability FD doesn't have. This is an illustrative
+//     judgment call (not literature-cited the way the beta signs above are)
+//     calibrated to that observed 0.4-1.6 percentage-point historical
+//     rate-revision range, kept well below BOND's 0.04 since PF is still far
+//     more stable than market-priced debt.
 const SYNTHETIC_PARAMS: Record<AssetClass, { drift: number; vol: number; beta: number; label: string }> = {
   EQUITY: { drift: 0.12, vol: 0.2, beta: 1.0, label: "Equity" },
   MUTUAL_FUND: { drift: 0.12, vol: 0.16, beta: 0.75, label: "Mutual Fund" },
@@ -277,6 +293,10 @@ const SYNTHETIC_PARAMS: Record<AssetClass, { drift: number; vol: number; beta: n
   ULIP_INSURANCE: { drift: 0.08, vol: 0.09, beta: 0.35, label: "ULIP/Insurance" },
   FD: { drift: 0.07, vol: 0.003, beta: 0, label: "Fixed Deposit" },
   CRYPTO: { drift: 0.25, vol: 0.6, beta: 0.3, label: "Crypto" },
+  // Blended PPF(7.1%)/EPF(8.25%) fallback drift — superseded by the actual
+  // holding's own declared rate below (pfInterestRatePercent) whenever it's
+  // known, same override pattern as FD.
+  PF: { drift: 0.075, vol: 0.01, beta: 0, label: "Provident Fund (PPF/EPF)" },
 };
 
 export interface HoldingReturnInput {
@@ -286,6 +306,12 @@ export interface HoldingReturnInput {
   symbol?: string;
   coingeckoId?: string;
   fdInterestRatePercent?: number;
+  // Unlike fdInterestRatePercent (a bank's freely-chosen rate, genuinely
+  // user-entered), PPF/EPF/VPF rates are public and government-declared —
+  // see config/pfRates.ts. Still stored per-holding (not looked up fresh
+  // every time) so an old holding keeps the rate that was actually in force
+  // when it was entered, and stays user-editable if the declared rate moves.
+  pfInterestRatePercent?: number;
 }
 
 export interface HoldingReturnSeries {
@@ -315,7 +341,12 @@ export async function resolveHoldingReturns(holding: HoldingReturnInput, marketF
   }
 
   const params = SYNTHETIC_PARAMS[holding.assetClass] ?? SYNTHETIC_PARAMS.EQUITY;
-  const drift = holding.assetClass === "FD" && holding.fdInterestRatePercent ? holding.fdInterestRatePercent / 100 : params.drift;
+  const drift =
+    holding.assetClass === "FD" && holding.fdInterestRatePercent
+      ? holding.fdInterestRatePercent / 100
+      : holding.assetClass === "PF" && holding.pfInterestRatePercent
+      ? holding.pfInterestRatePercent / 100
+      : params.drift;
   const seedKey = `${holding.assetClass}:${holding.instrumentId || holding.name}`;
   const length = marketFactor.length || 252;
   const returns = generateSyntheticReturns(seedKey, drift, params.vol, length, params.beta, marketFactor);

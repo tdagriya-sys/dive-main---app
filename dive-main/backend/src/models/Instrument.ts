@@ -12,6 +12,7 @@ export const ASSET_CLASSES = [
   "ULIP_INSURANCE",
   "FD",
   "CRYPTO",
+  "PF",
 ] as const;
 
 export type AssetClass = (typeof ASSET_CLASSES)[number];

@@ -152,6 +152,14 @@ export function computeHoldingQuality(
         tier: "good",
       };
 
+    case "PF":
+      return {
+        label: "Sovereign/EPFO-backed — no bank credit risk",
+        detail:
+          "PPF is backed directly by the Government of India via the National Small Savings Fund; EPF is administered by EPFO, a statutory body under the Ministry of Labour & Employment. Neither carries a bank's credit/default risk the way an FD does, so there's no DICGC-style deposit insurance here — none is needed. The government-declared interest rate (reviewed quarterly for PPF, annually for EPF) can change over time, but your principal and already-declared interest aren't at credit risk.",
+        tier: "good",
+      };
+
     case "BOND":
       return {
         label: "Issuer credit risk varies",

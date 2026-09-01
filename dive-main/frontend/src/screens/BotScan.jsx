@@ -5,6 +5,7 @@ import { useDive } from "../context/DiveContext";
 import { api } from "../lib/api";
 import InstrumentAutocomplete from "../components/dive/InstrumentAutocomplete";
 import ScanningLoader from "../components/dive/ScanningLoader";
+import { PF_DECLARED_RATES } from "../lib/diveEngine";
 
 const FRAME_INTERVAL_MS = 1800;
 const MAX_FRAMES = 20;
@@ -13,7 +14,20 @@ function emptyFd() {
   return { bank: "", tenureMonths: "12", startMonth: String(new Date().getMonth() + 1), startYear: String(new Date().getFullYear()), interestRate: "7" };
 }
 
-const ASSET_CLASSES = ["EQUITY", "MUTUAL_FUND", "ETF", "BOND", "REIT", "INVIT", "GOLD", "SILVER", "ULIP_INSURANCE", "FD", "CRYPTO"];
+// See FileUpload.jsx's identical helper for why startMonth/startYear always
+// default to "now" rather than being AI-extracted.
+function emptyPf(c) {
+  return {
+    subType: c?.pfSubType || "PPF",
+    institution: c?.pfInstitution || "",
+    monthlyContribution: c?.pfMonthlyContribution != null ? String(c.pfMonthlyContribution) : "",
+    startMonth: String(new Date().getMonth() + 1),
+    startYear: String(new Date().getFullYear()),
+    interestRatePercent: c?.pfInterestRatePercent != null ? String(c.pfInterestRatePercent) : String(PF_DECLARED_RATES[c?.pfSubType || "PPF"]),
+  };
+}
+
+const ASSET_CLASSES = ["EQUITY", "MUTUAL_FUND", "ETF", "BOND", "REIT", "INVIT", "GOLD", "SILVER", "ULIP_INSURANCE", "FD", "PF", "CRYPTO"];
 
 export default function BotScan() {
   const { setScreen, goBack, loadHoldings, holdings } = useDive();
@@ -171,6 +185,7 @@ export default function BotScan() {
         _localId: `${c.accountLabel || "account"}::${c.name}::${idx}`,
         include: !!c.verifiedInInstrumentList,
         fd: emptyFd(),
+        pf: emptyPf(c),
         saveError: null,
       }));
       setFoundList(list);
@@ -238,6 +253,18 @@ export default function BotScan() {
             startMonth: Number(c.fd.startMonth),
             startYear: Number(c.fd.startYear),
             interestRate: Number(c.fd.interestRate ?? c.fdAnnualRatePercent ?? 7),
+            source: "BOT",
+          });
+        } else if (c.assetClass === "PF") {
+          await api.post("/holdings/manual", {
+            assetClass: "PF",
+            subType: c.pf.subType,
+            institution: c.pf.institution || c.name,
+            openingBalance: Number(c.investedValue) || 0,
+            monthlyContribution: c.pf.monthlyContribution ? Number(c.pf.monthlyContribution) : undefined,
+            startMonth: Number(c.pf.startMonth),
+            startYear: Number(c.pf.startYear),
+            interestRatePercent: Number(c.pf.interestRatePercent),
             source: "BOT",
           });
         } else {
@@ -421,6 +448,22 @@ export default function BotScan() {
                     <input placeholder="Tenure (months)" value={c.fd.tenureMonths} onChange={(e) => updateCandidate(c._localId, { fd: { ...c.fd, tenureMonths: e.target.value } })}
                       className="rounded-lg border border-[var(--border)] bg-[var(--surface-card)] text-[var(--text-primary)] px-3 py-2 text-xs" />
                     <input placeholder="Interest rate %" value={c.fd.interestRate} onChange={(e) => updateCandidate(c._localId, { fd: { ...c.fd, interestRate: e.target.value } })}
+                      className="rounded-lg border border-[var(--border)] bg-[var(--surface-card)] text-[var(--text-primary)] px-3 py-2 text-xs" />
+                  </div>
+                ) : c.assetClass === "PF" ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    <select value={c.pf.subType}
+                      onChange={(e) => updateCandidate(c._localId, { pf: { ...c.pf, subType: e.target.value, interestRatePercent: String(PF_DECLARED_RATES[e.target.value]) } })}
+                      className="rounded-lg border border-[var(--border)] bg-[var(--surface-card)] text-[var(--text-primary)] px-3 py-2 text-xs col-span-2">
+                      <option value="PPF">PPF</option>
+                      <option value="EPF">EPF</option>
+                      <option value="VPF">VPF</option>
+                    </select>
+                    <input placeholder="Bank / EPFO" value={c.pf.institution} onChange={(e) => updateCandidate(c._localId, { pf: { ...c.pf, institution: e.target.value } })}
+                      className="rounded-lg border border-[var(--border)] bg-[var(--surface-card)] text-[var(--text-primary)] px-3 py-2 text-xs col-span-2" />
+                    <input placeholder="Opening balance ₹" value={c.investedValue ?? ""} onChange={(e) => updateCandidate(c._localId, { investedValue: e.target.value })}
+                      className="rounded-lg border border-[var(--border)] bg-[var(--surface-card)] text-[var(--text-primary)] px-3 py-2 text-xs" />
+                    <input placeholder="Interest rate %" value={c.pf.interestRatePercent} onChange={(e) => updateCandidate(c._localId, { pf: { ...c.pf, interestRatePercent: e.target.value } })}
                       className="rounded-lg border border-[var(--border)] bg-[var(--surface-card)] text-[var(--text-primary)] px-3 py-2 text-xs" />
                   </div>
                 ) : (

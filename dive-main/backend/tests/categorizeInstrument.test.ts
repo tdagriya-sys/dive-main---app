@@ -18,4 +18,16 @@ describe("instrument verification during categorization", () => {
     expect(result.assetClass).toBe("EQUITY");
     expect(result.verifiedInInstrumentList).toBe(false);
   });
+
+  // Regression guard for the ordering constraint noted right in
+  // categorizeInstrument.ts's KEYWORD_RULES: "provident fund" contains the
+  // substring "fund" and must not fall through to MUTUAL_FUND's \bfund\b
+  // pattern instead of PF's own rule, which has to run first.
+  it.each(["PPF Account", "EPF Balance", "My Provident Fund", "Employees Provident Fund"])(
+    "categorizes %s as PF, not MUTUAL_FUND",
+    async (name) => {
+      const result = await categorizeInstrument(name);
+      expect(result.assetClass).toBe("PF");
+    }
+  );
 });

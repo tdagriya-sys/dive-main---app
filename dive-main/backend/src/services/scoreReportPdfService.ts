@@ -71,6 +71,7 @@ const ASSET_CLASS_LABELS: Record<string, string> = {
   ULIP_INSURANCE: "Insurance",
   FD: "FD",
   CRYPTO: "Crypto",
+  PF: "PF",
 };
 
 // No public Indian currency source uses the ₹ glyph in PDFKit's standard

@@ -2,7 +2,16 @@ import { Response } from "express";
 import { Types } from "mongoose";
 import { Holding } from "../models/Holding";
 import { AssetClass, Instrument } from "../models/Instrument";
-import { parseManualHolding, computeFdValues, parseNonFdHoldingUpdate, parseFdHoldingUpdate, FdHoldingInput } from "../validators/holdings";
+import {
+  parseManualHolding,
+  computeFdValues,
+  computePfValues,
+  parseNonFdHoldingUpdate,
+  parseFdHoldingUpdate,
+  parsePfHoldingUpdate,
+  FdHoldingInput,
+  PfHoldingInput,
+} from "../validators/holdings";
 import { AuthedRequest } from "../middleware/auth";
 import { ApiError } from "../middleware/errorHandler";
 import { computeHoldingQuality } from "../services/holdingQualityService";
@@ -85,6 +94,29 @@ export async function createManualHolding(req: AuthedRequest, res: Response) {
     return res.status(201).json({ holding });
   }
 
+  if (input.assetClass === "PF") {
+    const { currentValue, investedToDate } = computePfValues(input);
+    const holding = await Holding.create({
+      userId: req.userId,
+      assetClass: "PF",
+      name: `${input.institution} ${input.subType}`,
+      investedValue: investedToDate,
+      currentValue,
+      extraFields: {
+        subType: input.subType,
+        institution: input.institution,
+        openingBalance: input.openingBalance,
+        monthlyContribution: input.monthlyContribution ?? 0,
+        startMonth: input.startMonth,
+        startYear: input.startYear,
+        interestRatePercent: input.interestRatePercent,
+      },
+      source: input.source ?? "MANUAL",
+    });
+    invalidateDiveScoreCache(req.userId!);
+    return res.status(201).json({ holding });
+  }
+
   let instrumentName = input.name;
   if (input.instrumentId) {
     const instrument = await Instrument.findById(input.instrumentId).lean();
@@ -141,6 +173,31 @@ export async function updateHolding(req: AuthedRequest, res: Response) {
       interestRate: merged.interestRate,
       maturityValue,
       maturityDate,
+    };
+  } else if (holding.assetClass === "PF") {
+    const input = parsePfHoldingUpdate(req.body);
+    const merged: PfHoldingInput = {
+      assetClass: "PF",
+      subType: input.subType ?? (holding.extraFields.subType as PfHoldingInput["subType"]),
+      institution: input.institution ?? (holding.extraFields.institution as string),
+      openingBalance: input.openingBalance ?? (holding.extraFields.openingBalance as number),
+      monthlyContribution: input.monthlyContribution ?? (holding.extraFields.monthlyContribution as number),
+      startMonth: input.startMonth ?? (holding.extraFields.startMonth as number),
+      startYear: input.startYear ?? (holding.extraFields.startYear as number),
+      interestRatePercent: input.interestRatePercent ?? (holding.extraFields.interestRatePercent as number),
+    };
+    const { currentValue, investedToDate } = computePfValues(merged);
+    holding.name = `${merged.institution} ${merged.subType}`;
+    holding.investedValue = investedToDate;
+    holding.currentValue = currentValue;
+    holding.extraFields = {
+      subType: merged.subType,
+      institution: merged.institution,
+      openingBalance: merged.openingBalance,
+      monthlyContribution: merged.monthlyContribution ?? 0,
+      startMonth: merged.startMonth,
+      startYear: merged.startYear,
+      interestRatePercent: merged.interestRatePercent,
     };
   } else {
     const input = parseNonFdHoldingUpdate(req.body);

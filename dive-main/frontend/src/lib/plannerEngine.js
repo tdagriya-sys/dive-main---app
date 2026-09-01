@@ -33,7 +33,7 @@ const CORPUS_TIERS = [
   { id: "growing", maxAmount: 200000, expectedClassCount: 3 },
   { id: "established", maxAmount: 1000000, expectedClassCount: 5 },
   { id: "substantial", maxAmount: 5000000, expectedClassCount: 8 },
-  { id: "large", maxAmount: Infinity, expectedClassCount: 11 },
+  { id: "large", maxAmount: Infinity, expectedClassCount: 12 },
 ];
 
 function resolveCorpusTier(totalInvestedAmount) {
@@ -41,10 +41,10 @@ function resolveCorpusTier(totalInvestedAmount) {
 }
 
 const PERSONA_BRACKETS = [
-  { id: "earlyCareer", minAge: 18, maxAge: 28, priorityClasses: ["EQUITY", "MUTUAL_FUND", "GOLD", "CRYPTO"], deprioritizedClasses: ["FD", "BOND", "ULIP_INSURANCE", "REIT", "INVIT"] },
-  { id: "buildingPhase", minAge: 29, maxAge: 40, priorityClasses: ["EQUITY", "MUTUAL_FUND", "GOLD", "BOND"], deprioritizedClasses: ["ULIP_INSURANCE", "REIT", "INVIT"] },
-  { id: "peakEarning", minAge: 41, maxAge: 55, priorityClasses: ["EQUITY", "MUTUAL_FUND", "BOND", "FD", "GOLD", "REIT", "INVIT"], deprioritizedClasses: [] },
-  { id: "preRetirement", minAge: 56, maxAge: 64, priorityClasses: ["BOND", "FD", "MUTUAL_FUND", "GOLD", "ULIP_INSURANCE", "EQUITY"], deprioritizedClasses: ["CRYPTO"] },
+  { id: "earlyCareer", minAge: 18, maxAge: 28, priorityClasses: ["EQUITY", "MUTUAL_FUND", "GOLD", "CRYPTO"], deprioritizedClasses: ["FD", "BOND", "ULIP_INSURANCE", "REIT", "INVIT", "PF"] },
+  { id: "buildingPhase", minAge: 29, maxAge: 40, priorityClasses: ["EQUITY", "MUTUAL_FUND", "GOLD", "BOND", "PF"], deprioritizedClasses: ["ULIP_INSURANCE", "REIT", "INVIT"] },
+  { id: "peakEarning", minAge: 41, maxAge: 55, priorityClasses: ["EQUITY", "MUTUAL_FUND", "BOND", "PF", "FD", "GOLD", "REIT", "INVIT"], deprioritizedClasses: [] },
+  { id: "preRetirement", minAge: 56, maxAge: 64, priorityClasses: ["BOND", "FD", "MUTUAL_FUND", "PF", "GOLD", "ULIP_INSURANCE", "EQUITY"], deprioritizedClasses: ["CRYPTO"] },
   { id: "retired", minAge: 65, maxAge: null, priorityClasses: ["FD", "BOND", "ULIP_INSURANCE", "GOLD", "MUTUAL_FUND", "EQUITY"], deprioritizedClasses: ["CRYPTO"] },
 ];
 
@@ -55,7 +55,7 @@ function resolvePersona(age) {
   );
 }
 
-const DEFAULT_CLASS_ORDER = ["EQUITY", "MUTUAL_FUND", "GOLD", "BOND", "FD", "ETF", "SILVER", "REIT", "INVIT", "CRYPTO", "ULIP_INSURANCE"];
+const DEFAULT_CLASS_ORDER = ["EQUITY", "MUTUAL_FUND", "GOLD", "BOND", "FD", "PF", "ETF", "SILVER", "REIT", "INVIT", "CRYPTO", "ULIP_INSURANCE"];
 
 function fullPersonaOrder(persona) {
   const ordered = [];

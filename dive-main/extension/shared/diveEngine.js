@@ -24,6 +24,7 @@ export const ASSET_CLASS_LABELS = {
   SILVER: "Gold/Silver",
   ULIP_INSURANCE: "Insurance",
   FD: "FD",
+  PF: "PF",
   CRYPTO: "Crypto",
 };
 
@@ -33,17 +34,17 @@ export const ASSET_CLASS_LABELS = {
 export const IDEAL_RANGES = {
   Conservative: {
     Equity: [20, 30], "Mutual Funds": [15, 25], Bonds: [20, 30],
-    "Gold/Silver": [8, 12], "REIT/InvIT": [5, 10], FD: [10, 20],
+    "Gold/Silver": [8, 12], "REIT/InvIT": [5, 10], FD: [10, 20], PF: [10, 18],
     ETF: [3, 8], Insurance: [5, 10], Crypto: [0, 2],
   },
   Balanced: {
     Equity: [25, 35], "Mutual Funds": [20, 30], Bonds: [15, 25],
-    "Gold/Silver": [8, 12], "REIT/InvIT": [8, 12], FD: [8, 15],
+    "Gold/Silver": [8, 12], "REIT/InvIT": [8, 12], FD: [8, 15], PF: [8, 14],
     ETF: [5, 10], Insurance: [3, 7], Crypto: [0, 5],
   },
   Aggressive: {
     Equity: [35, 50], "Mutual Funds": [20, 30], Bonds: [5, 15],
-    "Gold/Silver": [5, 10], "REIT/InvIT": [8, 15], FD: [3, 8],
+    "Gold/Silver": [5, 10], "REIT/InvIT": [8, 15], FD: [3, 8], PF: [3, 6],
     ETF: [5, 12], Insurance: [2, 5], Crypto: [2, 8],
   },
 };

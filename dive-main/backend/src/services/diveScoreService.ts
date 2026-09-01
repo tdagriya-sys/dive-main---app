@@ -54,6 +54,16 @@ const LIQUIDITY_TIER: Record<AssetClass, number> = {
   BOND: 50,
   ULIP_INSURANCE: 20,
   FD: 15,
+  // Below FD, not tied with it: FD is breakable any time (with an interest
+  // penalty) — full principal access is never in question. PF has no such
+  // unconditional exit — PPF's 15-year hard lock (partial withdrawal only
+  // from FY7, capped at 50% of the balance 4 years prior) and EPF's
+  // retirement/2-month-unemployment/purpose-specific-after-12-months gating
+  // are both strictly worse than a breakable FD. Not 0 — real, if narrow,
+  // partial-access routes exist (PPF's year 3-6 loan facility, EPF's
+  // purpose-based partial withdrawals), so an instrument with truly no
+  // access route at all still reads as meaningfully worse.
+  PF: 8,
 };
 
 const TRADING_DAYS_PER_YEAR = 252;
@@ -262,6 +272,7 @@ async function computeDiveScoreBreakdownUncached(userId: string): Promise<DiveSc
         symbol: instrument?.symbol,
         coingeckoId: instrument?.metadata?.coingeckoId as string | undefined,
         fdInterestRatePercent: typeof h.extraFields?.interestRate === "number" ? h.extraFields.interestRate : undefined,
+        pfInterestRatePercent: typeof h.extraFields?.interestRatePercent === "number" ? h.extraFields.interestRatePercent : undefined,
       },
       marketFactor
     );

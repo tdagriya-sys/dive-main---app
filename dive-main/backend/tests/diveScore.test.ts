@@ -164,6 +164,48 @@ describe("Dive Score v2 breakdown", () => {
     expect(res.body.correlationMatrix.labels).toEqual(["EQUITY"]);
   });
 
+  // Directly validates the numeric weighting decisions from the PF
+  // implementation plan — LIQUIDITY_TIER.PF: 8 (below FD's 15, since PF has
+  // no unconditional exit) and SYNTHETIC_PARAMS.PF's near-zero vol (above
+  // FD's, since PF's rate is periodically revised rather than locked at
+  // issuance, but still far below a market-priced debt instrument).
+  it("scores a 100% PF portfolio with a liquidity sub-score below FD's own (matching LIQUIDITY_TIER.PF: 8 < FD: 15), and low volatility", async () => {
+    const pfToken = await signupAndLogin("9700000021", "score-pf-liquidity@example.com");
+    await addHolding(pfToken, {
+      assetClass: "PF",
+      subType: "EPF",
+      institution: "EPFO (via Acme Corp)",
+      openingBalance: 100000,
+      startMonth: new Date().getMonth() + 1,
+      startYear: new Date().getFullYear(),
+      interestRatePercent: 8.25,
+    });
+    const pfRes = await request(app).get("/api/score/breakdown").set("Authorization", `Bearer ${pfToken}`);
+    expect(pfRes.status).toBe(200);
+    // Weighted average over a single 100%-weight holding == LIQUIDITY_TIER.PF exactly.
+    expect(pfRes.body.subScores.liquidity.score).toBe(8);
+    // Near-zero annualized vol (SYNTHETIC_PARAMS.PF.vol: 0.01) should read as
+    // a very high (low-risk) volatility sub-score, same ballpark as FD's.
+    expect(pfRes.body.subScores.volatility.score).toBeGreaterThan(85);
+
+    const fdToken = await signupAndLogin("9700000022", "score-fd-liquidity@example.com");
+    await addHolding(fdToken, {
+      assetClass: "FD",
+      bank: "HDFC Bank",
+      principal: 100000,
+      tenureMonths: 12,
+      startMonth: new Date().getMonth() + 1,
+      startYear: new Date().getFullYear(),
+      interestRate: 7,
+    });
+    const fdRes = await request(app).get("/api/score/breakdown").set("Authorization", `Bearer ${fdToken}`);
+    expect(fdRes.body.subScores.liquidity.score).toBe(15);
+    // The actual comparison this whole test exists to lock in: PF reads as
+    // LESS liquid than FD, not equal or more — a breakable bank FD beats a
+    // 15-year-locked PPF / retirement-gated EPF on this axis by design.
+    expect(pfRes.body.subScores.liquidity.score).toBeLessThan(fdRes.body.subScores.liquidity.score);
+  });
+
   it("is deterministic across repeated calls for the same holdings (seeded synthetic data, no randomness leaking in)", async () => {
     const token = await signupAndLogin("9700000004", "score-deterministic@example.com");
     await addHolding(token, { assetClass: "EQUITY", name: "Infosys", investedValue: 60000, currentValue: 65000 });
@@ -417,14 +459,14 @@ describe("Dive Score v2 — Layer D (Context Engine)", () => {
     expect(res.body.subScores.correlation.score).toBe(20); // genuine gap -> harsh floor still applies
   });
 
-  it("expands the expected set toward all 11 classes for a large corpus regardless of age", async () => {
+  it("expands the expected set toward all 12 classes for a large corpus regardless of age", async () => {
     const token = await signupAndLogin("9700000019", "score-context-large@example.com", 24);
     await addHolding(token, { assetClass: "EQUITY", name: "Reliance Industries", investedValue: 6000000, currentValue: 6000000 });
 
     const res = await request(app).get("/api/score/breakdown").set("Authorization", `Bearer ${token}`);
     expect(res.status).toBe(200);
     expect(res.body.context.corpusTier.id).toBe("large");
-    expect(res.body.context.expectedAssetClasses.length).toBe(11);
+    expect(res.body.context.expectedAssetClasses.length).toBe(12); // 11 -> 12 once PF joined the universe
   });
 
   it("gives full contextFit credit when expected classes are covered, even if the user also holds extra classes beyond what's expected", async () => {

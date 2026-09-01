@@ -53,6 +53,41 @@ describe("holdings", () => {
     expect(res.body.holding.extraFields.maturityValue).toBeGreaterThan(100000);
   });
 
+  // Mirrors the FD test above — PF (Provident Fund) is the other asset class
+  // with its own principal/rate-shaped schema instead of instrument+value.
+  it("creates a PF holding and computes its current value from opening balance + monthly contributions", async () => {
+    const token = await signupAndLogin();
+    const start = new Date();
+    start.setMonth(start.getMonth() - 12); // a year ago, so growth is actually observable
+    const res = await request(app)
+      .post("/api/holdings/manual")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        assetClass: "PF",
+        subType: "EPF",
+        institution: "EPFO (via Acme Corp)",
+        openingBalance: 100000,
+        monthlyContribution: 5000,
+        startMonth: start.getMonth() + 1,
+        startYear: start.getFullYear(),
+        interestRatePercent: 8.25,
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.holding.assetClass).toBe("PF");
+    expect(res.body.holding.extraFields.subType).toBe("EPF");
+    // currentValue reflects a year of compounding + 12 months of
+    // contributions; investedValue tracks only principal actually put in
+    // (opening balance + contributions), so it must be LESS than
+    // currentValue (the gap is real interest earned) but MORE than just the
+    // opening balance alone (contributions aren't "returns").
+    expect(res.body.holding.currentValue).toBeGreaterThan(res.body.holding.investedValue);
+    expect(res.body.holding.investedValue).toBeGreaterThan(100000);
+    expect(res.body.holding.investedValue).toBeCloseTo(100000 + 5000 * 12, -2);
+    // No FD-style maturityValue/maturityDate — PF's "maturity" doesn't map
+    // onto a single date (see computePfValues()'s own comment).
+    expect(res.body.holding.extraFields.maturityValue).toBeUndefined();
+  });
+
   it("rejects a holding for an unauthenticated request", async () => {
     const res = await request(app).get("/api/holdings");
     expect(res.status).toBe(401);

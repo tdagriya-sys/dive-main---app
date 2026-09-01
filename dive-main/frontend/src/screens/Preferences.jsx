@@ -4,7 +4,7 @@ import { LogOut, ListChecks, Loader2, AlertTriangle, FileDown, Bot, Check } from
 import { useDive } from "../context/DiveContext";
 import { api } from "../lib/api";
 
-const CATEGORIES = ["Equity", "Mutual Funds", "Bonds", "Gold/Silver", "REIT/InvIT", "ETF", "FD", "Insurance", "Crypto"];
+const CATEGORIES = ["Equity", "Mutual Funds", "Bonds", "Gold/Silver", "REIT/InvIT", "ETF", "FD", "PF", "Insurance", "Crypto"];
 const RISK = ["Conservative", "Balanced", "Aggressive"];
 const RETURN = ["Modest", "Moderate", "High"];
 const DIV = ["Low", "Medium", "High"];

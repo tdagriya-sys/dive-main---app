@@ -119,6 +119,7 @@ If you are not looking at a row inside a holdings/portfolio table or an individu
 - **currentValue**: the current / present / market value (a plain number). If the screen only shows one value (no separate invested vs current), use your best judgement — for most holdings screens both are shown; if genuinely only one number exists, put it in currentValue and set investedValue to null rather than guessing
 - **quantity**: number of shares/units, if shown; otherwise null
 - For **FD (Fixed Deposit)** specifically, also try to capture: **fdPrincipal**, **fdAnnualRatePercent** (interest rate), **fdTenureMonths**, **fdMaturityDate** (ISO date string if a date is shown, else null) — set any of these to null if not visible. Still fill investedValue with the principal and currentValue with the maturity/current value if shown.
+- For **PF (Provident Fund)** specifically, also try to capture: **pfSubType** ("PPF", "EPF", or "VPF" — infer from context, e.g. a bank/post-office passbook is almost always PPF, an employer/UAN/EPFO passbook is EPF or VPF), **pfInstitution** (bank name for PPF, or "EPFO" / employer name for EPF), **pfMonthlyContribution** (if a recurring monthly contribution amount is shown), **pfInterestRatePercent** (if a declared rate is shown — otherwise leave null; do not guess a rate) — set any of these to null if not visible. There's usually no clean single maturity/tenure the way FD has one (EPF has none short of retirement; PPF's 15-year term is extendable), so don't try to infer fdTenureMonths-style fields for PF.
 
 ## Asset class guidance (use these cues, not just the word "fund"/"bond" etc.)
 
@@ -133,8 +134,9 @@ If you are not looking at a row inside a holdings/portfolio table or an individu
 - **ULIP_INSURANCE**: Unit Linked Insurance Plans / investment-linked life insurance ("ULIP", "life plan", "guaranteed plan")
 - **FD**: Fixed Deposits / Term Deposits (bank or corporate)
 - **CRYPTO**: cryptocurrencies (Bitcoin, Ethereum, USDT, and other coins/tokens)
+- **PF**: Provident Fund accounts — PPF (Public Provident Fund, usually a bank/post-office passbook), EPF (Employees' Provident Fund, an employer/UAN/EPFO passbook), or VPF (Voluntary Provident Fund, a top-up on EPF)
 
-If you cannot tell which of the 11 classes applies, make your best guess (most bare tickers on an Indian brokerage app are EQUITY) and set confidence to "low".
+If you cannot tell which of the 12 classes applies, make your best guess (most bare tickers on an Indian brokerage app are EQUITY) and set confidence to "low".
 
 ## Cross-image reasoning — same account vs. different account (READ CAREFULLY)
 
@@ -180,6 +182,10 @@ const OUTPUT_SCHEMA = {
           fdAnnualRatePercent: { anyOf: [{ type: "number" }, { type: "null" }] },
           fdTenureMonths: { anyOf: [{ type: "number" }, { type: "null" }] },
           fdMaturityDate: { anyOf: [{ type: "string" }, { type: "null" }] },
+          pfSubType: { anyOf: [{ type: "string", enum: ["PPF", "EPF", "VPF"] }, { type: "null" }] },
+          pfInstitution: { anyOf: [{ type: "string" }, { type: "null" }] },
+          pfMonthlyContribution: { anyOf: [{ type: "number" }, { type: "null" }] },
+          pfInterestRatePercent: { anyOf: [{ type: "number" }, { type: "null" }] },
           accountLabel: { type: "string" },
           confidence: { type: "string", enum: ["high", "medium", "low"] },
           reasoning: { type: "string" },
@@ -194,6 +200,10 @@ const OUTPUT_SCHEMA = {
           "fdAnnualRatePercent",
           "fdTenureMonths",
           "fdMaturityDate",
+          "pfSubType",
+          "pfInstitution",
+          "pfMonthlyContribution",
+          "pfInterestRatePercent",
           "accountLabel",
           "confidence",
           "reasoning",
@@ -217,6 +227,10 @@ interface AiHoldingRaw {
   fdAnnualRatePercent: number | null;
   fdTenureMonths: number | null;
   fdMaturityDate: string | null;
+  pfSubType: "PPF" | "EPF" | "VPF" | null;
+  pfInstitution: string | null;
+  pfMonthlyContribution: number | null;
+  pfInterestRatePercent: number | null;
   accountLabel: string;
   confidence: "high" | "medium" | "low";
   reasoning: string;
@@ -229,6 +243,10 @@ export interface AiExtractedHolding extends CandidateHolding {
   fdAnnualRatePercent: number | null;
   fdTenureMonths: number | null;
   fdMaturityDate: string | null;
+  pfSubType: "PPF" | "EPF" | "VPF" | null;
+  pfInstitution: string | null;
+  pfMonthlyContribution: number | null;
+  pfInterestRatePercent: number | null;
 }
 
 export interface AiExtractionResult {
@@ -264,6 +282,10 @@ async function finalizeHoldings(parsed: { holdings: AiHoldingRaw[]; excludedNote
       fdAnnualRatePercent: raw.fdAnnualRatePercent,
       fdTenureMonths: raw.fdTenureMonths,
       fdMaturityDate: raw.fdMaturityDate,
+      pfSubType: raw.pfSubType,
+      pfInstitution: raw.pfInstitution,
+      pfMonthlyContribution: raw.pfMonthlyContribution,
+      pfInterestRatePercent: raw.pfInterestRatePercent,
     };
     candidate.missingFields = missingFieldsFor(candidate);
     return candidate;

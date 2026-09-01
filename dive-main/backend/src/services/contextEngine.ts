@@ -2,7 +2,7 @@ import { AssetClass } from "../models/Instrument";
 
 /**
  * Layer D — Context Engine. Given how much money someone has and how old
- * they are, decides which of the 11 asset classes it's actually SENSIBLE to
+ * they are, decides which of the 12 asset classes it's actually SENSIBLE to
  * expect them to hold RIGHT NOW — so the score and its messaging never treat
  * "not diversified yet" as a problem when, for this person's corpus and life
  * stage, it isn't one. See docs/DIVE_SCORE_MODEL.md §15 for the full writeup.
@@ -61,9 +61,9 @@ export const CORPUS_TIERS: CorpusTier[] = [
     id: "large",
     label: "Large",
     maxAmount: Infinity,
-    expectedClassCount: 11,
+    expectedClassCount: 12,
     reasoning:
-      "Above ₹50,00,000, every one of the 11 classes is achievable at a meaningful ticket size — at this scale, skipping a class is a deliberate allocation choice, not a practical constraint, so the full spectrum is the sensible expectation.",
+      "Above ₹50,00,000, every one of the 12 classes is achievable at a meaningful ticket size — at this scale, skipping a class is a deliberate allocation choice, not a practical constraint, so the full spectrum is the sensible expectation.",
   },
 ];
 
@@ -97,47 +97,47 @@ export const PERSONA_BRACKETS: PersonaBracket[] = [
     minAge: 18,
     maxAge: 28,
     priorityClasses: ["EQUITY", "MUTUAL_FUND", "GOLD", "CRYPTO"],
-    deprioritizedClasses: ["FD", "BOND", "ULIP_INSURANCE", "REIT", "INVIT"],
+    deprioritizedClasses: ["FD", "BOND", "ULIP_INSURANCE", "REIT", "INVIT", "PF"],
     volatilityWorstAt: 0.55,
     drawdownWorstAt: -0.7,
     reasoning:
-      "Long time horizon and typically the fewest financial dependents of any life stage — the main resource this stage has is time, which growth assets (equity, funds) compound. Locking money into low-liquidity, preservation-first instruments trades away that advantage before it's needed. That same long horizon means more time to recover from a deep drawdown, so the volatility/drawdown level that counts as a failure is set further out than for later stages.",
+      "Long time horizon and typically the fewest financial dependents of any life stage — the main resource this stage has is time, which growth assets (equity, funds) compound. Locking money into low-liquidity, preservation-first instruments trades away that advantage before it's needed. That same long horizon means more time to recover from a deep drawdown, so the volatility/drawdown level that counts as a failure is set further out than for later stages. PF is deprioritized alongside every other lock-in class here even though EPF is often already accruing passively via payroll at this age — that existing balance still gets entered and scored regardless of this ordering; deprioritizing it just means the app doesn't actively nudge toward a NEW voluntary PPF/VPF commitment this early.",
   },
   {
     id: "buildingPhase",
     label: "Building Phase",
     minAge: 29,
     maxAge: 40,
-    priorityClasses: ["EQUITY", "MUTUAL_FUND", "GOLD", "BOND"],
+    priorityClasses: ["EQUITY", "MUTUAL_FUND", "GOLD", "BOND", "PF"],
     deprioritizedClasses: ["ULIP_INSURANCE", "REIT", "INVIT"],
     volatilityWorstAt: 0.5,
     drawdownWorstAt: -0.65,
     reasoning:
-      "Still growth-oriented, but rising responsibilities (loans, family) make a first slice of debt (bonds) a reasonable, not premature, addition.",
+      "Still growth-oriented, but rising responsibilities (loans, family) make a first slice of debt (bonds) a reasonable, not premature, addition. A first deliberate PPF/VPF top-up is a reasonable, tax-advantaged debt decision alongside it by this stage.",
   },
   {
     id: "peakEarning",
     label: "Peak Earning",
     minAge: 41,
     maxAge: 55,
-    priorityClasses: ["EQUITY", "MUTUAL_FUND", "BOND", "FD", "GOLD", "REIT", "INVIT"],
+    priorityClasses: ["EQUITY", "MUTUAL_FUND", "BOND", "PF", "FD", "GOLD", "REIT", "INVIT"],
     deprioritizedClasses: [],
     volatilityWorstAt: 0.45,
     drawdownWorstAt: -0.6,
     reasoning:
-      "Typically the highest income and capacity of any stage — growth and preservation are both reasonable to expect side by side, across the broadest priority list of any persona. Treated as the baseline risk-capacity level (these were the model's original, persona-blind defaults).",
+      "Typically the highest income and capacity of any stage — growth and preservation are both reasonable to expect side by side, across the broadest priority list of any persona. Treated as the baseline risk-capacity level (these were the model's original, persona-blind defaults). PF sits ahead of FD here specifically: this bracket is most likely to be in the highest tax slab, where PF's EEE edge over FD's fully-taxable interest matters most.",
   },
   {
     id: "preRetirement",
     label: "Pre-Retirement",
     minAge: 56,
     maxAge: 64,
-    priorityClasses: ["BOND", "FD", "MUTUAL_FUND", "GOLD", "ULIP_INSURANCE", "EQUITY"],
+    priorityClasses: ["BOND", "FD", "MUTUAL_FUND", "PF", "GOLD", "ULIP_INSURANCE", "EQUITY"],
     deprioritizedClasses: ["CRYPTO"],
     volatilityWorstAt: 0.35,
     drawdownWorstAt: -0.45,
     reasoning:
-      "Capital preservation rises sharply in importance as the investing horizon shortens — debt and insured instruments should meaningfully lift the score now, and their absence should be flagged more than it would be at 25. Equity remains present (a multi-decade retirement still needs growth) but sits behind preservation in priority; crypto's volatility no longer suits this stage. A shorter horizon to recover from a drawdown means the failure threshold moves in.",
+      "Capital preservation rises sharply in importance as the investing horizon shortens — debt and insured instruments should meaningfully lift the score now, and their absence should be flagged more than it would be at 25. Equity remains present (a multi-decade retirement still needs growth) but sits behind preservation in priority; crypto's volatility no longer suits this stage. A shorter horizon to recover from a drawdown means the failure threshold moves in. PF is deliberately placed AFTER MUTUAL_FUND, not before: a fresh PPF opened at 56-64 doesn't mature for 15 years — a real mismatch for this persona's shortening horizon — so it shouldn't outrank more liquid, immediately-practical preservation options, even though PF's tax treatment is otherwise attractive here too.",
   },
   {
     id: "retired",
@@ -149,7 +149,7 @@ export const PERSONA_BRACKETS: PersonaBracket[] = [
     volatilityWorstAt: 0.28,
     drawdownWorstAt: -0.35,
     reasoning:
-      "Preservation and income dominate; a smaller equity sleeve remains reasonable since retirement itself can span decades, but growth is no longer the priority and crypto's volatility is actively deprioritized. Least tolerance for volatility/drawdown of any persona — often already drawing down the corpus for income, with the least time to recover before that withdrawal need arrives.",
+      "Preservation and income dominate; a smaller equity sleeve remains reasonable since retirement itself can span decades, but growth is no longer the priority and crypto's volatility is actively deprioritized. Least tolerance for volatility/drawdown of any persona — often already drawing down the corpus for income, with the least time to recover before that withdrawal need arrives. PF is deliberately left off both lists here (falls through to DEFAULT_CLASS_ORDER instead) — no new payroll EPF at this stage for most users, and a fresh 15-year PPF lock is a poor fit for a retirement-drawdown horizon; any existing EPF balance still gets entered and scored regardless.",
   },
 ];
 
@@ -169,6 +169,7 @@ const DEFAULT_CLASS_ORDER: AssetClass[] = [
   "GOLD",
   "BOND",
   "FD",
+  "PF",
   "ETF",
   "SILVER",
   "REIT",
@@ -184,11 +185,11 @@ export interface ContextProfile {
 }
 
 /**
- * Builds the "Expected Asset Class Set" — which of the 11 classes it's
+ * Builds the "Expected Asset Class Set" — which of the 12 classes it's
  * reasonable to expect a portfolio like this one to hold right now. Corpus
  * tier governs the COUNT; persona governs the ORDER. A large-enough corpus
  * tier count will eventually pull in even a persona's deprioritized classes
- * (matching "large corpus + any age → expected set approaches all 11") —
+ * (matching "large corpus + any age → expected set approaches all 12") —
  * deprioritization only affects ordering, never permanent exclusion.
  */
 export function resolveContext(totalInvestedAmount: number, age: number): ContextProfile {

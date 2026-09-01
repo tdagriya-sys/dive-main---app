@@ -1,11 +1,11 @@
 // DIVE deterministic scoring & look-through engine
-// All 9 segment labels the app's 11-way backend assetClass enum collapses
+// All 10 segment labels the app's 12-way backend assetClass enum collapses
 // into (REIT+InvIT and Gold+Silver each share one label — see
 // ASSET_CLASS_LABELS below) — every one of them gets a Suggestions card,
 // a missing-category nudge, and an ideal-range target, not just a subset.
-export const CORE_CATEGORIES = ["Equity", "Mutual Funds", "Bonds", "Gold/Silver", "REIT/InvIT", "FD", "ETF", "Insurance", "Crypto"];
+export const CORE_CATEGORIES = ["Equity", "Mutual Funds", "Bonds", "Gold/Silver", "REIT/InvIT", "FD", "PF", "ETF", "Insurance", "Crypto"];
 
-// Maps the backend's canonical 11-way assetClass enum to the human-readable
+// Maps the backend's canonical 12-way assetClass enum to the human-readable
 // segment labels this engine (and the existing UI copy) was built around.
 export const ASSET_CLASS_LABELS = {
   EQUITY: "Equity",
@@ -19,6 +19,7 @@ export const ASSET_CLASS_LABELS = {
   ULIP_INSURANCE: "Insurance",
   FD: "FD",
   CRYPTO: "Crypto",
+  PF: "PF",
 };
 
 // Ideal allocation ranges by risk profile (% of portfolio). This is static
@@ -33,20 +34,29 @@ export const ASSET_CLASS_LABELS = {
 //     if anything higher for Conservative (protection-minded) than Aggressive.
 //   - Crypto: high-volatility/speculative — kept small across every profile,
 //     including Aggressive, rather than scaling up the way Equity does.
+//   - PF (PPF/EPF/VPF): same declining-with-risk-appetite SHAPE as FD (both
+//     are guaranteed-return, zero-volatility instruments), but the ceiling is
+//     pulled below FD's own numbers — PPF caps contributions at ₹1.5L/year
+//     and EPF is capped by salary/employer formula, a hard practical ceiling
+//     FD doesn't have (you can always add more to an FD). PF's illiquidity
+//     (15-year PPF lock / retirement-gated EPF) also makes over-shooting a
+//     target here a worse mistake than over-shooting FD, which you can
+//     unwind. Authored independently, like every other row — no need to sum
+//     to 100% with the rest (see rescaleIdealRanges below).
 export const IDEAL_RANGES = {
   Conservative: {
     Equity: [20, 30], "Mutual Funds": [15, 25], Bonds: [20, 30],
-    "Gold/Silver": [8, 12], "REIT/InvIT": [5, 10], FD: [10, 20],
+    "Gold/Silver": [8, 12], "REIT/InvIT": [5, 10], FD: [10, 20], PF: [10, 18],
     ETF: [3, 8], Insurance: [5, 10], Crypto: [0, 2],
   },
   Balanced: {
     Equity: [25, 35], "Mutual Funds": [20, 30], Bonds: [15, 25],
-    "Gold/Silver": [8, 12], "REIT/InvIT": [8, 12], FD: [8, 15],
+    "Gold/Silver": [8, 12], "REIT/InvIT": [8, 12], FD: [8, 15], PF: [8, 14],
     ETF: [5, 10], Insurance: [3, 7], Crypto: [0, 5],
   },
   Aggressive: {
     Equity: [35, 50], "Mutual Funds": [20, 30], Bonds: [5, 15],
-    "Gold/Silver": [5, 10], "REIT/InvIT": [8, 15], FD: [3, 8],
+    "Gold/Silver": [5, 10], "REIT/InvIT": [8, 15], FD: [3, 8], PF: [3, 6],
     ETF: [5, 12], Insurance: [2, 5], Crypto: [2, 8],
   },
 };
@@ -92,6 +102,13 @@ export function adaptHolding(h) {
 
 export const fmtINR = (n) => "₹" + Math.round(n).toLocaleString("en-IN");
 
+// Mirrors backend/src/config/pfRates.ts exactly — government-declared PPF/
+// EPF/VPF rates, used only to pre-fill a new PF holding's interest-rate
+// field (still user-editable). See that file's own comment for sourcing;
+// last verified 2026-09-01. No live feed exists for this — update both
+// copies by hand when either rate body revises its rate.
+export const PF_DECLARED_RATES = { PPF: 7.1, EPF: 8.25, VPF: 8.25 };
+
 export const SEGMENT_COLORS = {
   Equity: "#E3B856",
   "Mutual Funds": "#A78BFA",
@@ -104,6 +121,10 @@ export const SEGMENT_COLORS = {
   // Was missing entirely — fell back to the generic "#A1A1AA" gray on the
   // segment donut, same monochrome issue fixed for per-company colors earlier.
   Crypto: "#F43F5E",
+  // A green not shared with any other of the 9 existing hues above (nearest
+  // is Bonds' teal #2DD4BF) — same "give every category a distinct hue,
+  // don't let it fall back to gray" lesson as Crypto's own comment above.
+  PF: "#4ADE80",
 };
 
 // Fixed-order categorical palette for the company/look-through exposure
@@ -127,6 +148,7 @@ const SIM_TEMPLATES = {
   "Gold/Silver": [{ company: "Gold", pct: 100 }],
   "REIT/InvIT": [{ company: "Embassy REIT", pct: 55 }, { company: "IndiGrid InvIT", pct: 45 }],
   FD: [{ company: "Govt / Bank", pct: 100 }],
+  PF: [{ company: "EPFO / Govt", pct: 100 }],
   Insurance: [{ company: "Govt / Bank", pct: 60 }, { company: "Others (diversified)", pct: 40 }],
   Crypto: [{ company: "Bitcoin", pct: 40 }, { company: "Ethereum", pct: 30 }, { company: "Others (diversified)", pct: 30 }],
 };
@@ -461,7 +483,7 @@ export function buildSuggestions(holdings, ranges, risk) {
 // ahead of defensive ones (and vice-versa for "Modest"); it does not change
 // what "on track"/"over its ideal band" means for any category.
 export const RETURN_TIER = {
-  FD: "low", Bonds: "low", Insurance: "low",
+  FD: "low", PF: "low", Bonds: "low", Insurance: "low",
   "Gold/Silver": "medium", "REIT/InvIT": "medium", "Mutual Funds": "medium",
   Equity: "high", ETF: "high", Crypto: "high",
 };

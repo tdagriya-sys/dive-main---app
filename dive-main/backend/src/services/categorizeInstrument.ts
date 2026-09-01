@@ -4,6 +4,9 @@ import { Instrument, AssetClass, ASSET_CLASSES } from "../models/Instrument";
 // name lookup. Order matters — more specific patterns first.
 const KEYWORD_RULES: Array<{ assetClass: AssetClass; pattern: RegExp }> = [
   { assetClass: "FD", pattern: /\bfixed deposit\b|\bfd\b|\btime deposit\b/i },
+  // Must come before MUTUAL_FUND's \bfund\b pattern below — "provident fund"
+  // contains the substring "fund" and would otherwise mis-match there first.
+  { assetClass: "PF", pattern: /\bppf\b|\bepf\b|\bvpf\b|\bprovident fund\b|\bpublic provident fund\b|\bemployees'? provident fund\b/i },
   { assetClass: "CRYPTO", pattern: /\bbitcoin\b|\bethereum\b|\bcrypto\b|\busdt\b|\bbnb\b|\bsolana\b|\bdogecoin\b/i },
   { assetClass: "GOLD", pattern: /\bgold\b|\bsgb\b|\bsovereign gold bond\b/i },
   { assetClass: "SILVER", pattern: /\bsilver\b/i },
@@ -30,7 +33,7 @@ export interface CategorizeResult {
 
 /**
  * Maps a free-text instrument name (from a file upload row, bot-scan OCR line,
- * etc.) to one of the 11 canonical asset classes. Broker holdings pages
+ * etc.) to one of the 12 canonical asset classes. Broker holdings pages
  * (e.g. Angel One) show ticker SYMBOLS (e.g. "RELIANCE"), not full company
  * names, so symbol lookup is tried first (exact, case-insensitive) before
  * falling back to fuzzy name matching.

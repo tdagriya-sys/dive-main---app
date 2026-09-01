@@ -11,6 +11,9 @@ import {
   rescaleIdealRanges,
   totalInvested,
   IDEAL_RANGES,
+  CORE_CATEGORIES,
+  SEGMENT_COLORS,
+  ASSET_CLASS_LABELS,
 } from "./diveEngine";
 
 describe("adaptHolding", () => {
@@ -185,6 +188,56 @@ describe("apparentDiversification / realDiversification / diveScore", () => {
 describe("totalInvested", () => {
   it("sums the amount field across holdings", () => {
     expect(totalInvested([{ amount: 100 }, { amount: 250 }])).toBe(350);
+  });
+});
+
+// PF (Provident Fund — PPF/EPF/VPF) is the newest CORE_CATEGORIES entry.
+// diveEngine.js is the single collapse-point between the backend's 12-way
+// assetClass enum and every downstream consumer (Suggestions, Planner,
+// Preferences, X-Ray) — a missing PF row in any of these tables degrades
+// silently rather than crashing (e.g. buildSuggestions falls back to an
+// [0,0] ideal band, SEGMENT_COLORS falls back to gray), so these are worth
+// asserting directly rather than trusting downstream screens to catch it.
+describe("PF (Provident Fund) — diveEngine.js wiring", () => {
+  it("is a CORE_CATEGORIES entry mapped from the backend's PF enum value", () => {
+    expect(CORE_CATEGORIES).toContain("PF");
+    expect(ASSET_CLASS_LABELS.PF).toBe("PF");
+  });
+
+  it("has its own real IDEAL_RANGES band in every risk profile, not the [0,0] fallback", () => {
+    ["Conservative", "Balanced", "Aggressive"].forEach((risk) => {
+      const [lo, hi] = IDEAL_RANGES[risk].PF;
+      expect(hi).toBeGreaterThan(lo);
+      expect(lo).toBeGreaterThan(0);
+    });
+    // FD-shaped (declining with risk appetite), pulled below FD's own
+    // ceiling at every step — see diveEngine.js's own IDEAL_RANGES comment
+    // for why (PPF/EPF have hard practical contribution ceilings FD doesn't).
+    expect(IDEAL_RANGES.Conservative.PF[1]).toBeLessThan(IDEAL_RANGES.Conservative.FD[1]);
+    expect(IDEAL_RANGES.Balanced.PF[1]).toBeLessThan(IDEAL_RANGES.Balanced.FD[1]);
+    expect(IDEAL_RANGES.Aggressive.PF[1]).toBeLessThan(IDEAL_RANGES.Aggressive.FD[1]);
+  });
+
+  it("has a distinct SEGMENT_COLORS hex, not the generic gray fallback", () => {
+    expect(SEGMENT_COLORS.PF).toBeTruthy();
+    expect(SEGMENT_COLORS.PF).not.toBe("#A1A1AA");
+    expect(Object.values(SEGMENT_COLORS).filter((c) => c === SEGMENT_COLORS.PF)).toHaveLength(1); // no collision with an existing hue
+  });
+
+  it("participates in the diversification score like any other segment — no special-casing needed", () => {
+    const holdings = [{ segment: "PF", amount: 1000 }];
+    // diveScore() is fully generic over segment strings (HHI-based) — a
+    // single-category portfolio should score low regardless of which
+    // category it is, confirming PF isn't silently excluded from the calc.
+    expect(diveScore(holdings)).toBeLessThan(50);
+  });
+
+  it("reads as an 'increase' suggestion when absent, using its own real ideal band (not [0,0])", () => {
+    const holdings = [{ segment: "Equity", amount: 100000 }]; // no PF holding at all
+    const suggestions = buildSuggestions(holdings, IDEAL_RANGES, "Balanced");
+    const pf = suggestions.find((s) => s.cat === "PF");
+    expect(pf.action).toBe("increase");
+    expect(pf.hiAmt).toBeGreaterThan(0); // would be 0 if IDEAL_RANGES.Balanced.PF were missing
   });
 });
 

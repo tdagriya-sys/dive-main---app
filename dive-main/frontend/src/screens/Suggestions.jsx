@@ -1,9 +1,9 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, TrendingUp, TrendingDown, Minus, FlaskConical, X, ArrowRight, ChevronRight, Landmark } from "lucide-react";
+import { Search, TrendingUp, TrendingDown, Minus, FlaskConical, X, ArrowRight, ChevronRight, Landmark, Zap } from "lucide-react";
 import { useDive } from "../context/DiveContext";
 import { ScoreRing, RangeBar, AnimatedNumber } from "../components/dive/Widgets";
-import { buildSuggestions, rescaleIdealRanges, personalizeSuggestions, diveScore, topExposure, missingCategories, apparentDiversification, realDiversification, totalInvested, fmtINR, effectiveHoldings } from "../lib/diveEngine";
+import { buildSuggestions, rescaleIdealRanges, personalizeSuggestions, diveScore, topExposure, missingCategories, apparentDiversification, realDiversification, totalInvested, fmtINR, effectiveHoldings, segmentBreakdown } from "../lib/diveEngine";
 import { contextSummaryMessage, isCategoryExpected, deferredIncreaseNote, deferredReduceNote, expectedCoreCategories } from "../lib/contextMessaging";
 import { HoldingsLoadingState, HoldingsLoadErrorState, HoldingsEmptyState } from "../components/dive/HoldingsGateStates";
 
@@ -61,6 +61,19 @@ import { HoldingsLoadingState, HoldingsLoadErrorState, HoldingsEmptyState } from
 //   - Crypto's flat 30% (Sec 115BBH), no loss set-off, and 1% TDS
 //     (₹10,000/₹50,000 threshold, Sec 194S) are unchanged since their 2022
 //     introduction.
+//   - PF (Provident Fund — diveEngine's PPF/EPF/VPF bucket): PPF's 80C/
+//     interest/maturity exemption is fully uncapped and unconditional (aside
+//     from the old-vs-new-tax-regime split, which applies to the 80C leg
+//     ONLY, not the interest/maturity legs). EPF/VPF's interest-taxability
+//     rule is a genuine, separate MARGINAL carve-out — only the interest on
+//     an employee's OWN contribution above ₹2.5L/year (₹5L with no employer
+//     contribution) is taxed, not the whole account — deliberately worded to
+//     contrast with ULIP's all-or-nothing cliff above, not read the same
+//     way. The rarer ₹7.5L/year employer-contribution perquisite rule (Sec
+//     17(2)(vii)/(viia)) is also marginal (only the excess + its growth).
+//     Rates/mechanics verified against EPFO/Ministry of Finance-sourced
+//     reporting (cleartax.in/s/epf-interest-taxation-exceeding-2-5-lakh,
+//     businesstoday.in coverage of the 239th CBT meeting) as of Aug 2026.
 //
 // Section numbers cited are the long-standing Income-tax Act, 1961 ones —
 // still how virtually every source (and the user's own request) refers to
@@ -77,6 +90,7 @@ const TAX_NOTES = {
   ETF: "Index and equity ETFs are taxed exactly like stocks: 20% STCG if sold within 12 months, or a flat 12.5% LTCG on gains above ₹1.25 lakh a year if held longer.",
   Insurance: "ULIP maturity proceeds are tax-free under Section 10(10D) — but only if your total annual premium across all your ULIPs stays at ₹2.5 lakh or less. Cross that in even one policy year and the exemption is lost entirely, not just on the excess: the gain (proceeds minus premiums paid) is then taxed like an equity fund instead — 20% if held ≤12 months, or 12.5% above a ₹1.25 lakh/year exemption if held longer. The death benefit stays 100% tax-free regardless of premium.",
   Crypto: "Every gain is taxed at a flat 30% (Section 115BBH) no matter how long you held it, and losses can't be set off against any other gains. A 1% TDS is also deducted on most sell transactions above ₹10,000–₹50,000 a year.",
+  PF: "Contributions up to ₹1.5 lakh/year are deductible under Section 80C — but only under the old tax regime; the new regime (the default since FY2023-24) allows no 80C deduction at all. PPF interest and maturity proceeds are fully tax-free, with no cap or condition. EPF/VPF interest is tax-free too, unless your own contribution exceeds ₹2.5 lakh in a year (₹5 lakh if your employer contributes nothing) — cross that and only the interest earned on the excess becomes taxable at your slab rate, not the whole account (a marginal rule, not an all-or-nothing cliff like ULIP's). A rarer rule for high earners: if your employer's combined EPF + NPS + superannuation contributions exceed ₹7.5 lakh/year, the excess and its growth are taxed as a perquisite.",
 };
 
 // Which TAX_NOTES entries get the green "tax benefit" card border vs stay
@@ -85,16 +99,20 @@ const TAX_NOTES = {
 // Equity/Mutual Funds/ETF/REIT-InvIT all reference the standard ₹1.25L LTCG
 // exemption, but that's boilerplate available to nearly any capital asset,
 // not a distinctive feature of the category — those stay liability-framed.
-// These three each have a genuine, standout tax-free outcome that's the
+// These four each have a genuine, standout tax-free outcome that's the
 // headline of their own note: ULIP maturity under Sec 10(10D) (Insurance),
-// specific tax-free PSU bonds under Sec 10(15) (Bonds), and Sovereign Gold
-// Bond tax-free redemption at maturity (Gold/Silver).
-const TAX_BENEFIT_CATEGORIES = new Set(["Insurance", "Bonds", "Gold/Silver"]);
+// specific tax-free PSU bonds under Sec 10(15) (Bonds), Sovereign Gold
+// Bond tax-free redemption at maturity (Gold/Silver), and PPF's fully
+// uncapped EEE status plus EPF/VPF's EEE status outside a narrow high-earner
+// edge case (PF) — confirmed with the user as arguably the strongest
+// tax-free feature of any category here.
+const TAX_BENEFIT_CATEGORIES = new Set(["Insurance", "Bonds", "Gold/Silver", "PF"]);
 
 export default function Suggestions() {
   const { holdings, holdingsLoading, holdingsError, loadHoldings, ranges, prefs, setScreen, setAskInstrument, sims, addSim, resetSims, scoreBreakdown } = useDive();
   const [sim, setSim] = useState(null); // {cat, amount}
-  const [stress, setStress] = useState(false);
+  const [whatIf, setWhatIf] = useState(false);
+  const [marketStress, setMarketStress] = useState(false);
 
   // Same reasoning as Home.jsx: a bare `return null` here is indistinguishable
   // from a crash.
@@ -237,12 +255,11 @@ export default function Suggestions() {
           return (
             <motion.div key={s.cat} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06 }}
               className={`bg-[var(--surface-card)] rounded-2xl p-5 border shadow-sm ${
-                // s.prioritized (the user's own explicit "preferred category"
-                // setting) wins over the tax-benefit highlight when both are
-                // true — it's a direct, active user preference, vs. this
-                // being a passive, always-the-same-for-everyone fact about
-                // the category's tax treatment.
-                s.prioritized ? "border-[var(--dive-blue)]" : TAX_BENEFIT_CATEGORIES.has(s.cat) ? "border-[var(--green)]" : "border-[var(--border)]"
+                // The tax-benefit highlight lives on the tax note strip
+                // itself now (below), not the whole card — s.prioritized
+                // (the user's own explicit "preferred category" setting) is
+                // the only thing that still colors the outer card border.
+                s.prioritized ? "border-[var(--dive-blue)]" : "border-[var(--border)]"
               }`} data-testid={`sugg-card-${s.cat}`}>
               <div className="flex items-center gap-2 mb-1">
                 <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${effectiveAction === "increase" ? "bg-[var(--dive-blue-light)]" : effectiveAction === "reduce" ? "bg-[#FEF3C7]" : "bg-[#D1FAE5]"}`}>
@@ -281,9 +298,15 @@ export default function Suggestions() {
               {/* Tax profile is a fact about the category itself, not about
                   whether Divve is actively pushing it right now — shown
                   regardless of deferred/capped/on-track/over-exposed state.
-                  See TAX_NOTES above for sourcing on every number here. */}
+                  See TAX_NOTES above for sourcing on every number here.
+                  TAX_BENEFIT_CATEGORIES gets a green border on just THIS
+                  strip (not the whole card, unlike the earlier design) — the
+                  highlight is scoped to the specific fact it's about. */}
               {TAX_NOTES[s.cat] && (
-                <div data-testid={`sugg-tax-note-${s.cat}`} className="mt-3 bg-[var(--surface-card-hover)] rounded-xl px-3 py-2.5 flex items-start gap-2">
+                <div data-testid={`sugg-tax-note-${s.cat}`}
+                  className={`mt-3 bg-[var(--surface-card-hover)] rounded-xl px-3 py-2.5 flex items-start gap-2 border ${
+                    TAX_BENEFIT_CATEGORIES.has(s.cat) ? "border-[var(--green)]" : "border-transparent"
+                  }`}>
                   <Landmark size={14} className="text-[var(--text-tertiary)] shrink-0 mt-0.5" />
                   <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
                     <span className="font-bold text-[var(--text-primary)]">Tax: </span>{TAX_NOTES[s.cat]}
@@ -310,16 +333,27 @@ export default function Suggestions() {
         })}
       </div>
 
-      <div className="px-6 mt-6">
-        <button data-testid="stress-test-btn" onClick={() => setStress(true)}
-          className="w-full md:max-w-xs md:ml-auto bg-[var(--surface-card)] border border-[var(--border)] rounded-full py-3.5 font-bold flex items-center justify-center gap-2 hover:bg-[var(--surface-card-hover)] transition-colors">
-          <FlaskConical size={18} className="text-[var(--dive-blue)]" /> Run Stress Test
+      {/* Two distinct features, deliberately not one button: "What If" (left)
+          replays hypothetical PORTFOLIO FIXES (cap top-issuer, fill missing
+          categories, close the lookthrough gap) — unrelated to markets moving.
+          "Run Stress Test" (right) is the genuine MARKET-SHOCK test — see
+          MarketStressSheet below. They used to be one misleadingly-labeled
+          "Run Stress Test" button covering only the first concept. */}
+      <div className="px-6 mt-6 flex gap-3">
+        <button data-testid="what-if-btn" onClick={() => setWhatIf(true)}
+          className="flex-1 bg-[var(--surface-card)] border border-[var(--border)] rounded-full py-3.5 font-bold flex items-center justify-center gap-2 hover:bg-[var(--surface-card-hover)] transition-colors">
+          <FlaskConical size={18} className="text-[var(--dive-blue)]" /> What If
+        </button>
+        <button data-testid="stress-test-btn" onClick={() => setMarketStress(true)}
+          className="flex-1 bg-[var(--surface-card)] border border-[var(--border)] rounded-full py-3.5 font-bold flex items-center justify-center gap-2 hover:bg-[var(--surface-card-hover)] transition-colors">
+          <Zap size={18} className="text-[var(--dive-blue)]" /> Run Stress Test
         </button>
       </div>
 
       <AnimatePresence>
         {sim && <SimulateSheet sim={sim} setSim={setSim} baseHoldings={h} onApply={applySim} canonicalScore={canonicalScore} scoreBreakdown={scoreBreakdown} />}
-        {stress && <StressSheet setStress={setStress} baseHoldings={h} canonicalScore={canonicalScore} />}
+        {whatIf && <WhatIfSheet setWhatIf={setWhatIf} baseHoldings={h} canonicalScore={canonicalScore} scoreBreakdown={scoreBreakdown} />}
+        {marketStress && <MarketStressSheet setMarketStress={setMarketStress} baseHoldings={h} scoreBreakdown={scoreBreakdown} />}
       </AnimatePresence>
     </div>
   );
@@ -462,8 +496,22 @@ function fillMissingCategories(h) {
 // Breakdown); `after` applies the fast formula's estimated delta on top,
 // rather than showing the lightweight formula's absolute value as a second,
 // competing score.
-function buildRealScenarios(h, canonicalScore) {
+function buildRealScenarios(h, canonicalScore, scoreBreakdown) {
   const before = canonicalScore;
+
+  // Apparent/Real Diversification % for the "close the gap" card below MUST
+  // anchor on the same canonical scoreBreakdown values Home.jsx/AskDive.jsx/
+  // ScoreBreakdown.jsx already show — same "single source of truth" principle
+  // this function already applies to `before` above. The LOCAL apparentDiversification()/
+  // realDiversification() calls only detect overlap via a crude holding-NAME
+  // match (see crossSegmentOverlaps' own comment); the backend's real
+  // lookthrough/connectedness engine (lookthroughService.ts) catches
+  // cross-class overlaps that heuristic misses, which is exactly why a user
+  // could see Home's real REAL DIV. tile read below Apparent while this
+  // card, using the local formula, wrongly showed no gap at all.
+  const hasCanonicalDiv = !!scoreBreakdown?.hasHoldings;
+  const canonicalApp = hasCanonicalDiv ? scoreBreakdown.apparentDiversificationPct : Math.round(apparentDiversification(h));
+  const canonicalReal = hasCanonicalDiv ? scoreBreakdown.realDiversificationPct : Math.round(realDiversification(h));
   const top = topExposure(h).pct;
   const missing = missingCategories(h).length;
   const baseline = diveScore(h);
@@ -474,6 +522,7 @@ function buildRealScenarios(h, canonicalScore) {
       id: "cap-issuer",
       name: "Cap single-issuer exposure at 30%",
       desc: `You're currently ${top.toFixed(0)}% concentrated in ${topExposure(h).name || "one holding"}.`,
+      metric: "score",
       before,
       after: deltaFor(capTopExposure(h, 30)),
     },
@@ -481,6 +530,7 @@ function buildRealScenarios(h, canonicalScore) {
       id: "fill-categories",
       name: "Fill your missing categories",
       desc: missing > 0 ? `You're missing ${missing} core categor${missing === 1 ? "y" : "ies"}.` : "You already hold every core category.",
+      metric: "score",
       before,
       after: deltaFor(fillMissingCategories(h)),
     },
@@ -488,44 +538,263 @@ function buildRealScenarios(h, canonicalScore) {
       id: "close-lookthrough-gap",
       name: "Close the apparent-vs-real gap",
       desc: "If none of your holdings shared an issuer with a holding in a different category.",
-      before: Math.round(realDiversification(h)),
-      after: Math.round(apparentDiversification(h)),
+      // Different metric than the two cards above (Divve Score) — this one is
+      // REAL DIVERSIFICATION %, not score, so it needs its own labels below
+      // rather than the shared "Now"/"If fixed" score captions. `after` is
+      // exactly (not approximately) what real diversification becomes once
+      // overlap hits 0%: realDiversification() = apparent * (1 - overlapShare),
+      // so overlapShare = 0 makes real == apparent by construction — not a
+      // stand-in value, the true post-fix number.
+      metric: "diversification",
+      before: canonicalReal,
+      after: canonicalApp,
     },
   ];
 }
 
-function StressSheet({ setStress, baseHoldings, canonicalScore }) {
-  const scenarios = buildRealScenarios(baseHoldings, canonicalScore);
+// Pure restyle of the former StressSheet — content/math (buildRealScenarios,
+// capTopExposure, fillMissingCategories above) is UNCHANGED, only the wrapper
+// chrome moved from a full-width bottom sheet to the same floating centered-
+// modal pattern SimulateSheet already uses, for visual consistency between
+// the two "sheet" experiences on this screen.
+function WhatIfSheet({ setWhatIf, baseHoldings, canonicalScore, scoreBreakdown }) {
+  const scenarios = buildRealScenarios(baseHoldings, canonicalScore, scoreBreakdown);
   return (
-    <>
-      <motion.div className="absolute inset-0 bg-black/40 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setStress(false)} />
-      <motion.div className="absolute bottom-0 inset-x-0 z-50 bg-[var(--surface-card)] rounded-t-3xl p-6 max-h-[85%] overflow-y-auto no-scrollbar"
-        initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }} transition={{ type: "spring", stiffness: 300, damping: 30 }} data-testid="stress-sheet">
+    <motion.div className="absolute inset-0 z-40 bg-black/40 flex items-center justify-center p-4"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setWhatIf(false)}>
+      <motion.div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-md bg-[var(--surface-card)] rounded-3xl p-6 max-h-[85vh] overflow-y-auto no-scrollbar"
+        initial={{ opacity: 0, scale: 0.94, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 8 }}
+        transition={{ type: "spring", stiffness: 320, damping: 28 }} data-testid="what-if-sheet">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-heading font-black text-xl">What-if scenarios</h2>
-          <button data-testid="stress-close-btn" onClick={() => setStress(false)}><X size={22} className="text-[var(--text-secondary)]" /></button>
+          <button data-testid="what-if-close-btn" onClick={() => setWhatIf(false)}><X size={22} className="text-[var(--text-secondary)]" /></button>
         </div>
         <p className="text-sm text-[var(--text-secondary)] mb-5">Computed from your real holdings — not a market forecast, just what your DIVVE Score would look like if you fixed each thing.</p>
         <div className="space-y-3">
           {scenarios.map((sc) => (
-            <div key={sc.id} className="bg-[var(--surface-card-hover)] rounded-2xl p-4" data-testid={`stress-${sc.id}`}>
+            <div key={sc.id} className="bg-[var(--surface-card-hover)] rounded-2xl p-4" data-testid={`what-if-${sc.id}`}>
               <p className="font-bold text-sm">{sc.name}</p>
               <p className="text-xs text-[var(--text-secondary)] mb-3">{sc.desc}</p>
               <div className="flex items-center gap-3">
                 <div className="text-center">
-                  <p className="text-[10px] text-[var(--text-tertiary)] font-bold uppercase">Now</p>
-                  <span className="font-heading font-black text-xl text-[var(--red)]">{sc.before}</span>
+                  <p className="text-[10px] text-[var(--text-tertiary)] font-bold uppercase">
+                    {sc.metric === "diversification" ? "Real div. now" : "Now"}
+                  </p>
+                  <span className="font-heading font-black text-xl text-[var(--red)]">
+                    {sc.before}{sc.metric === "diversification" ? "%" : ""}
+                  </span>
                 </div>
                 <ArrowRight size={16} className="text-[var(--text-tertiary)]" />
                 <div className="text-center">
-                  <p className="text-[10px] text-[var(--text-tertiary)] font-bold uppercase">If fixed</p>
-                  <span className="font-heading font-black text-xl text-[var(--green)]">{sc.after}</span>
+                  <p className="text-[10px] text-[var(--text-tertiary)] font-bold uppercase">
+                    {sc.metric === "diversification" ? "Real div. if fixed" : "If fixed"}
+                  </p>
+                  <span className="font-heading font-black text-xl text-[var(--green)]">
+                    {sc.after}{sc.metric === "diversification" ? "%" : ""}
+                  </span>
                 </div>
               </div>
             </div>
           ))}
         </div>
       </motion.div>
-    </>
+    </motion.div>
+  );
+}
+
+// =============================================================
+// Market Stress Test — a GENUINE market-shock estimate, distinct from
+// WhatIfSheet above (which replays hypothetical portfolio FIXES, not market
+// moves). Every number here is either real backend data (scoreBreakdown's
+// sub-scores) or a cited, reasoned estimate — never fabricated, per
+// docs/DIVE_SCORE_MODEL.md §5's project-wide rule. See §11-adjacent new
+// subsection in that doc for the full citations behind every row below.
+// =============================================================
+
+// "Resilience" here = the 5 sub-scores that actually respond to a market-
+// VALUE shock (volatility/drawdown/var/beta/correlation) — deliberately
+// excluding: liquidity (exit-ability, doesn't move on a price shock),
+// concentration (already the direct input to the Sector Crash scenario
+// below — including it too would double-penalize a concentrated portfolio),
+// diversificationRatio (backward-looking correlation-smoothing measure, not
+// shock-responsive), and contextFit/stockCountFit (life-stage/breadth fit,
+// not shock-responsive). Weights are read from scoreBreakdown.weights at
+// runtime (not hardcoded) — same "single source of truth" principle
+// SimulateSheet already applies to its own concentrationWeight — so this
+// stays correct automatically if DIVE_SCORE_V2_WEIGHTS is ever rebalanced.
+const RESILIENCE_DIMS = ["volatility", "drawdown", "var", "beta", "correlation"];
+const RESILIENCE_WEIGHTS_FALLBACK = { volatility: 0.12, drawdown: 0.12, var: 0.08, beta: 0.08, correlation: 0.08 };
+
+function resilienceScore(scoreBreakdown) {
+  const weights = scoreBreakdown?.weights || RESILIENCE_WEIGHTS_FALLBACK;
+  const subScores = scoreBreakdown?.subScores;
+  if (!subScores) return 0;
+  const dimWeightSum = RESILIENCE_DIMS.reduce((s, d) => s + (weights[d] ?? RESILIENCE_WEIGHTS_FALLBACK[d]), 0);
+  const weighted = RESILIENCE_DIMS.reduce(
+    (s, d) => s + ((weights[d] ?? RESILIENCE_WEIGHTS_FALLBACK[d]) / dimWeightSum) * (subScores[d]?.score ?? 0),
+    0
+  );
+  return Math.max(0, Math.min(100, Math.round(weighted)));
+}
+
+// Per-category sensitivity (0-1 = fraction of that category's portfolio
+// weight "at risk" in the scenario; negative = a genuine benefit, e.g.
+// gold's safe-haven role). Keyed to the 10 CORE_CATEGORIES labels
+// segmentBreakdown() already returns, not the 12-way backend enum — avoids
+// a second classification axis this file doesn't otherwise track. Merged
+// categories (Gold/Silver, REIT/InvIT) use the plain arithmetic mean of
+// their two constituents — a market-share-weighted blend would need an
+// unverifiable ratio this codebase has no cited source for.
+//
+// Magnitudes are anchored to the already-cited betas in SYNTHETIC_PARAMS
+// (backend/src/services/priceHistoryService.ts), not asserted from scratch:
+//   - Geopolitical Tension: Equity anchored to India's recurring
+//     oil-import-driven geopolitical corrections (1991 Gulf War, 2022
+//     Ukraine war, 2023-24 Middle East flare-ups). Mutual Funds/ETF scaled
+//     by SYNTHETIC_PARAMS' own beta ratios (0.75/0.9 vs Equity's 1.0).
+//     Gold/Silver negative, per the World Gold Council-cited safe-haven
+//     property SYNTHETIC_PARAMS.GOLD already documents. Crypto highest,
+//     citing the SAME Corbet/Meegan/Larkin/Lucey/Yarovaya 2018 and Baur &
+//     Dimpfl 2021 sources SYNTHETIC_PARAMS.CRYPTO cites for "occasional
+//     stress spikes" — this IS that stress case, not the calm-period low
+//     correlation SYNTHETIC_PARAMS' own beta (0.3) describes. FD/PF at 0:
+//     neither is marked-to-market, so a shock doesn't change their current
+//     value (same principle as SYNTHETIC_PARAMS.FD/PF's beta: 0).
+//   - Rate Hike: a different channel (duration/valuation, not equity-beta).
+//     Bonds highest via the textbook duration/price-yield relationship.
+//     REIT/InvIT next (yield-competing, financing-cost-sensitive). Gold/
+//     Silver flips POSITIVE here (real-rate/opportunity-cost channel,
+//     opposite driver from Geopolitical). Crypto high, citing its real 2022
+//     hiking-cycle drawdown. FD/PF at 0 for the SAME reason as above — an
+//     existing FD/PF's current value doesn't move on a rate change; only
+//     NEW deposits/contributions earn more going forward, a forward-looking
+//     effect this scenario isn't modeling. (PF's slightly higher long-run
+//     *volatility* in SYNTHETIC_PARAMS reflects a different, multi-year
+//     phenomenon — periodic government rate revisions — not an acute shock,
+//     so it doesn't conflict with 0 here.)
+const MARKET_STRESS_SENSITIVITY = {
+  geopolitical: {
+    Equity: 0.35, "Mutual Funds": 0.26, ETF: 0.32, Bonds: 0.08,
+    "Gold/Silver": -0.09, "REIT/InvIT": 0.17, Insurance: 0.12,
+    FD: 0, PF: 0, Crypto: 0.45,
+  },
+  rateHike: {
+    Equity: 0.25, "Mutual Funds": 0.19, ETF: 0.22, Bonds: 0.55,
+    "Gold/Silver": 0.17, "REIT/InvIT": 0.43, Insurance: 0.20,
+    FD: 0, PF: 0, Crypto: 0.50,
+  },
+};
+
+// Sector Crash reuses the SAME lookthrough data topExposure() already
+// computes (shown elsewhere on this screen, in SimulateSheet's "Top
+// exposure" card) — but restricted to categories where a real single-
+// business collapse is a coherent risk. Bonds/Gold-Silver/FD/PF/Insurance
+// are deliberately excluded: their lookthrough uses generic non-company
+// placeholders ("Gold", "Govt / Bank", "EPFO / Govt" — see SIM_TEMPLATES in
+// diveEngine.js) that don't represent real business/credit risk the way an
+// equity issuer does. Gold doesn't have a "sector" that can crash; a locked
+// FD/PF's value isn't exposed to any company's collapse. A portfolio
+// dominated by one of these excluded categories correctly resolves to ~0
+// Sector Crash sensitivity here — not a fall — the financially honest
+// answer, unrelated to whatever Geopolitical Tension shows for the same
+// portfolio (different risk vectors).
+const SECTOR_CRASH_CATEGORIES = new Set(["Equity", "Mutual Funds", "ETF", "REIT/InvIT", "Crypto"]);
+// 60% of the top single company's real portfolio share — moderate-severe:
+// real Indian single-stock/sector collapses span roughly 50-90%
+// peak-to-trough (Yes Bank ~-85% single-day 2020, Adani Group ~-50 to -60%
+// over days in Jan 2023, Satyam fraud ~-78% single-day 2009, IL&FS/DHFL debt
+// sector collapse >90%). 0.6 sits in the moderate-severe part of that range
+// — below the most extreme idiosyncratic fraud/governance-collapse cases
+// (not what a named, repeatable "Sector Crash" scenario should represent),
+// above a routine correction.
+const SECTOR_CRASH_SEVERITY = 0.6;
+
+function crashableTopExposure(h) {
+  const crashable = h.filter((holding) => SECTOR_CRASH_CATEGORIES.has(holding.segment));
+  const top = topExposure(crashable); // identifies the top company among ONLY crashable-category holdings
+  if (!top.name || top.name === "-") return { name: null, pct: 0 };
+  // Re-measure that company's TRUE share of the FULL portfolio (not just the
+  // crashable subset) — same aggregation capTopExposure() above already
+  // uses — so a small equity sleeve inside a mostly-gold/FD portfolio isn't
+  // reported as if it were the dominant holding.
+  const total = totalInvested(h);
+  const companyAmount = h.reduce((sum, holding) => {
+    const share = (holding.lookthrough || []).find((lt) => lt.company === top.name);
+    return sum + (share ? holding.amount * (share.pct / 100) : 0);
+  }, 0);
+  return { name: top.name, pct: total ? (companyAmount / total) * 100 : 0 };
+}
+
+// Every sensitivity value above is bounded to roughly [-0.12, 0.6] in
+// magnitude, and segmentBreakdown()'s weights always sum to 1.0, so a single
+// shared maxSwing (rather than three separately-tuned per-scenario
+// constants, which would mean re-deciding "how severe is this scenario"
+// twice) already produces a well-differentiated, self-bounded point swing —
+// roughly [-12, +55] points for any realistic holdings mix — without extra
+// tuning. Mirrors the "self-bounding by construction" property SimulateSheet
+// documents for its own concentration-delta estimate.
+const MARKET_STRESS_MAX_SWING = 100;
+
+function buildMarketStressScenarios(h, scoreBreakdown) {
+  const before = resilienceScore(scoreBreakdown);
+  const breakdown = segmentBreakdown(h);
+  const weightedSensitivity = (table) =>
+    breakdown.reduce((sum, seg) => sum + (seg.pct / 100) * (table[seg.name] ?? 0), 0);
+  const afterFor = (weighted) => Math.max(0, Math.min(100, Math.round(before - weighted * MARKET_STRESS_MAX_SWING)));
+
+  return [
+    { id: "geopolitical", label: "Geopolitical", before, after: afterFor(weightedSensitivity(MARKET_STRESS_SENSITIVITY.geopolitical)) },
+    { id: "rate-hike", label: "Rate Hike", before, after: afterFor(weightedSensitivity(MARKET_STRESS_SENSITIVITY.rateHike)) },
+    { id: "sector-crash", label: "Sector Crash", before, after: afterFor((crashableTopExposure(h).pct / 100) * SECTOR_CRASH_SEVERITY) },
+  ];
+}
+
+function MarketStressSheet({ setMarketStress, baseHoldings, scoreBreakdown }) {
+  const ready = !!scoreBreakdown?.hasHoldings;
+  const scenarios = ready ? buildMarketStressScenarios(baseHoldings, scoreBreakdown) : [];
+  return (
+    <motion.div className="absolute inset-0 z-40 bg-black/40 flex items-center justify-center p-4"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setMarketStress(false)}>
+      <motion.div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-md bg-[var(--surface-card)] rounded-3xl p-6 max-h-[85vh] overflow-y-auto no-scrollbar"
+        initial={{ opacity: 0, scale: 0.94, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 8 }}
+        transition={{ type: "spring", stiffness: 320, damping: 28 }} data-testid="market-stress-sheet">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-heading font-black text-xl">Stress test</h2>
+          <button data-testid="market-stress-close-btn" onClick={() => setMarketStress(false)}><X size={22} className="text-[var(--text-secondary)]" /></button>
+        </div>
+        {ready ? (
+          <>
+            <p className="text-sm text-[var(--text-secondary)] mb-5">Estimated from your real holdings and resilience data — not a market forecast, just how your resilience score would likely move under each scenario.</p>
+            <div className="grid grid-cols-3 gap-2">
+              {scenarios.map((sc) => {
+                // Conditional coloring, not hardcoded red — a Gold/Silver-
+                // heavy portfolio can genuinely show after > before under
+                // Geopolitical Tension (real safe-haven benefit, not a bug),
+                // same conditional pattern SimulateSheet already uses for
+                // its own score delta.
+                const color = sc.after > sc.before ? "text-[var(--green)]" : sc.after < sc.before ? "text-[var(--red)]" : "text-[var(--text-secondary)]";
+                return (
+                  <div key={sc.id} className="bg-[var(--surface-card-hover)] rounded-2xl p-3 text-center" data-testid={`market-stress-${sc.id}`}>
+                    <p className="text-[9px] font-bold uppercase tracking-wide text-[var(--text-tertiary)] mb-2">{sc.label}</p>
+                    <div className="flex items-center justify-center gap-1 flex-wrap">
+                      <span data-testid={`market-stress-${sc.id}-before`} className="font-heading font-black text-lg text-[var(--text-tertiary)]">{sc.before}</span>
+                      <ArrowRight size={12} className="text-[var(--text-tertiary)] shrink-0" />
+                      <AnimatedNumber data-testid={`market-stress-${sc.id}-after`} value={sc.after} className={`font-heading font-black text-lg ${color}`} />
+                    </div>
+                    <p className="text-[9px] text-[var(--text-tertiary)] mt-1">resilience score</p>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          <p data-testid="market-stress-not-ready" className="text-sm text-[var(--text-secondary)]">Your resilience data isn't ready yet — add a holding first, or check back once your DIVVE Score has finished computing.</p>
+        )}
+      </motion.div>
+    </motion.div>
   );
 }

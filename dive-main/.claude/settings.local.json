@@ -309,7 +309,12 @@
       "Bash(taskkill //PID 32408 //F)",
       "WebSearch",
       "Bash(node -e \"const icons=require\\('lucide-react'\\); console.log\\('Landmark' in icons, 'Percent' in icons, 'ReceiptText' in icons, 'Scale' in icons\\)\")",
-      "Bash(powershell -Command \"Get-Process node,tsx -ErrorAction SilentlyContinue | Stop-Process -Force\")"
+      "Bash(powershell -Command \"Get-Process node,tsx -ErrorAction SilentlyContinue | Stop-Process -Force\")",
+      "Bash(ls -la \"C:\\\\Users\\\\Dagriya Fin-Tech\\\\.claude\\\\projects\\\\D--Dive-dive-main---app\\\\memory\\\\\" 2>&1)",
+      "Bash(powershell -NoProfile -Command 'Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match '\\\\''tsx watch|craco'\\\\'' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }; '\\\\''done'\\\\''')",
+      "PowerShell(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'tsx watch' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; \"done\")",
+      "Bash(taskkill //F //PID 26464 //PID 1184 //PID 14184)",
+      "Bash(taskkill //F //PID 30872 //PID 23208 //PID 17108 //PID 32924)"
     ]
   }
 }

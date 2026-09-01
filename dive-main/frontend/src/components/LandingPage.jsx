@@ -15,7 +15,7 @@ import { TermsPage, PrivacyPage } from "./dive/LegalPages";
 // product only exists behind login/signup — see App.js's routing.
 
 const STEPS = [
-  { n: "01", title: "Track", body: "All your investments in one place — equity, mutual funds, bonds, gold, REITs, crypto, deposits, insurance." },
+  { n: "01", title: "Track", body: "All your investments in one place — equity, mutual funds, bonds, gold, REITs, crypto, deposits, provident fund, insurance." },
   { n: "02", title: "Score", body: "One number. Your Divve Score (0–100) — like a CIBIL score for your portfolio resilience." },
   { n: "03", title: "Diversify", body: "Rupee-specific suggestions. Not vague advice. A truly balanced portfolio, built for you." },
 ];
@@ -246,8 +246,18 @@ export default function LandingPage() {
 
           <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-80px" }} transition={{ duration: 0.7, delay: 0.15 }}
             className="flex flex-wrap justify-center gap-x-10 gap-y-6">
+            {/* Hard-coded literals, not derived from a shared constant — none of
+                these exist on the frontend to import (10 = DIVE_SCORE_V2_WEIGHTS'
+                sub-score count, backend/src/services/diveScoreService.ts; 12 =
+                ASSET_CLASSES.length, backend/src/models/Instrument.ts, the RAW
+                backend enum count before REIT+InvIT/Gold+Silver collapse to
+                shared labels — NOT CORE_CATEGORIES.length, which is 10; 5 = the
+                entry methods on ChooseFetchMethod.jsx). Manually keep in sync,
+                same convention as every other cross-file duplicated constant in
+                this codebase — last synced 2026-09-01 when PF became the 12th
+                asset class. */}
             <StatChip icon={Layers} value={10} label="Score signals" format={(v) => Math.round(v)} />
-            <StatChip icon={ShieldCheck} value={11} label="Asset classes covered" format={(v) => Math.round(v)} />
+            <StatChip icon={ShieldCheck} value={12} label="Asset classes covered" format={(v) => Math.round(v)} />
             <StatChip icon={TrendingUp} value={5} label="Ways to add your portfolio" format={(v) => Math.round(v)} />
             <StatChip icon={Users} value={0} label="Bank-grade security, always" format={() => "🔒"} />
           </motion.div>

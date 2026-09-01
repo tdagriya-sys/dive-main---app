@@ -2,7 +2,7 @@
 
 **Status:** Living document. This must be updated in the same change as any edit to the scoring model's formulas, weights, tiers, or data sources — see [§15 Maintenance](#15-maintenance--change-log) for how.
 
-**Last verified against source:** 2026-08-17, against the codebase in this repository (`backend/src/services/diveScoreService.ts`, `lookthroughService.ts`, `priceHistoryService.ts`, `contextEngine.ts`, `stats.ts`, `backend/src/seed/*`, `backend/src/services/instrumentSources.ts`, `frontend/src/lib/diveEngine.js`, `frontend/src/lib/contextMessaging.js`, `frontend/src/screens/XRay.jsx`).
+**Last verified against source:** 2026-09-01, against the codebase in this repository (`backend/src/services/diveScoreService.ts`, `lookthroughService.ts`, `priceHistoryService.ts`, `contextEngine.ts`, `stats.ts`, `backend/src/seed/*`, `backend/src/services/instrumentSources.ts`, `frontend/src/lib/diveEngine.js`, `frontend/src/lib/contextMessaging.js`, `frontend/src/screens/XRay.jsx`, `frontend/src/screens/Suggestions.jsx`).
 
 ---
 
@@ -89,6 +89,7 @@ No free, daily-granularity public price source exists in India for bonds, REIT/I
 | ULIP_INSURANCE | 8% | 9% | 0.35 | Balanced/equity-linked insurance products with embedded capital protection |
 | FD | 7% (or the holding's actual entered interest rate, if provided) | 0.3% | 0 | Contractually fixed return, zero market correlation by construction |
 | CRYPTO | 25% | 60% | **0.3** | Academic literature (Corbet, Meegan, Larkin, Lucey & Yarovaya 2018; Baur & Dimpfl 2021) documents LOW and UNSTABLE crypto-equity correlation in normal periods (~0.1–0.3), with occasional stress spikes — **not** the strong, stable positive correlation a higher beta would imply. Crypto still isn't a "free" diversifier despite this low correlation, because its own volatility (60%) dominates any diversification benefit on the vol axis. |
+| PF (Provident Fund — PPF/EPF/VPF) | 7.5% (blended PPF 7.1%/EPF 8.25% fallback; or the holding's actual `pfInterestRatePercent`, if provided) | 1% | 0 | Beta 0, same as FD — no market co-movement visible to the account holder. Vol deliberately set ABOVE FD's 0.3%, not equal: FD's rate is locked for the deposit's whole tenure at issuance (genuinely fixed once opened); PF's government-declared rate is instead periodically revised for the WHOLE balance going forward — PPF has moved from 8.7% (FY2015-16) to a 7.1% floor unchanged since Apr–Jun 2020, EPF from 8.1%–8.65% over the last 6 years — real, if slow, rate-revision variability FD doesn't have. An illustrative judgment call (not literature-cited the way the betas above are), calibrated to that observed 0.4–1.6pt historical rate-revision range, kept well below BOND's 4% since PF is still far more stable than market-priced debt. |
 
 `vol` values are informed by typical annualized-volatility ranges commonly cited in Indian mutual-fund fact sheets (AMFI/CRISIL risk-o-meter bands), NSE/international index and ETF volatility data, and gold/silver commodity volatility indices — not fitted to one specific live dataset. These are documented, defensible starting points for illustrative math — **not investment research** and not backtested/calibrated against realized outcomes. (Bolded betas above were corrected 2026-07-30 — see §15 changelog; crypto's beta in particular was previously 1.6, which wrongly implied a strong, stable positive equity correlation.)
 
@@ -98,7 +99,7 @@ No free, daily-granularity public price source exists in India for bonds, REIT/I
 
 | Purpose | Source | Endpoint | Cost | Notes |
 |---|---|---|---|---|
-| Bundled fallback (all classes, esp. REIT/InvIT/SGB/ULIP/FD-issuers with no public master list) | Hand-maintained static list | `backend/src/seed/staticInstruments.ts` | — | Always seeded first |
+| Bundled fallback (all classes, esp. REIT/InvIT/SGB/ULIP/FD-issuers with no public master list) | Hand-maintained static list | `backend/src/seed/staticInstruments.ts` | — | Always seeded first. PF (like FD) has no `Instrument` row at all — it's a principal/rate-based holding shape, not an instrument-lookup one; see `validators/holdings.ts`'s `pfSchema`. |
 | MUTUAL_FUND names/codes | AMFI | `amfiindia.com/spages/NAVAll.txt` | Free, keyless | Capped at 8,000 rows (see §5.1) |
 | EQUITY names/symbols | NSE | `nsearchives.nseindia.com/content/equities/EQUITY_L.csv` | Free, keyless | Frequently blocked by NSE's bot protection; fails soft to the static list |
 | ETF (+ GOLD/SILVER commodity ETF reclassification) | NSE | `.../eq_etfseclist.csv` | Free, keyless | "Underlying" column routes gold/silver ETFs into GOLD/SILVER classes |
@@ -170,7 +171,7 @@ withinClassConcentrationScore = round( Σ_class (classTotalValue / totalValue) �
 
 Value-weighted across classes, so a concentrated *small* class (e.g. one bond unit that's 5% of the portfolio) drags the score down proportionally less than a concentrated *large* class (e.g. one stock that's 80% of the portfolio).
 
-**Three class-specific quality adjustments** sit on top of the raw name-HHI `classScore` above — a modest step toward "don't use one generic formula for all 11 classes" (the rest of that ask is deferred; see §13.1):
+**Three class-specific quality adjustments** sit on top of the raw name-HHI `classScore` above — a modest step toward "don't use one generic formula for all 12 classes" (the rest of that ask is deferred; see §13.1):
 
 - **CRYPTO — capped at 70, however well name-spread.** Most crypto assets are documented to move together, especially in stress periods — spreading across N coins doesn't reduce risk anywhere near as much as spreading across N genuinely distinct equities, so this class's within-class score can never claim full credit for "diversification" the way an equally-spread equity sleeve can.
 - **FD — blended with a maturity-laddering score**, when 2+ distinct FDs exist and each has a resolvable maturity month (from `extraFields.maturityDate`, already computed at holding-creation time): `ladderScore = round(100 × distinctMaturityMonths / distinctFdCount)`, then `classScore = round((classScore + ladderScore) / 2)`. Two FDs at different banks maturing the same month is a real, different risk (reinvestment/rate risk concentrated at one point in time) from the same two FDs laddered across different months — even though issuer-name spread looks identical either way. Skipped (no adjustment) when maturity data isn't resolvable for any holding, rather than guessing.
@@ -331,7 +332,9 @@ Sourced from `contextEngine.ts`'s `PersonaBracket.volatilityWorstAt`/`drawdownWo
 | ETF | 90 | BOND | 50 |
 | GOLD | 75 | ULIP_INSURANCE | 20 |
 | MUTUAL_FUND | 70 | FD | 15 |
-| SILVER | 65 | | |
+| SILVER | 65 | PF | 8 |
+
+PF sits below FD, not tied with it: FD is breakable any time (with an interest penalty) — full principal access is never in question. PF has no such unconditional exit — PPF's 15-year hard lock (partial withdrawal only from FY7, capped at 50% of the balance 4 years prior) and EPF's retirement/2-month-unemployment/purpose-specific-after-12-months gating are both strictly worse than a breakable FD. Not 0 — real, if narrow, partial-access routes exist (PPF's year 3-6 loan facility, EPF's purpose-based partial withdrawals).
 
 ## 9. Composite Score
 
@@ -394,6 +397,52 @@ after         = clamp(before + scaledDelta, 0, 100)
 
 So the absolute anchor is always accurate; only the magnitude of a simulated change is a concentration-only approximation, now correctly weighted down to its real share of the composite. Note this client-side delta also doesn't reflect Layer D (§12) — `contextFit` and the softened correlation floor are backend-only, so a simulated change's estimated delta doesn't move for context reasons, only for concentration ones.
 
+**"Close the apparent-vs-real gap" card — same X-Ray-class bug (§7.9), fixed 2026-09-01:** this `WhatIfSheet` card shows Real Diversification % (`before`) and what it becomes once cross-segment overlap hits 0% (`after`) — mathematically exactly `apparentDiversificationPct`, since `realDiversificationPct = apparent × (1 − overlapShare)` and overlapShare = 0 makes real == apparent by construction (§6.1). It originally computed both from this screen's own local `apparentDiversification(h)`/`realDiversification(h)` (diveEngine.js), which only detects overlap via a crude match on each **holding's own name** (`crossSegmentOverlaps`) — not the backend's real lookthrough/connectedness engine (§7's tiered model: MF top-holdings, keyword affinity, industry affinity, same-sector). A user genuinely saw Home's canonical tiles read Apparent 70% / Real 69% while this card showed 70/70 (no gap at all) for the identical portfolio — the backend caught a real cross-class connection this screen's local heuristic couldn't see. Fixed the same way §7.9 fixed X-Ray's donut: anchor on `scoreBreakdown.apparentDiversificationPct`/`realDiversificationPct` when available (`hasHoldings: true`), falling back to the local calc only when no canonical score exists yet. See `buildRealScenarios()`'s `canonicalApp`/`canonicalReal`.
+
+### 11.1 Market Stress Test (added 2026-09) — a second, DIFFERENT derived metric: "resilience score"
+
+`Suggestions.jsx`'s "Run Stress Test" button (distinct from "What If," §11's `WhatIfSheet` above, which replays hypothetical portfolio FIXES, not market moves) shows how a new derived **resilience score** — NOT the main DIVVE Score — would move under three named market-shock scenarios: Geopolitical Tension, Rate Hike, Sector Crash.
+
+**Resilience score baseline** — a weighted blend of the 5 REAL backend sub-scores that actually respond to a market-VALUE shock:
+```
+RESILIENCE_DIMS = [volatility, drawdown, var, beta, correlation]
+dimWeightSum    = Σ scoreBreakdown.weights[dim] for dim in RESILIENCE_DIMS   // ≈0.48 of DIVE_SCORE_V2_WEIGHTS' 1.00
+resilienceScore = round(Σ (weights[dim]/dimWeightSum) * subScores[dim].score)
+```
+Deliberately excludes: `liquidity` (exit-ability, doesn't move on a price shock), `concentration` (already the direct input to the Sector Crash scenario below — including it too would double-penalize a concentrated portfolio), `diversificationRatio` (backward-looking correlation-smoothing measure, not shock-responsive), and `contextFit`/`stockCountFit` (life-stage/breadth fit, not shock-responsive). Weights are read from `scoreBreakdown.weights` at runtime, not hardcoded, so this stays correct automatically if `DIVE_SCORE_V2_WEIGHTS` is ever rebalanced — same principle as `concentrationWeight` above.
+
+**Per-category sensitivity** — keyed to the 10 `CORE_CATEGORIES` labels (not the 12-way backend enum), each value = fraction of that category's portfolio weight "at risk" (negative = a genuine benefit). Magnitudes anchored to the already-cited betas in `SYNTHETIC_PARAMS` (§4.2), not asserted from scratch. Merged categories (Gold/Silver, REIT/InvIT) use the plain arithmetic mean of their two constituents (a market-share-weighted blend would need an unverifiable ratio this codebase has no source for):
+
+| Category | Geopolitical | Rate Hike |
+|---|---|---|
+| Equity | 0.35 | 0.25 |
+| Mutual Funds | 0.26 | 0.19 |
+| ETF | 0.32 | 0.22 |
+| Bonds | 0.08 | **0.55** |
+| Gold/Silver | **−0.09** | 0.17 |
+| REIT/InvIT | 0.17 | 0.43 |
+| Insurance | 0.12 | 0.20 |
+| FD | 0 | 0 |
+| PF | 0 | 0 |
+| Crypto | 0.45 | 0.50 |
+
+Geopolitical: Equity anchored to India's recurring oil-import-driven geopolitical corrections (1991 Gulf War, 2022 Ukraine war, 2023-24 Middle East flare-ups); Mutual Funds/ETF scaled by their own `SYNTHETIC_PARAMS` beta ratio vs. Equity; Gold/Silver negative per the World Gold Council-cited safe-haven property `SYNTHETIC_PARAMS.GOLD` already documents; Crypto highest, citing the SAME Corbet/Meegan/Larkin/Lucey/Yarovaya 2018 and Baur & Dimpfl 2021 sources `SYNTHETIC_PARAMS.CRYPTO` cites for "occasional stress spikes" (this IS that stress case, not the calm-period low correlation its beta of 0.3 describes). Rate Hike: a different channel (duration/valuation, not equity-beta) — Bonds highest via the textbook duration/price-yield relationship; REIT/InvIT next (yield-competing, financing-cost-sensitive); Gold/Silver flips positive (real-rate/opportunity-cost channel); Crypto high, citing its real 2022 hiking-cycle drawdown. **FD/PF are 0 in BOTH scenarios**, confirmed consistent with `SYNTHETIC_PARAMS.FD.beta`/`SYNTHETIC_PARAMS.PF.beta` both being `0` — neither is marked-to-market, so a shock doesn't change an already-locked holding's current value (only new deposits/contributions earn differently going forward, a forward-looking effect this isn't modeling). PF's slightly higher long-run *volatility* in `SYNTHETIC_PARAMS` reflects a separate, multi-year phenomenon (periodic government rate revisions), not an acute shock, so it doesn't conflict with 0 here.
+
+**Sector Crash** reuses the same lookthrough data `topExposure()` already computes (§16.2/`SimulateSheet`'s "Top exposure" card) — but restricted to categories where a real single-business collapse is a coherent risk: Equity, Mutual Funds, ETF, REIT/InvIT, Crypto. Bonds/Gold-Silver/FD/PF/Insurance are excluded — their lookthrough uses generic non-company placeholders (`"Gold"`, `"Govt / Bank"`, `"EPFO / Govt"`, see `SIM_TEMPLATES`) that don't represent real business/credit risk the way an equity issuer does. A portfolio dominated by one of these excluded categories (e.g. all-gold) correctly resolves to ~0 Sector Crash sensitivity — not a fall — the financially honest answer, and *unrelated* to whatever Geopolitical Tension shows for the same portfolio (different risk vectors; a gold-heavy portfolio can show a Geopolitical *improvement* and a Sector Crash *no-change* simultaneously, which is correct, not contradictory).
+```
+sensitivity = (topExposure(equity/MF/ETF/REIT-InvIT/crypto-only holdings).pct / 100) * 0.6
+```
+Severity `0.6`: real Indian single-stock/sector collapses span roughly 50-90% peak-to-trough (Yes Bank ~−85% single-day 2020, Adani Group ~−50 to −60% over days in Jan 2023, Satyam fraud ~−78% single-day 2009, IL&FS/DHFL debt-sector collapse >90%) — `0.6` sits in the moderate-severe part of that range, below the most extreme idiosyncratic fraud/governance-collapse cases (not what a named, repeatable scenario should represent), above a routine correction.
+
+**Delta formula** — one shared `maxSwing` across all three scenarios, not three separately-tuned constants (would mean re-deciding "how severe is this scenario" twice):
+```
+delta = -weightedSensitivity * 100
+after = clamp(round(resilienceScore + delta), 0, 100)
+```
+Self-bounding by construction: every sensitivity value above is ≤0.55 in magnitude and category weights always sum to 1.0, so the realistic swing range is roughly [−12, +55] points without an extra clamp beyond the final floor/ceiling — mirrors the "self-bounding by construction" property already noted above for `rawDelta`.
+
+Cards use conditional coloring (green if `after > before`, red/amber if `after < before`, neutral if flat) rather than hardcoded red, since a Gold/Silver-heavy portfolio can genuinely improve under Geopolitical Tension — a real outcome, not a bug.
+
 ## 12. Layer D — Context Engine
 
 `backend/src/services/contextEngine.ts`. Prevents the score and its messaging from ever penalizing someone for something that doesn't make sense at their situation — the direct fix for "₹10,000 in 3 equity stocks is not a problem worth flagging." Two independent dimensions:
@@ -409,17 +458,17 @@ So the absolute anchor is always accurate; only the magnitude of a simulated cha
 | Growing | ₹25,000–₹2,00,000 | 3 | Comfortably supports 3 classes at ₹8,000+ each even at the low end. |
 | Established | ₹2,00,000–₹10,00,000 | 5 | Meaningful (₹20,000–40,000+) ticket sizes — room for a first ULIP/insurance commitment or a REIT/InvIT slice. |
 | Substantial | ₹10,00,000–₹50,00,000 | 8 | Even a 1/8th equal slice (₹1.25L–6.25L) clears every class's practical minimum. |
-| Large | ₹50,00,000+ | 11 | Every class is achievable at a meaningful ticket size — skipping one is a deliberate choice, not a constraint. |
+| Large | ₹50,00,000+ | 12 | Every class is achievable at a meaningful ticket size — skipping one is a deliberate choice, not a constraint. |
 
 ### 12.2 Persona brackets
 
 | Persona | Age | Priority classes (in order) | Deprioritized | Reasoning |
 |---|---|---|---|---|
-| Early Career | 18–28 | EQUITY, MUTUAL_FUND, GOLD, CRYPTO | FD, BOND, ULIP_INSURANCE, REIT, INVIT | Longest time horizon, fewest dependents — the main resource is time, which growth assets compound. |
-| Building Phase | 29–40 | EQUITY, MUTUAL_FUND, GOLD, BOND | ULIP_INSURANCE, REIT, INVIT | Still growth-oriented; rising responsibilities make a first slice of debt reasonable. |
-| Peak Earning | 41–55 | EQUITY, MUTUAL_FUND, BOND, FD, GOLD, REIT, INVIT | — | Highest capacity of any stage — the broadest priority list. |
-| Pre-Retirement | 56–64 | BOND, FD, MUTUAL_FUND, GOLD, ULIP_INSURANCE, EQUITY | CRYPTO | Preservation rises sharply in importance as the horizon shortens; debt/insured instruments should meaningfully lift the score now. |
-| Retired/Senior | 65+ | FD, BOND, ULIP_INSURANCE, GOLD, MUTUAL_FUND, EQUITY | CRYPTO | Preservation and income dominate; a smaller equity sleeve remains reasonable since retirement can span decades. |
+| Early Career | 18–28 | EQUITY, MUTUAL_FUND, GOLD, CRYPTO | FD, BOND, ULIP_INSURANCE, REIT, INVIT, PF | Longest time horizon, fewest dependents — the main resource is time, which growth assets compound. PF is deprioritized alongside every other lock-in class here even though EPF is often already accruing passively via payroll at this age — that existing balance still gets entered and scored regardless; deprioritizing it just means the app doesn't actively nudge toward a NEW voluntary PPF/VPF commitment this early. |
+| Building Phase | 29–40 | EQUITY, MUTUAL_FUND, GOLD, BOND, PF | ULIP_INSURANCE, REIT, INVIT | Still growth-oriented; rising responsibilities make a first slice of debt reasonable — a first deliberate PPF/VPF top-up is a reasonable, tax-advantaged debt decision alongside it by this stage. |
+| Peak Earning | 41–55 | EQUITY, MUTUAL_FUND, BOND, PF, FD, GOLD, REIT, INVIT | — | Highest capacity of any stage — the broadest priority list. PF sits ahead of FD: this bracket is most likely in the highest tax slab, where PF's EEE edge over FD's fully-taxable interest matters most. |
+| Pre-Retirement | 56–64 | BOND, FD, MUTUAL_FUND, PF, GOLD, ULIP_INSURANCE, EQUITY | CRYPTO | Preservation rises sharply in importance as the horizon shortens; debt/insured instruments should meaningfully lift the score now. PF is deliberately placed AFTER Mutual Funds, not before: a fresh PPF opened at 56–64 doesn't mature for 15 years — a real mismatch for this persona's shortening horizon — so it shouldn't outrank more liquid, immediately-practical preservation options. |
+| Retired/Senior | 65+ | FD, BOND, ULIP_INSURANCE, GOLD, MUTUAL_FUND, EQUITY | CRYPTO | Preservation and income dominate; a smaller equity sleeve remains reasonable since retirement can span decades. PF is deliberately left off both lists (falls through to `DEFAULT_CLASS_ORDER` instead, landing as this persona's 7th expected class at the Substantial tier) — no new payroll EPF at this stage for most users, and a fresh 15-year PPF lock is a poor fit for a retirement-drawdown horizon; any existing EPF balance still gets entered and scored regardless. |
 
 Each persona also carries `volatilityWorstAt`/`drawdownWorstAt` risk-capacity thresholds, used by the Volatility/Drawdown sub-scores — see §8.1 for the full table and reasoning.
 
@@ -432,21 +481,21 @@ ordered = persona.priorityClasses
 expectedAssetClasses = ordered.slice(0, corpusTier.expectedClassCount)
 ```
 
-A large corpus tier count (up to 11) will eventually pull in even a persona's deprioritized classes — deprioritization only affects *order*, never permanent exclusion, matching "large corpus + any age → expected set approaches all 11."
+A large corpus tier count (up to 12) will eventually pull in even a persona's deprioritized classes — deprioritization only affects *order*, never permanent exclusion, matching "large corpus + any age → expected set approaches all 12."
 
 ### 12.4 How it feeds the score
 
 - **`contextFit` sub-score** (new, §9): `round(100 × min(1, expectedClassesHeld / expectedAssetClasses.length))` — 100 once every expected class is held, capped at 100 so exceeding expectations is never penalized, never negative so falling short is graded proportionally.
 - **Correlation floor softened** (§8): a single-class portfolio scores 20 (genuine gap) unless the Context Engine says 1 class is exactly what's expected, in which case it scores a neutral 50.
 - **Deliberately NOT touched:** `apparentDiversificationPct`/`realDiversificationPct` and the core HHI math (§6) — those stay a pure, context-free measurement of actual spread. Context only adjusts `contextFit` and the correlation floor, both new/isolated levers, so the well-tested apparent-≤-real invariant and look-through model are untouched.
-- **Considered and explicitly rejected: re-scaling Apparent Diversification's own ceiling against `expectedAssetClasses.length`** (e.g. `100 × (1-classHhi) / (1 - 1/expectedCount)`, so hitting exactly your own expected set reads as 100%). Worked through with real comparative numbers across several tiers — it does what it promises (e.g. 3-of-3 expected classes, evenly split, would read 100% instead of 67%) — but rejected because **"100%" reads as an absolute claim of full diversification, and a user can't tell that apart from someone who actually holds all 11 classes evenly.** It risks overconfidence — nudging someone to stop growing their portfolio's class coverage because the number told them they're "done." `contextFit` and the correlation floor already carry the "you're doing well for your stage" signal *without* overwriting the honest, absolute "Apparent Div. %" stat shown on Home/Score Breakdown — that number stays a plain fact, not a relative grade.
+- **Considered and explicitly rejected: re-scaling Apparent Diversification's own ceiling against `expectedAssetClasses.length`** (e.g. `100 × (1-classHhi) / (1 - 1/expectedCount)`, so hitting exactly your own expected set reads as 100%). Worked through with real comparative numbers across several tiers — it does what it promises (e.g. 3-of-3 expected classes, evenly split, would read 100% instead of 67%) — but rejected because **"100%" reads as an absolute claim of full diversification, and a user can't tell that apart from someone who actually holds all 12 classes evenly.** It risks overconfidence — nudging someone to stop growing their portfolio's class coverage because the number told them they're "done." `contextFit` and the correlation floor already carry the "you're doing well for your stage" signal *without* overwriting the honest, absolute "Apparent Div. %" stat shown on Home/Score Breakdown — that number stays a plain fact, not a relative grade.
 
 ### 12.5 Messaging module
 
 `frontend/src/lib/contextMessaging.js` — reusable, not ad-hoc per-screen strings:
 
 - `contextSummaryMessage(context)` — reassurance ("your mix is a solid, complete starting point...") when nothing expected is missing, or a scoped nudge ("...Mutual Funds would be worth adding next") when something is. Rendered on `Suggestions.jsx` (banner) and `ScoreBreakdown.jsx` ("Your situation" card).
-- `isCategoryExpected(categoryLabel, context)` / `expectedCoreCategories(context)` — maps the backend's 11-way `expectedAssetClasses` down to the 6 `CORE_CATEGORIES` `Suggestions.jsx` operates on.
+- `isCategoryExpected(categoryLabel, context)` / `expectedCoreCategories(context)` — maps the backend's 12-way `expectedAssetClasses` down to the 10 `CORE_CATEGORIES` `Suggestions.jsx` operates on.
 - `deferredIncreaseNote(...)` / `deferredReduceNote(...)` — per-category copy used in `Suggestions.jsx` to replace a generic "Add to X" or "Trim X" nudge when it doesn't make sense yet:
   - An `increase` suggestion is deferred when the category isn't in the expected set.
   - A `reduce` suggestion is deferred when the category is the user's *sole* expected class — e.g. "Trim Equity to 25–35%" is nonsensical for a Starter-tier user whose entire expected set **is** equity, since the generic ideal range assumes a multi-class split that isn't realistic yet.
@@ -456,7 +505,7 @@ A large corpus tier count (up to 11) will eventually pull in even a persona's de
 
 ### 13.1 Considered for later — deferred, not forgotten
 
-A broader audit (2026-07-30) proposed a fuller "per-class quality" model across all 11 asset classes, plus a per-class point-ceiling architecture. Some pieces were built (§6.3's CRYPTO/FD/EQUITY adjustments, §8.1's persona-adjusted risk thresholds); the rest were deliberately deferred or rejected, for the specific reasons below — not simply unstarted.
+A broader audit (2026-07-30) proposed a fuller "per-class quality" model across all 11 asset classes (at the time; a 12th, PF, was added later — see §15 changelog), plus a per-class point-ceiling architecture. Some pieces were built (§6.3's CRYPTO/FD/EQUITY adjustments, §8.1's persona-adjusted risk thresholds); the rest were deliberately deferred or rejected, for the specific reasons below — not simply unstarted.
 
 **Deferred — genuinely valuable, but blocked on data this app has no free source for yet:**
 
@@ -504,6 +553,9 @@ Run via `cd backend && npm test` (or `./node_modules/.bin/jest --runInBand` if d
 
 | Date | Change | Why | File(s) |
 |---|---|---|---|
+| 2026-09-01 | `WhatIfSheet`'s "Close the apparent-vs-real gap" card: (1) relabeled from generic "Now"/"If fixed" (shared with the two Divve Score cards beside it) to "Real div. now"/"Real div. if fixed" with a `%` suffix, since it shows a different metric than those two; (2) anchored its numbers on canonical `scoreBreakdown.apparentDiversificationPct`/`realDiversificationPct` instead of a local recompute, falling back to the local calc only when no canonical score exists yet — same fix class as §7.9's X-Ray donut fix | User reported the card showing 70/70 (no gap) while Home's canonical tiles read Apparent 70% / Real 69% for the same portfolio — confirmed as a real bug: the local `apparentDiversification(h)`/`realDiversification(h)` only detect overlap via a crude holding-name match, missing cross-class connections the backend's real lookthrough engine (§7) catches | `Suggestions.jsx`, `Suggestions.test.jsx`, `docs/DIVE_SCORE_MODEL.md` |
+| 2026-09 | Split Suggestions' single "Run Stress Test" button into two: "What If" (unchanged 3 portfolio-fix scenarios, restyled bottom-sheet→floating modal to match `SimulateSheet`) and a genuine new "Run Stress Test" showing a new derived **resilience score** under 3 real market-shock scenarios (Geopolitical Tension/Rate Hike/Sector Crash) — see new §11.1 for the full formula, sensitivity tables, and citations. Two decisions confirmed with the user before implementation: FD/PF both get 0 sensitivity in both shock scenarios (consistent with their `SYNTHETIC_PARAMS.beta: 0` in the main score); Sector Crash restricted to categories with real single-issuer collapse risk (Equity/MF/ETF/REIT-InvIT/Crypto), so a gold-heavy portfolio correctly shows no Sector Crash fall even though it improves under Geopolitical Tension (safe-haven benefit) — different risk vectors, not a contradiction | The old button misleadingly labeled 3 hypothetical-fix scenarios as a "stress test" when it wasn't testing market shocks at all; user asked for a genuine market-stress feature alongside the renamed original | `Suggestions.jsx`, `Suggestions.test.jsx`, `docs/DIVE_SCORE_MODEL.md` |
+| 2026-09-01 | Added PF (Provident Fund — PPF/EPF/VPF) as a 12th asset class, wired through every layer: `LIQUIDITY_TIER.PF: 8` (below FD's 15 — no unconditional exit, unlike a breakable FD); `SYNTHETIC_PARAMS.PF` (vol 1%, above FD's 0.3% since PF's rate is periodically revised rather than locked at issuance, but far below BOND's 4%) with a real-declared-rate override mirroring FD's own pattern (new `config/pfRates.ts`); Context Engine's `CORPUS_TIERS.large` bumped 11→12 classes and each `PERSONA_BRACKETS` entry updated (PF deprioritized for Early Career despite EPF often being quasi-mandatory via payroll — see §12.2's reasoning; prioritized ahead of FD for Peak Earning given its EEE tax edge; placed after Mutual Funds, not before, for Pre-Retirement given a fresh PPF's 15-year lock); own `pfSchema`/`computePfValues()` (annual compounding, no `maturityValue`/`maturityDate` — PF's "maturity" doesn't map to a single date) mirroring FD's validator pattern; new `case "PF":` in `holdingQualityService.ts` using sovereign/EPFO-backed framing (not FD's DICGC bank-insurance framing — genuinely different risk); `frontend/src/lib/diveEngine.js`'s `IDEAL_RANGES.PF` (FD-shaped but with a lower ceiling — PPF/EPF have hard practical contribution caps FD doesn't); a `TAX_NOTES.PF` entry and inclusion in `TAX_BENEFIT_CATEGORIES` in `Suggestions.jsx` (confirmed with the user). Two decisions confirmed with the user before implementation: PF gets the green tax-benefit border, and PF is deprioritized (not prioritized) for Early Career | User asked to add PF as a new asset class, "wired to all the branches like context and others" — PPF/EPF/VPF accounts are one of the most common holdings for Indian retail investors (mandatory payroll deduction for EPF, or a deliberate tax-advantaged choice for PPF) and were entirely unrepresented before this change | `models/Instrument.ts`, `diveScoreService.ts`, `priceHistoryService.ts`, `config/pfRates.ts` (new), `contextEngine.ts`, `holdingQualityService.ts`, `validators/holdings.ts`, `controllers/holdingsController.ts`, `categorizeInstrument.ts`, `aiExtractionService.ts`, `scoreReportPdfService.ts`, `frontend/src/lib/diveEngine.js`, `frontend/src/lib/plannerEngine.js`, `frontend/src/screens/Suggestions.jsx`, `Preferences.jsx`, `ManualEntry.jsx`, `FileUpload.jsx`, `BotScan.jsx` |
 | 2026-08-17 | Added §7.9 (X-Ray's donut vs. this model) and §16 (Suggestions' ideal-₹ calculation), both previously entirely undocumented; wired `scoreBreakdown.connections` into X-Ray's deep view so it surfaces real backend-detected overlap (MF look-through, sector/industry affinity) the name-only donut structurally can't see | User asked how Suggestions' ideal ₹ amounts are calculated and flagged it (and possibly other things) as missing from this doc; auditing turned up a real, previously-unnoticed discrepancy — X-Ray's "True exposure" view could disagree with the canonical `realDiversificationPct` for the same portfolio, since it only ever detected same-name overlap | `XRay.jsx`, `docs/DIVE_SCORE_MODEL.md` |
 | 2026-08-04 | Scaled the frontend fast-path's simulated score delta by `weights.concentration` (0.17) instead of adding it 1:1 to the real anchor score; capped Ask DIVVE's Fit-for-you slider range to `Math.max(100000, total * 2)` instead of an unbounded, value-chasing max | User reported Ask DIVVE's Fit-for-you score reaching 99-100 when simulating a large mutual-fund addition, despite the portfolio missing FD/REIT/InvIT coverage and holding minimal ETF/Gold — confirmed as a real bug: the concentration-only delta is unbounded in magnitude and was being added to the real composite anchor as if concentration were the whole score, not 17% of it | `Suggestions.jsx` (`SimulateSheet`), `AskDive.jsx` (`FitForYouCard`) |
 | 2026-08-02 | Added Tier 5 — sectoral mutual fund ↔ matching-sector equity cross-class connection (fixed strength 0.15), via a new `MF_SEGMENT_TO_NSE_INDUSTRY` curated translation table and a new "Automobile" `MUTUAL_FUND_SEGMENT_KEYWORDS` entry | User reported apparent==real diversification for an Automobile-sector equity held alongside an Automobile-themed sectoral mutual fund. No tier connected equity to mutual funds by sector at all — Tier 4's `INDUSTRY_ASSET_CLASS_AFFINITY` only ever targets GOLD/SILVER/REIT/INVIT (asset classes that are themselves sector-homogeneous); naively extending it to MUTUAL_FUND would have wrongly connected an equity to *any* fund the user holds, not just matching-sector ones — needed a genuinely different mechanism comparing both sides' own sector tags. Not yet covered by an automated test (verified via live manual testing only) | `lookthroughService.ts`, `seed/sectorAffinity.ts`, `seed/mutualFundSegments.ts` |
@@ -520,7 +572,7 @@ Run via `cd backend && npm test` (or `./node_modules/.bin/jest --runInBand` if d
 
 ## 16. Suggestions — Ideal Allocation Ranges
 
-**Not part of the DIVE Score composite itself** — this is a fully separate, client-side-only calculation that powers `Suggestions.jsx`'s "current ₹ → ideal ₹" cards. It shares no code or formula with §6-§9's concentration/resilience math; the only thing it has in common with the score is which *categories* exist (`CORE_CATEGORIES`, the same 9-way segment label set §7's tables use).
+**Not part of the DIVE Score composite itself** — this is a fully separate, client-side-only calculation that powers `Suggestions.jsx`'s "current ₹ → ideal ₹" cards. It shares no code or formula with §6-§9's concentration/resilience math; the only thing it has in common with the score is which *categories* exist (`CORE_CATEGORIES`, the same 10-way segment label set §7's tables use).
 
 ### 16.1 The ideal-range table
 
@@ -528,13 +580,13 @@ Run via `cd backend && npm test` (or `./node_modules/.bin/jest --runInBand` if d
 
 ```js
 export const IDEAL_RANGES = {
-  Conservative: { Equity: [20, 30], "Mutual Funds": [15, 25], Bonds: [20, 30], "Gold/Silver": [8, 12], "REIT/InvIT": [5, 10], FD: [10, 20], ETF: [3, 8], Insurance: [5, 10], Crypto: [0, 2] },
-  Balanced:     { Equity: [25, 35], "Mutual Funds": [20, 30], Bonds: [15, 25], "Gold/Silver": [8, 12], "REIT/InvIT": [8, 12], FD: [8, 15],  ETF: [5, 10], Insurance: [3, 7],  Crypto: [0, 5] },
-  Aggressive:   { Equity: [35, 50], "Mutual Funds": [20, 30], Bonds: [5, 15],  "Gold/Silver": [5, 10], "REIT/InvIT": [8, 15], FD: [3, 8],   ETF: [5, 12], Insurance: [2, 5],  Crypto: [2, 8] },
+  Conservative: { Equity: [20, 30], "Mutual Funds": [15, 25], Bonds: [20, 30], "Gold/Silver": [8, 12], "REIT/InvIT": [5, 10], FD: [10, 20], PF: [10, 18], ETF: [3, 8], Insurance: [5, 10], Crypto: [0, 2] },
+  Balanced:     { Equity: [25, 35], "Mutual Funds": [20, 30], Bonds: [15, 25], "Gold/Silver": [8, 12], "REIT/InvIT": [8, 12], FD: [8, 15],  PF: [8, 14],  ETF: [5, 10], Insurance: [3, 7],  Crypto: [0, 5] },
+  Aggressive:   { Equity: [35, 50], "Mutual Funds": [20, 30], Bonds: [5, 15],  "Gold/Silver": [5, 10], "REIT/InvIT": [8, 15], FD: [3, 8],   PF: [3, 6],   ETF: [5, 12], Insurance: [2, 5],  Crypto: [2, 8] },
 };
 ```
 
-Ported from the original prototype, hand-extended for the 3 classes it left out (ETF, Insurance, Crypto — see the comment above the table in source for the reasoning behind each). **Illustrative reference bands, not personalized or backtested** — same caveat as every other curated constant in this document (§13.2), but unlike §6-§9's model, these bands are keyed *only* on risk profile, not on Layer D's corpus tier or persona (see §16.4).
+Ported from the original prototype, hand-extended for the 3 classes it left out (ETF, Insurance, Crypto — see the comment above the table in source for the reasoning behind each), plus PF (added later — see §15 changelog). PF's band deliberately follows FD's declining-with-risk-appetite SHAPE (both are guaranteed-return, zero-volatility instruments) but with a lower ceiling at every step — PPF caps contributions at ₹1.5L/year and EPF is capped by salary/employer formula, a hard practical ceiling FD doesn't have. **Illustrative reference bands, not personalized or backtested** — same caveat as every other curated constant in this document (§13.2), but unlike §6-§9's model, these bands are keyed *only* on risk profile, not on Layer D's corpus tier or persona (see §16.4).
 
 ### 16.2 From bands to ₹ amounts — `buildSuggestions(holdings, ranges, risk)`
 
