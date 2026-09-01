@@ -226,43 +226,40 @@ describe("Suggestions — What If / Run Stress Test button split", () => {
     expect(screen.getByText("Close the apparent-vs-real gap")).toBeInTheDocument();
   });
 
-  it("labels the 'Close the apparent-vs-real gap' card as Real Diversification %, not the Divve Score used by the other two cards", async () => {
+  it("shows the same Divve Score 'Now'/'If fixed' format as the other two cards, with the real apparent/real diversification % folded into the description instead of repeating Home's dashboard numbers as the headline", async () => {
     const user = userEvent.setup();
     render(<Suggestions />);
     await user.click(screen.getByTestId("what-if-btn"));
 
     const card = screen.getByTestId("what-if-close-lookthrough-gap");
-    // Rendered uppercase via CSS (text-transform), so match the actual DOM text case.
-    expect(within(card).getByText("Real div. now")).toBeInTheDocument();
-    expect(within(card).getByText("Real div. if fixed")).toBeInTheDocument();
-    // Not the score labels the other two cards use.
-    expect(within(card).queryByText("NOW")).not.toBeInTheDocument();
-    expect(within(card).queryByText("IF FIXED")).not.toBeInTheDocument();
-
-    const values = within(card).getAllByText(/^\d+%$/).map((el) => Number(el.textContent.replace("%", "")));
-    expect(values).toHaveLength(2);
+    // Rendered uppercase via CSS (text-transform), so match the actual DOM text case — same labels the other two cards use.
+    expect(within(card).getAllByText("Now")).toHaveLength(1);
+    expect(within(card).getAllByText("If fixed")).toHaveLength(1);
+    // Real diversification % now lives in the description, not the headline numbers.
+    expect(card).toHaveTextContent("Real diversification is 69% versus an apparent 70% right now.");
+    // The headline numbers are the Divve Score (compositeScore: 58), not raw diversification %.
+    expect(within(card).queryByText(/^69%$|^70%$/)).not.toBeInTheDocument();
   });
 
-  it("anchors 'Close the apparent-vs-real gap' on the CANONICAL scoreBreakdown diversification numbers (same as Home/X-Ray), not a local recompute — regression for a real user report of 70/70 shown when Home read 70/69", async () => {
+  it("computes an EXACT (not fabricated) Divve Score delta from the real apparent/real diversification gap, per the documented concentration formula (§6.4): gap × 0.15 (real's weight inside concentration) × weights.concentration", async () => {
     const user = userEvent.setup();
-    // baseContext.holdings is a single Equity holding with no cross-segment
-    // overlap at all — the local apparentDiversification()/realDiversification()
-    // functions would both compute 0 for it. SCORE_BREAKDOWN_FIXTURE's
-    // apparentDiversificationPct: 70 / realDiversificationPct: 69 must win
-    // instead, exactly like Home.jsx/AskDive.jsx already anchor on it — the
-    // backend's real lookthrough/connectedness engine catches cross-class
-    // overlaps this screen's own crude holding-NAME heuristic can miss.
-    useDive.mockReturnValue(baseContext);
+    // Deliberately a bigger, easy-to-hand-verify gap than the default fixture's
+    // 70/69: gapConcentrationDelta = (90-40)*0.15 = 7.5; gapScoreDelta = 7.5*0.17
+    // = 1.275; after = round(58 + 1.275) = 59.
+    useDive.mockReturnValue({
+      ...baseContext,
+      scoreBreakdown: { ...SCORE_BREAKDOWN_FIXTURE, apparentDiversificationPct: 90, realDiversificationPct: 40 },
+    });
     render(<Suggestions />);
     await user.click(screen.getByTestId("what-if-btn"));
 
     const card = screen.getByTestId("what-if-close-lookthrough-gap");
-    expect(within(card).getByText("69%")).toBeInTheDocument(); // real, canonical
-    expect(within(card).getByText("70%")).toBeInTheDocument(); // apparent, canonical
-    expect(within(card).queryByText("0%")).not.toBeInTheDocument(); // what the local-only calc would have shown
+    expect(card).toHaveTextContent("Real diversification is 40% versus an apparent 90% right now.");
+    expect(within(card).getByText("58")).toBeInTheDocument(); // Now = canonicalScore, unchanged
+    expect(within(card).getByText("59")).toBeInTheDocument(); // If fixed = exact hand-computed value above
   });
 
-  it("falls back to the local apparent/real diversification calc when no canonical scoreBreakdown is available yet", async () => {
+  it("falls back to the local apparent/real diversification calc when no canonical scoreBreakdown is available yet, and never lets the score move backwards when closing the gap", async () => {
     const user = userEvent.setup();
     // Deliberate cross-segment overlap so the LOCAL formula (diveEngine.js's
     // crossSegmentOverlaps, which matches on the HOLDING's own name, not
@@ -281,10 +278,11 @@ describe("Suggestions — What If / Run Stress Test button split", () => {
     await user.click(screen.getByTestId("what-if-btn"));
 
     const card = screen.getByTestId("what-if-close-lookthrough-gap");
-    const values = within(card).getAllByText(/^\d+%$/).map((el) => Number(el.textContent.replace("%", "")));
+    expect(card).toHaveTextContent("Real diversification is 0% versus an apparent 50% right now."); // full overlap -> real 0, 2 even segments -> apparent 50
+    const values = within(card).getAllByText(/^\d+$/).map((el) => Number(el.textContent));
     expect(values).toHaveLength(2);
     const [now, ifFixed] = values;
-    expect(now).toBeLessThan(ifFixed); // real (0, full overlap) < apparent (50, 2 even segments)
+    expect(ifFixed).toBeGreaterThanOrEqual(now); // closing a real gap can only hold or raise the score, never lower it
   });
 
   it("opens/closes the two sheets independently", async () => {

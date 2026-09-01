@@ -314,7 +314,8 @@
       "Bash(powershell -NoProfile -Command 'Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match '\\\\''tsx watch|craco'\\\\'' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }; '\\\\''done'\\\\''')",
       "PowerShell(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'tsx watch' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; \"done\")",
       "Bash(taskkill //F //PID 26464 //PID 1184 //PID 14184)",
-      "Bash(taskkill //F //PID 30872 //PID 23208 //PID 17108 //PID 32924)"
+      "Bash(taskkill //F //PID 30872 //PID 23208 //PID 17108 //PID 32924)",
+      "Bash(taskkill //F //PID 6136 //PID 17112 //PID 28444 //PID 13472)"
     ]
   }
 }

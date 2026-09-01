@@ -517,12 +517,30 @@ function buildRealScenarios(h, canonicalScore, scoreBreakdown) {
   const baseline = diveScore(h);
   const deltaFor = (hypothetical) => Math.max(0, Math.min(100, Math.round(before + (diveScore(hypothetical) - baseline))));
 
+  // "Closing the gap" only changes whether cross-class issuer overlap exists —
+  // it doesn't touch WHAT you hold or how it's split across asset classes. So
+  // unlike the two estimates above (which re-run the frontend's own simplified
+  // diveScore() on a hypothetical holdings list), this delta is exact, not
+  // approximate: the backend's own documented concentration formula
+  // (DIVE_SCORE_MODEL.md §6.4) is
+  //   concentrationScore = apparent*0.50 + real*0.15 + name*0.20 + withinClass*0.15
+  // and closing the gap sets real -> apparent (overlapShare -> 0), leaving
+  // every other term untouched — so the concentration sub-score's exact swing
+  // is just realDiversificationPct's own weight (0.15) applied to a gap we
+  // already know exactly (canonicalApp - canonicalReal, both real backend
+  // numbers). Scaled into the composite the same way SimulateSheet already
+  // scales its own concentration-only estimate, by concentration's real share
+  // of the composite (scoreBreakdown.weights.concentration).
+  const REAL_DIV_WEIGHT_IN_CONCENTRATION = 0.15;
+  const concentrationWeight = scoreBreakdown?.weights?.concentration ?? 0.17;
+  const gapConcentrationDelta = (canonicalApp - canonicalReal) * REAL_DIV_WEIGHT_IN_CONCENTRATION;
+  const gapScoreDelta = gapConcentrationDelta * concentrationWeight;
+
   return [
     {
       id: "cap-issuer",
       name: "Cap single-issuer exposure at 30%",
       desc: `You're currently ${top.toFixed(0)}% concentrated in ${topExposure(h).name || "one holding"}.`,
-      metric: "score",
       before,
       after: deltaFor(capTopExposure(h, 30)),
     },
@@ -530,24 +548,15 @@ function buildRealScenarios(h, canonicalScore, scoreBreakdown) {
       id: "fill-categories",
       name: "Fill your missing categories",
       desc: missing > 0 ? `You're missing ${missing} core categor${missing === 1 ? "y" : "ies"}.` : "You already hold every core category.",
-      metric: "score",
       before,
       after: deltaFor(fillMissingCategories(h)),
     },
     {
       id: "close-lookthrough-gap",
       name: "Close the apparent-vs-real gap",
-      desc: "If none of your holdings shared an issuer with a holding in a different category.",
-      // Different metric than the two cards above (Divve Score) — this one is
-      // REAL DIVERSIFICATION %, not score, so it needs its own labels below
-      // rather than the shared "Now"/"If fixed" score captions. `after` is
-      // exactly (not approximately) what real diversification becomes once
-      // overlap hits 0%: realDiversification() = apparent * (1 - overlapShare),
-      // so overlapShare = 0 makes real == apparent by construction — not a
-      // stand-in value, the true post-fix number.
-      metric: "diversification",
-      before: canonicalReal,
-      after: canonicalApp,
+      desc: `Real diversification is ${canonicalReal}% versus an apparent ${canonicalApp}% right now.`,
+      before,
+      after: Math.max(0, Math.min(100, Math.round(before + gapScoreDelta))),
     },
   ];
 }
@@ -579,21 +588,13 @@ function WhatIfSheet({ setWhatIf, baseHoldings, canonicalScore, scoreBreakdown }
               <p className="text-xs text-[var(--text-secondary)] mb-3">{sc.desc}</p>
               <div className="flex items-center gap-3">
                 <div className="text-center">
-                  <p className="text-[10px] text-[var(--text-tertiary)] font-bold uppercase">
-                    {sc.metric === "diversification" ? "Real div. now" : "Now"}
-                  </p>
-                  <span className="font-heading font-black text-xl text-[var(--red)]">
-                    {sc.before}{sc.metric === "diversification" ? "%" : ""}
-                  </span>
+                  <p className="text-[10px] text-[var(--text-tertiary)] font-bold uppercase">Now</p>
+                  <span className="font-heading font-black text-xl text-[var(--red)]">{sc.before}</span>
                 </div>
                 <ArrowRight size={16} className="text-[var(--text-tertiary)]" />
                 <div className="text-center">
-                  <p className="text-[10px] text-[var(--text-tertiary)] font-bold uppercase">
-                    {sc.metric === "diversification" ? "Real div. if fixed" : "If fixed"}
-                  </p>
-                  <span className="font-heading font-black text-xl text-[var(--green)]">
-                    {sc.after}{sc.metric === "diversification" ? "%" : ""}
-                  </span>
+                  <p className="text-[10px] text-[var(--text-tertiary)] font-bold uppercase">If fixed</p>
+                  <span className="font-heading font-black text-xl text-[var(--green)]">{sc.after}</span>
                 </div>
               </div>
             </div>
