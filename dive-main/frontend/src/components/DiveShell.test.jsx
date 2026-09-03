@@ -51,9 +51,13 @@ describe("DiveShell — responsive nav (Phase 3)", () => {
     });
   });
 
-  // Regression guard: a screen's own `absolute inset-0` overlay (e.g. Home's
-  // GetStartedPopup) must bind to just this content column, not bubble up to
-  // the outer wrapper and center itself across the sidebar's width too.
+  // Regression guard: a screen's own `absolute inset-0` overlay must bind to
+  // just this content column, not bubble up to the outer wrapper and center
+  // itself across the sidebar's width too. (Full-screen SHEETS — WhatIfSheet,
+  // MarketStressSheet, ShareCard, GetStartedPopup, ExtensionDownloadCard —
+  // no longer rely on this at all; they're portaled to `document.body` and
+  // fixed-positioned there instead, precisely because this column's own
+  // scrolling would otherwise drag them along even as `position: fixed`.)
   it("gives the content column its own `relative` positioning context, separate from the sidebar", () => {
     useDive.mockReturnValue({ ...baseContext, screen: "home" });
     render(<DiveShell />);

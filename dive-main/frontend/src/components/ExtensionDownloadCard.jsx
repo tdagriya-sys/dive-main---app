@@ -45,7 +45,7 @@ export default function ExtensionDownloadCard({ onClose }) {
     // not from within a screen's own content, so it must always render on
     // top of any in-page sheet regardless of DOM paint order, rather than
     // competing at the same stacking level.
-    <motion.div className="absolute inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+    <motion.div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
       <motion.div
         onClick={(e) => e.stopPropagation()}

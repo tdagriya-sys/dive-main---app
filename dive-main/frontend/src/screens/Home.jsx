@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { AlertTriangle, CheckCircle2, ChevronRight, X, Sparkles, Link2, Compass } from "lucide-react";
 import { useDive } from "../context/DiveContext";
@@ -9,6 +10,7 @@ import {
   realDiversification, segmentBreakdown, fmtINR, effectiveHoldings, CORE_CATEGORIES,
 } from "../lib/diveEngine";
 import { isCategoryExpected, contextSummaryMessage } from "../lib/contextMessaging";
+import { usePortalEnter } from "../lib/usePortalEnter";
 import { DownloadReportButton } from "../lib/useDownloadReport";
 
 export default function Home() {
@@ -239,19 +241,33 @@ export default function Home() {
 // consistency across the app. Purely a navigational nudge — no numbers of
 // any kind, so there's nothing here that could ever be a fabricated figure.
 function GetStartedPopup({ setScreen, onClose }) {
-  return (
-    <motion.div className="absolute inset-0 z-40 bg-black/40 flex items-center justify-center p-4"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
+  // See lib/usePortalEnter.js — framer-motion's own initial/animate/exit
+  // auto-trigger is unreliable for anything portaled to document.body, this
+  // one included (confirmed directly via computed style: stuck at
+  // `opacity: 0` on a genuinely fresh account, well after mount).
+  const { entered, handleClose } = usePortalEnter(onClose);
+
+  // Portaled to document.body, outside DiveShell's own `overflow-y-auto`
+  // content column — `position: fixed` alone doesn't escape a scrollable
+  // ancestor's own internal scrolling for content still nested inside it
+  // (see DiveShell.jsx's content-column comment for the fuller explanation,
+  // and Suggestions.jsx's WhatIfSheet/MarketStressSheet, which hit the exact
+  // same bug and got the same fix). `md:left-56` restates the sidebar
+  // exclusion explicitly (matching DiveShell's own `md:w-56`) since
+  // portaling loses the "free" scoping the old `relative` ancestor gave it.
+  return createPortal(
+    <motion.div className="fixed inset-0 md:left-56 z-40 bg-black/40 flex items-center justify-center p-4"
+      animate={{ opacity: entered ? 1 : 0 }} onClick={handleClose}>
       <motion.div
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-xl bg-[var(--surface-card)] rounded-3xl p-8 max-h-[85vh] overflow-y-auto no-scrollbar"
-        initial={{ opacity: 0, scale: 0.94, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 8 }}
+        animate={{ opacity: entered ? 1 : 0, scale: entered ? 1 : 0.94, y: entered ? 0 : 12 }}
         transition={{ type: "spring", stiffness: 320, damping: 28 }} data-testid="get-started-popup">
         <div className="flex items-start justify-between mb-5">
           <div className="w-12 h-12 rounded-2xl bg-[var(--dive-blue-light)] flex items-center justify-center shrink-0">
             <Sparkles size={24} className="text-[var(--dive-blue)]" />
           </div>
-          <button data-testid="get-started-close-btn" onClick={onClose}><X size={22} className="text-[var(--text-secondary)]" /></button>
+          <button data-testid="get-started-close-btn" onClick={handleClose}><X size={22} className="text-[var(--text-secondary)]" /></button>
         </div>
         <h2 className="font-heading font-black text-2xl mb-2.5">Let's see your real diversification</h2>
         <p className="text-sm text-[var(--text-secondary)] mb-6">Add what you already hold, or tell us how much you have — either way, DIVVE scores it in under a minute.</p>
@@ -280,6 +296,7 @@ function GetStartedPopup({ setScreen, onClose }) {
           </button>
         </div>
       </motion.div>
-    </motion.div>
+    </motion.div>,
+    document.body
   );
 }

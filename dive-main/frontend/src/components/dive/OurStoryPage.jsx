@@ -1,7 +1,7 @@
 import React from "react";
 import { motion } from "framer-motion";
 import { ArrowRight, TrendingUp, Landmark, Users } from "lucide-react";
-import { BackLink, SubpageHead } from "./SubpageChrome";
+import { BackLink, SubpageHead, CompanyFooterNote } from "./SubpageChrome";
 import tusharPhoto from "../../assets/tushar-dagriya.webp";
 
 const CREDENTIALS = [
@@ -172,6 +172,7 @@ export default function OurStoryPage({ onBack, onGetStarted }) {
           Get started free <ArrowRight size={18} />
         </button>
       </div>
+      <CompanyFooterNote />
     </div>
   );
 }

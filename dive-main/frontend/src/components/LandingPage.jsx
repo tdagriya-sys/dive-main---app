@@ -363,7 +363,7 @@ export default function LandingPage() {
 
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-12 pt-8 border-t border-[var(--border-light)]">
             <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-4">
-              <p className="text-xs text-[var(--text-tertiary)]">© {new Date().getFullYear()} Divve. All rights reserved.</p>
+              <p className="text-xs text-[var(--text-tertiary)]">© {new Date().getFullYear()} Divve, a product of Dagriya Fin-Tech Private Limited. All rights reserved.</p>
               <div className="flex items-center gap-4">
                 <button data-testid="footer-terms-btn" onClick={() => goToPage("terms")}
                   className="text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors">

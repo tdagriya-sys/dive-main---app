@@ -29,3 +29,18 @@ export function SubpageHead({ eyebrow, title, lede, maxWidth = "max-w-3xl" }) {
     </motion.div>
   );
 }
+
+// Legal-entity attribution, deliberately understated — the corporate footer
+// convention (own line, muted/tertiary text, bottom of the page), not a
+// banner. The main landing page's own footer says the same thing in its
+// copyright line; these secondary pages (Story/Contact/Terms/Privacy/Refund)
+// don't share that footer at all (see LandingPage.jsx's `page` state — each
+// is its own standalone view, not rendered alongside it), so without this
+// they'd carry no legal-entity mention whatsoever.
+export function CompanyFooterNote() {
+  return (
+    <p className="text-xs text-[var(--text-tertiary)] mt-16 pt-8 border-t border-[var(--border-light)]">
+      Divve is a product of Dagriya Fin-Tech Private Limited.
+    </p>
+  );
+}

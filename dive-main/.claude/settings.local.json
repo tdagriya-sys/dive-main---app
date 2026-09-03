@@ -333,7 +333,8 @@
       "Bash(curl -s \"http://localhost:8000/api/share/72?u=Priya&top=42\" -D - -o /tmp/share-response.html)",
       "Bash(xargs grep -l \"FD\")",
       "Bash(node -e \"console.log\\(require\\('razorpay/package.json'\\).version\\)\")",
-      "Bash(powershell -Command 'Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -eq 3000 -or $_.LocalPort -eq 8000 } | Select-Object LocalAddress, LocalPort, OwningProcess')"
+      "Bash(powershell -Command 'Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -eq 3000 -or $_.LocalPort -eq 8000 } | Select-Object LocalAddress, LocalPort, OwningProcess')",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"name='node.exe'\" | Where-Object { $_.CommandLine -match 'backend' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force; Write-Output \"Killed PID $\\($_.ProcessId\\)\" })"
     ]
   }
 }

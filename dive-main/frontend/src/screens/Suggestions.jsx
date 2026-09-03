@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Search, TrendingUp, TrendingDown, Minus, FlaskConical, X, ArrowRight, ChevronRight, Landmark, Zap } from "lucide-react";
 import { useDive } from "../context/DiveContext";
@@ -6,6 +7,7 @@ import { ScoreRing, RangeBar, AnimatedNumber } from "../components/dive/Widgets"
 import { buildSuggestions, rescaleIdealRanges, personalizeSuggestions, diveScore, topExposure, missingCategories, apparentDiversification, realDiversification, totalInvested, fmtINR, effectiveHoldings, segmentBreakdown } from "../lib/diveEngine";
 import { contextSummaryMessage, isCategoryExpected, deferredIncreaseNote, deferredReduceNote, expectedCoreCategories } from "../lib/contextMessaging";
 import { HoldingsLoadingState, HoldingsLoadErrorState, HoldingsEmptyState } from "../components/dive/HoldingsGateStates";
+import { usePortalEnter } from "../lib/usePortalEnter";
 
 // One tax fact per CORE_CATEGORIES entry (diveEngine.js) — the rate/threshold
 // numbers below, and the specific instruments each category maps to
@@ -395,7 +397,32 @@ function SimulateSheet({ sim, setSim, baseHoldings, onApply, canonicalScore, sco
   const newScore = Math.max(0, Math.min(100, Math.round(baseScore + estimatedDelta)));
   const scoreWasCapped = isCappedCategory && rawDelta > 0;
   const apply = () => { if (sim.action === "increase") onApply(sim.cat, amount); setSim(null); };
-  return (
+  // See lib/usePortalEnter.js — framer-motion's own initial/animate/exit
+  // auto-trigger is unreliable for anything portaled to document.body.
+  const { entered, handleClose } = usePortalEnter(() => setSim(null));
+  return createPortal(
+    // Portaled straight to document.body, OUTSIDE DiveShell's own
+    // `overflow-y-auto` content column — `position: fixed` alone isn't
+    // enough to escape a scrollable ancestor's OWN internal scrolling if the
+    // element is still nested inside it as regular content (a transformed
+    // ancestor changes which box `fixed` positions against, it doesn't grant
+    // immunity from that box's scrolling — see DiveShell.jsx's comment on
+    // its content column for the fuller explanation). Rendering here instead
+    // means "fixed" finally means what it's supposed to: pinned to the true
+    // browser viewport, unaffected by how far the underlying screen is
+    // scrolled — the actual bug this fixes (open this after scrolling deep
+    // into a long Suggestions list and it used to render off the top of the
+    // visible viewport instead of centered in view).
+    //
+    // `md:left-56` (matching the sidebar's own `md:w-56` in DiveShell.jsx)
+    // is the tradeoff that comes with portaling to document.body: it's no
+    // longer naturally scoped to just this content column the way it was
+    // when nested inside DiveShell's `relative` wrapper (which excluded the
+    // sidebar "for free"), so this restates that exclusion explicitly —
+    // without it, the backdrop/centering would span the sidebar's width too,
+    // and the card would center in the FULL window instead of just the
+    // content area, the same bug already fixed once for GetStartedPopup.
+    //
     // A single full-screen layer doubles as both the dimmed backdrop AND the
     // centering container — its own onClick closes the modal, and the modal
     // itself stops that click from bubbling back up, the standard
@@ -403,16 +430,16 @@ function SimulateSheet({ sim, setSim, baseHoldings, onApply, canonicalScore, sco
     // overlapping full-screen divs (one purely for the dim, one purely for
     // centering) that would otherwise fight over which one owns the close-
     // on-click behavior.
-    <motion.div className="absolute inset-0 z-40 bg-black/40 flex items-center justify-center p-4"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSim(null)}>
+    <motion.div className="fixed inset-0 md:left-56 z-40 bg-black/40 flex items-center justify-center p-4"
+      animate={{ opacity: entered ? 1 : 0 }} onClick={handleClose}>
       <motion.div
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-md bg-[var(--surface-card)] rounded-3xl p-6 max-h-[85vh] overflow-y-auto no-scrollbar"
-        initial={{ opacity: 0, scale: 0.94, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 8 }}
+        animate={{ opacity: entered ? 1 : 0, scale: entered ? 1 : 0.94, y: entered ? 0 : 12 }}
         transition={{ type: "spring", stiffness: 320, damping: 28 }} data-testid="simulate-sheet">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-heading font-black text-xl">Simulate: {sim.cat}</h2>
-          <button data-testid="simulate-close-btn" onClick={() => setSim(null)}><X size={22} className="text-[var(--text-secondary)]" /></button>
+          <button data-testid="simulate-close-btn" onClick={handleClose}><X size={22} className="text-[var(--text-secondary)]" /></button>
         </div>
         <p className="text-sm text-[var(--text-secondary)] mb-4">Mock-allocate an amount and watch your score react. Demo only.</p>
         <div className="text-center mb-2">
@@ -452,7 +479,8 @@ function SimulateSheet({ sim, setSim, baseHoldings, onApply, canonicalScore, sco
           Apply to my portfolio (Demo)
         </button>
       </motion.div>
-    </motion.div>
+    </motion.div>,
+    document.body
   );
 }
 
@@ -568,17 +596,24 @@ function buildRealScenarios(h, canonicalScore, scoreBreakdown) {
 // the two "sheet" experiences on this screen.
 function WhatIfSheet({ setWhatIf, baseHoldings, canonicalScore, scoreBreakdown }) {
   const scenarios = buildRealScenarios(baseHoldings, canonicalScore, scoreBreakdown);
-  return (
-    <motion.div className="absolute inset-0 z-40 bg-black/40 flex items-center justify-center p-4"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setWhatIf(false)}>
+  // Portaled to document.body — see SimulateSheet's comment above for why:
+  // `fixed` nested inside DiveShell's own scrolling content column still
+  // scrolled along with it, so this rendered off-screen if opened after
+  // scrolling partway down a long Suggestions list. See lib/usePortalEnter.js
+  // for why the animation is driven by `entered`, not framer-motion's own
+  // initial/animate/exit auto-trigger.
+  const { entered, handleClose } = usePortalEnter(() => setWhatIf(false));
+  return createPortal(
+    <motion.div className="fixed inset-0 md:left-56 z-40 bg-black/40 flex items-center justify-center p-4"
+      animate={{ opacity: entered ? 1 : 0 }} onClick={handleClose}>
       <motion.div
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-md bg-[var(--surface-card)] rounded-3xl p-6 max-h-[85vh] overflow-y-auto no-scrollbar"
-        initial={{ opacity: 0, scale: 0.94, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 8 }}
+        animate={{ opacity: entered ? 1 : 0, scale: entered ? 1 : 0.94, y: entered ? 0 : 12 }}
         transition={{ type: "spring", stiffness: 320, damping: 28 }} data-testid="what-if-sheet">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-heading font-black text-xl">What-if scenarios</h2>
-          <button data-testid="what-if-close-btn" onClick={() => setWhatIf(false)}><X size={22} className="text-[var(--text-secondary)]" /></button>
+          <button data-testid="what-if-close-btn" onClick={handleClose}><X size={22} className="text-[var(--text-secondary)]" /></button>
         </div>
         <p className="text-sm text-[var(--text-secondary)] mb-5">Computed from your real holdings — not a market forecast, just what your DIVVE Score would look like if you fixed each thing.</p>
         <div className="space-y-3">
@@ -601,7 +636,8 @@ function WhatIfSheet({ setWhatIf, baseHoldings, canonicalScore, scoreBreakdown }
           ))}
         </div>
       </motion.div>
-    </motion.div>
+    </motion.div>,
+    document.body
   );
 }
 
@@ -755,17 +791,20 @@ function buildMarketStressScenarios(h, scoreBreakdown) {
 function MarketStressSheet({ setMarketStress, baseHoldings, scoreBreakdown }) {
   const ready = !!scoreBreakdown?.hasHoldings;
   const scenarios = ready ? buildMarketStressScenarios(baseHoldings, scoreBreakdown) : [];
-  return (
-    <motion.div className="absolute inset-0 z-40 bg-black/40 flex items-center justify-center p-4"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setMarketStress(false)}>
+  // Portaled to document.body — see SimulateSheet's comment above for why,
+  // and lib/usePortalEnter.js for why the animation is driven by `entered`.
+  const { entered, handleClose } = usePortalEnter(() => setMarketStress(false));
+  return createPortal(
+    <motion.div className="fixed inset-0 md:left-56 z-40 bg-black/40 flex items-center justify-center p-4"
+      animate={{ opacity: entered ? 1 : 0 }} onClick={handleClose}>
       <motion.div
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-md bg-[var(--surface-card)] rounded-3xl p-6 max-h-[85vh] overflow-y-auto no-scrollbar"
-        initial={{ opacity: 0, scale: 0.94, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 8 }}
+        animate={{ opacity: entered ? 1 : 0, scale: entered ? 1 : 0.94, y: entered ? 0 : 12 }}
         transition={{ type: "spring", stiffness: 320, damping: 28 }} data-testid="market-stress-sheet">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-heading font-black text-xl">Stress test</h2>
-          <button data-testid="market-stress-close-btn" onClick={() => setMarketStress(false)}><X size={22} className="text-[var(--text-secondary)]" /></button>
+          <button data-testid="market-stress-close-btn" onClick={handleClose}><X size={22} className="text-[var(--text-secondary)]" /></button>
         </div>
         {ready ? (
           <>
@@ -796,6 +835,7 @@ function MarketStressSheet({ setMarketStress, baseHoldings, scoreBreakdown }) {
           <p data-testid="market-stress-not-ready" className="text-sm text-[var(--text-secondary)]">Your resilience data isn't ready yet — add a holding first, or check back once your DIVVE Score has finished computing.</p>
         )}
       </motion.div>
-    </motion.div>
+    </motion.div>,
+    document.body
   );
 }

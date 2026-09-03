@@ -1,5 +1,5 @@
 import React from "react";
-import { BackLink, SubpageHead } from "./SubpageChrome";
+import { BackLink, SubpageHead, CompanyFooterNote } from "./SubpageChrome";
 
 // Standard early-stage draft language for a portfolio-analysis fintech app —
 // covers the shape of what a real Terms/Privacy page needs (no-advice
@@ -35,6 +35,7 @@ function LegalPage({ eyebrow, title, sections, onBack }) {
           </div>
         ))}
       </div>
+      <CompanyFooterNote />
     </div>
   );
 }

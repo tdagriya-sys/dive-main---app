@@ -1,11 +1,18 @@
 import React from "react";
+import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 import { X, Share2, Link2, Sparkles, Trophy } from "lucide-react";
 import { toast } from "sonner";
 import { ScoreRing } from "./Widgets";
 import { scoreLabel } from "../../lib/diveEngine";
+import { usePortalEnter } from "../../lib/usePortalEnter";
 
 export default function ShareCard({ score, name, topPct, onClose }) {
+  // See usePortalEnter.js — framer-motion's own initial/animate/exit
+  // auto-trigger is unreliable for anything portaled to document.body,
+  // this one included.
+  const { entered, handleClose } = usePortalEnter(onClose);
+
   const link = `${process.env.REACT_APP_BACKEND_URL}/api/share/${score}?u=${encodeURIComponent(name || "me")}&top=${Math.round(topPct)}`;
   const caption = `My DIVVE Score is ${score}/100 (${scoreLabel(score)}). DIVVE looked through my whole portfolio and found ${Math.round(topPct)}% was secretly tied to one company 😳 Check your real diversification 👉`;
 
@@ -24,14 +31,24 @@ export default function ShareCard({ score, name, topPct, onClose }) {
     catch (e) { toast.error("Couldn't copy link"); }
   };
 
-  return (
-    <>
-      <motion.div className="absolute inset-0 bg-black/50 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
-      <motion.div className="absolute bottom-0 inset-x-0 z-50 bg-white rounded-t-3xl p-6"
-        initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }} transition={{ type: "spring", stiffness: 300, damping: 30 }} data-testid="share-card-sheet">
+  // Portaled to document.body, outside Insights.jsx's own scrolling content
+  // column — `position: fixed` alone doesn't escape a scrollable ancestor's
+  // own internal scrolling for content still nested inside it (see
+  // DiveShell.jsx's content-column comment for the fuller explanation).
+  // `md:left-56` on both layers restates the sidebar exclusion the old
+  // `relative`-ancestor scoping gave "for free" before this was portaled —
+  // matching DiveShell's own `md:w-56` sidebar width. The sheet is nested
+  // INSIDE the backdrop motion.div, not a sibling — `stopPropagation` on the
+  // sheet keeps a click on it from bubbling up to the backdrop's own close.
+  return createPortal(
+    <motion.div className="fixed inset-0 md:left-56 bg-black/50 z-40" animate={{ opacity: entered ? 1 : 0 }} onClick={handleClose}>
+      <motion.div
+        onClick={(e) => e.stopPropagation()}
+        className="fixed bottom-0 inset-x-0 md:left-56 z-50 bg-white rounded-t-3xl p-6"
+        animate={{ opacity: entered ? 1 : 0, y: entered ? 0 : 24 }} transition={{ type: "spring", stiffness: 300, damping: 30 }} data-testid="share-card-sheet">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-heading font-extrabold text-xl">Share your DIVVE Score</h2>
-          <button data-testid="share-close-btn" onClick={onClose}><X size={22} className="text-[var(--text-secondary)]" /></button>
+          <button data-testid="share-close-btn" onClick={handleClose}><X size={22} className="text-[var(--text-secondary)]" /></button>
         </div>
 
         {/* The shareable card artifact — premium black + gold */}
@@ -71,6 +88,7 @@ export default function ShareCard({ score, name, topPct, onClose }) {
         </div>
         <p className="text-xs text-[var(--text-tertiary)] text-center mt-3">Invite a friend to check their real diversification.</p>
       </motion.div>
-    </>
+    </motion.div>,
+    document.body
   );
 }

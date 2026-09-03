@@ -183,12 +183,24 @@ export default function DiveShell() {
               </button>
             </div>
 
-            {/* `relative` (not just a plain flex child) — this is the binding
-                ancestor for any `absolute inset-0` overlay deep inside a
-                screen (e.g. Home.jsx's GetStartedPopup): without it, that
-                positioning bubbles up to the outer wrapper above, which
-                spans the sidebar too, centering the popup across the whole
-                app width instead of just this content column. */}
+            {/* `relative` (not just a plain flex child) — the binding ancestor
+                for any `absolute inset-0` overlay still deep inside a screen;
+                without it, that positioning bubbles up to the outer wrapper
+                above, which spans the sidebar too, centering the popup
+                across the whole app width instead of just this content
+                column. A screen's own full-screen SHEETS (WhatIfSheet,
+                MarketStressSheet, ShareCard, GetStartedPopup,
+                ExtensionDownloadCard) don't rely on this anymore — they're
+                portaled straight to `document.body` (see each component's
+                own comment) specifically because nesting them inside THIS
+                div, even as `position: fixed`, still scrolled them along
+                with its `overflow-y-auto` content: a transformed ancestor
+                only changes which box `fixed`/`absolute` positions against,
+                it doesn't grant immunity from that box's own scrolling if
+                the element is still part of its scrollable content — the
+                classic "trap fixed in a scroll panel" trick assumes the
+                trapped element sits OUTSIDE the scrolling region (e.g. a
+                pinned header), not inside it, which isn't this shape. */}
             <div className="relative flex-1 h-full overflow-y-auto no-scrollbar">{content}</div>
 
             {/* Bottom nav — mobile only, hidden once the sidebar takes over at md:+. */}

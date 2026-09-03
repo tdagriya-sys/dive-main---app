@@ -2,7 +2,7 @@ import React from "react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { Mail, Clock, Lock, CheckCircle2, Loader2 } from "lucide-react";
-import { BackLink, SubpageHead } from "./SubpageChrome";
+import { BackLink, SubpageHead, CompanyFooterNote } from "./SubpageChrome";
 import { api } from "../../lib/api";
 
 const SUPPORT_EMAIL = "hello@divve.in";
@@ -147,6 +147,7 @@ export default function ContactPage({ onBack }) {
           )}
         </motion.form>
       </div>
+      <CompanyFooterNote />
     </div>
   );
 }
