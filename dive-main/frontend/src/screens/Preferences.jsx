@@ -1,10 +1,10 @@
 import React, { useState } from "react";
 import { motion } from "framer-motion";
-import { LogOut, ListChecks, Loader2, AlertTriangle, FileDown, Bot, Check } from "lucide-react";
+import { LogOut, ListChecks, Loader2, AlertTriangle, Bot, Check } from "lucide-react";
 import { useDive } from "../context/DiveContext";
-import { api } from "../lib/api";
+import { DownloadReportButton } from "../lib/useDownloadReport";
 
-const CATEGORIES = ["Equity", "Mutual Funds", "Bonds", "Gold/Silver", "REIT/InvIT", "ETF", "FD", "PF", "Insurance", "Crypto"];
+const CATEGORIES = ["Equity", "Mutual Funds", "Bonds", "Gold/Silver", "REIT/InvIT", "ETF", "FD/RD", "PF", "Insurance", "Crypto"];
 const RISK = ["Conservative", "Balanced", "Aggressive"];
 const RETURN = ["Modest", "Moderate", "High"];
 const DIV = ["Low", "Medium", "High"];
@@ -19,8 +19,6 @@ export default function Preferences() {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
-  const [downloadingReport, setDownloadingReport] = useState(false);
-  const [reportError, setReportError] = useState("");
   const [prefsSaveError, setPrefsSaveError] = useState("");
 
   const [name, setName] = useState(user?.name || "");
@@ -76,26 +74,6 @@ export default function Preferences() {
   const handleSavePrefs = async (next) => {
     const ok = await savePrefs(next);
     setPrefsSaveError(ok ? "" : "Couldn't save that change — check your connection and try again.");
-  };
-
-  const downloadReport = async () => {
-    setDownloadingReport(true);
-    setReportError("");
-    try {
-      const res = await api.get("/score/breakdown/pdf", { responseType: "blob" });
-      const url = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "divve-resilience-report.pdf";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
-    } catch (err) {
-      setReportError("Couldn't generate your report. Please try again.");
-    } finally {
-      setDownloadingReport(false);
-    }
   };
 
   const confirmDeleteAccount = async () => {
@@ -180,12 +158,7 @@ export default function Preferences() {
       </div>
 
       <Section title="Reports" hint="Your full resilience score breakdown, as a downloadable one-pager.">
-        {reportError && <p className="text-xs text-[var(--red)] font-semibold mb-3">{reportError}</p>}
-        <button data-testid="prefs-download-report-btn" onClick={downloadReport} disabled={downloadingReport}
-          className="w-full md:max-w-sm md:mx-auto gold-btn rounded-full py-3.5 font-bold flex items-center justify-center gap-2 disabled:opacity-60 transition-colors">
-          {downloadingReport ? <Loader2 size={18} className="animate-spin" /> : <FileDown size={18} />}
-          {downloadingReport ? "Preparing report…" : "Download Resilience Score Report (PDF)"}
-        </button>
+        <DownloadReportButton testId="prefs-download-report-btn" />
       </Section>
 
       <div className="px-6 mt-6">

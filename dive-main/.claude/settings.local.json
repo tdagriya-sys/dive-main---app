@@ -315,7 +315,25 @@
       "PowerShell(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'tsx watch' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; \"done\")",
       "Bash(taskkill //F //PID 26464 //PID 1184 //PID 14184)",
       "Bash(taskkill //F //PID 30872 //PID 23208 //PID 17108 //PID 32924)",
-      "Bash(taskkill //F //PID 6136 //PID 17112 //PID 28444 //PID 13472)"
+      "Bash(taskkill //F //PID 6136 //PID 17112 //PID 28444 //PID 13472)",
+      "Bash(taskkill //F //PID 27412 //PID 4060 //PID 31100 //PID 5760 //PID 31292 //PID 6956 //PID 19584 //PID 34800)",
+      "Bash(taskkill //F //PID 20152 //PID 33540 //PID 17756 //PID 11160)",
+      "Bash(cd \"D:\\\\Dive\\\\dive-main - app\\\\dive-main\\\\backend\\\\src\" && ls routes/ && echo \"---package.json deps---\" && grep -A2 '\"archiver\"\\\\|\"dependencies\"' ../package.json | head -20)",
+      "Bash(node -e \"const m = require\\('./dist/controllers/extensionController.js'\\); console.log\\(typeof m.downloadZip\\);\")",
+      "Bash(taskkill //F //PID 30280 //PID 33496 //PID 22836 //PID 24632)",
+      "Bash(taskkill //F //PID 34608 //PID 12628 //PID 26108 //PID 34384)",
+      "Bash(taskkill //F //PID 13604)",
+      "Bash(taskkill //F //PID 25452 //PID 13464 //PID 26196 //PID 27848 //PID 30524)",
+      "Bash(taskkill //F //PID 4180 //PID 26196 //PID 27200 //PID 28412)",
+      "Bash(taskkill //F //PID 1352 //PID 15636 //PID 32400 //PID 17132)",
+      "Bash(powershell -Command 'Get-CimInstance Win32_Process -Filter \"name='\\\\''node.exe'\\\\''\" | Where-Object { $_.CommandLine -match '\\\\''backend'\\\\'' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force; Write-Output \"Killed PID $\\($_.ProcessId\\)\" }')",
+      "Bash(xargs grep -ln \"compress\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8000/api/score/breakdown)",
+      "Bash(xargs -I{} basename {})",
+      "Bash(curl -s \"http://localhost:8000/api/share/72?u=Priya&top=42\" -D - -o /tmp/share-response.html)",
+      "Bash(xargs grep -l \"FD\")",
+      "Bash(node -e \"console.log\\(require\\('razorpay/package.json'\\).version\\)\")",
+      "Bash(powershell -Command 'Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -eq 3000 -or $_.LocalPort -eq 8000 } | Select-Object LocalAddress, LocalPort, OwningProcess')"
     ]
   }
 }

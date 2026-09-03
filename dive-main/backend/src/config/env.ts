@@ -82,6 +82,31 @@ export const env = {
   },
 
   publicBaseUrl: process.env.PUBLIC_BASE_URL || "",
+
+  // Razorpay — gates the paid resilience-score PDF download (see
+  // paymentService.ts). Deliberately its own key pair, separate from
+  // whatever Razorpay keys any other product on this account uses — see
+  // docs/RAZORPAY_SETUP_GUIDE.md for how to get one. Without a real key
+  // pair, order creation/verification runs in a clearly-labeled mock mode
+  // (paymentService.ts) instead of calling the real Razorpay API — same
+  // "placeholder means dev/mock mode" convention as every other integration
+  // in this file (Finvu, email, AI extraction).
+  razorpay: {
+    keyId: process.env.RAZORPAY_KEY_ID,
+    keySecret: process.env.RAZORPAY_KEY_SECRET,
+    // Separate secret from keySecret above — Razorpay issues this only when
+    // you set up a webhook endpoint (docs/RAZORPAY_SETUP_GUIDE.md §5), used
+    // solely to verify that an incoming POST /api/payments/webhook call
+    // genuinely came from Razorpay, not to authenticate API calls TO Razorpay.
+    webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET,
+    isPlaceholder: isPlaceholder(process.env.RAZORPAY_KEY_ID) || isPlaceholder(process.env.RAZORPAY_KEY_SECRET),
+  },
+  // Price of the resilience-score PDF, in paise (Razorpay's smallest INR
+  // unit — 100 paise = Rs. 1), matching the Rs. 99 the frontend's
+  // DownloadReportButton already advertises. A separate env var (not just a
+  // hardcoded 9900 in code) so the price can change without a redeploy of
+  // frontend copy and backend charge amount drifting out of sync.
+  reportPricePaise: parseInt(process.env.REPORT_PRICE_PAISE || "9900", 10),
 };
 
 export { isPlaceholder };

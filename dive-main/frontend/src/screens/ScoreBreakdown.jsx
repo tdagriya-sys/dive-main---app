@@ -207,7 +207,7 @@ export default function ScoreBreakdown() {
                 {data.dataQuality.realPriceCoveragePct}% of your portfolio's value is backed by real historical price data
               </p>
               <p className="text-[11px] text-[var(--dive-blue-dark)]/80 leading-relaxed">
-                The rest (mutual funds, bonds, REIT/InvIT units not separately listed, ULIP, FD) uses clearly-labeled, illustrative synthetic
+                The rest (mutual funds, bonds, REIT/InvIT units not separately listed, ULIP, FD/RD) uses clearly-labeled, illustrative synthetic
                 return assumptions — there's no cheap public daily-price source for those in India yet.
               </p>
             </div>

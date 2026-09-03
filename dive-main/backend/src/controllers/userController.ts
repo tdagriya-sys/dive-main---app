@@ -11,6 +11,7 @@ import { REFRESH_COOKIE_NAME as REFRESH_COOKIE } from "../config/constants";
 import { profileUpdateSchema, passwordChangeSchema, plannerStateSchema } from "../validators/user";
 import { publicUser } from "../utils/publicUser";
 import { invalidateDiveScoreCache } from "../services/diveScoreService";
+import { invalidateReportPurchase } from "../services/paymentService";
 
 const preferencesSchema = z.object({
   risk: z.enum(["Conservative", "Balanced", "Aggressive"]).optional(),
@@ -54,7 +55,10 @@ export async function updateProfile(req: AuthedRequest, res: Response) {
   // Age drives the Context Engine's persona/corpus-tier bucketing
   // (contextEngine.ts), which feeds several DiveScoreBreakdown sub-scores —
   // a stale cached breakdown would keep showing the old persona otherwise.
-  if (input.age !== undefined) invalidateDiveScoreCache(req.userId!);
+  if (input.age !== undefined) {
+    invalidateDiveScoreCache(req.userId!);
+    await invalidateReportPurchase(req.userId!);
+  }
 
   res.json({ user: publicUser(user) });
 }
@@ -85,6 +89,21 @@ export async function updatePlannerState(req: AuthedRequest, res: Response) {
   await user.save();
 
   res.json({ plannerState: user.plannerState });
+}
+
+// Guided tour (frontend/src/components/Walkthrough.jsx) — only ever flips
+// this one way, so no request body/validation needed, unlike the other
+// /me/* routes above. Returns the full publicUser() shape (not just the
+// flag) to match updateProfile/updatePlannerState's own convention, so the
+// caller can just setUser(data.user) directly.
+export async function markWalkthroughSeen(req: AuthedRequest, res: Response) {
+  const user = await User.findById(req.userId);
+  if (!user) throw new ApiError(404, "USER_NOT_FOUND", "Account no longer exists.");
+
+  user.hasSeenWalkthrough = true;
+  await user.save();
+
+  res.json({ user: publicUser(user) });
 }
 
 export async function changePassword(req: AuthedRequest, res: Response) {

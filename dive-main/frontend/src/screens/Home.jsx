@@ -1,6 +1,6 @@
-import React, { useEffect } from "react";
-import { motion } from "framer-motion";
-import { Search, Bell, Settings, AlertTriangle, CheckCircle2, ChevronRight } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { AlertTriangle, CheckCircle2, ChevronRight, X, Sparkles, Link2, Compass } from "lucide-react";
 import { useDive } from "../context/DiveContext";
 import { ScoreRing, AnimatedNumber } from "../components/dive/Widgets";
 import { HoldingsLoadingState, HoldingsLoadErrorState, HoldingsEmptyState } from "../components/dive/HoldingsGateStates";
@@ -9,10 +9,35 @@ import {
   realDiversification, segmentBreakdown, fmtINR, effectiveHoldings, CORE_CATEGORIES,
 } from "../lib/diveEngine";
 import { isCategoryExpected, contextSummaryMessage } from "../lib/contextMessaging";
+import { DownloadReportButton } from "../lib/useDownloadReport";
 
 export default function Home() {
-  const { holdings, holdingsLoading, holdingsError, loadHoldings, user, setScreen, sims, resetSims, scoreBreakdown, loadScoreBreakdown } = useDive();
+  const { holdings, holdingsLoading, holdingsError, loadHoldings, user, setScreen, sims, resetSims, scoreBreakdown, loadScoreBreakdown, walkthroughOpen } = useDive();
   const simulating = sims.some((s) => s.amount > 0);
+  // Shown once per browser session (sessionStorage — clears when the tab
+  // closes, unlike localStorage), not once ever — so it doesn't nag a
+  // returning user days later, but also doesn't reappear on every Home visit
+  // within the same sitting. Keyed per-user, not just a flat flag: this app's
+  // own DiveContext.js already calls out the shared/kiosk-browser case (one
+  // person logs out, a different person logs in on the same tab) — a flat
+  // key would wrongly skip the popup for a genuinely-new person's first-ever
+  // Home visit just because someone else already saw it in this tab. Reads
+  // and writes happen together in the lazy initializer (not a separate
+  // effect) so "seen" is recorded at the exact moment it's decided to show,
+  // regardless of how the user leaves — dismiss, navigate away, anything.
+  const [showGetStarted, setShowGetStarted] = useState(() => {
+    const key = user?.id ? `divve_get_started_shown:${user.id}` : null;
+    if (!key) return true;
+    try {
+      if (sessionStorage.getItem(key) === "true") return false;
+      sessionStorage.setItem(key, "true");
+      return true;
+    } catch (e) {
+      // Private-browsing/storage-disabled contexts can throw — fail open
+      // (show it) rather than silently breaking the nudge entirely.
+      return true;
+    }
+  });
 
   useEffect(() => {
     if (!scoreBreakdown && holdings.length) loadScoreBreakdown();
@@ -29,8 +54,18 @@ export default function Home() {
   }
   if (!holdings.length) {
     return (
-      <HoldingsEmptyState setScreen={setScreen} testId="home-empty-state" ctaTestId="home-empty-add-btn"
-        title="No investments yet" body="Add your first holding and DIVVE will score your portfolio." ctaLabel="Add investments" />
+      <>
+        <HoldingsEmptyState setScreen={setScreen} testId="home-empty-state" ctaTestId="home-empty-add-btn"
+          title="No investments yet" body="Add your first holding and DIVVE will score your portfolio." ctaLabel="Add investments" />
+        {/* Suppressed while the guided walkthrough (DiveShell.jsx) is open —
+            a first-time, zero-holdings user would otherwise get both
+            full-screen-ish overlays at once. The walkthrough finishing or
+            being skipped is what reveals this, not any explicit hand-off
+            logic — see DiveShell.jsx's own onDone comment. */}
+        <AnimatePresence>
+          {showGetStarted && !walkthroughOpen && <GetStartedPopup setScreen={setScreen} onClose={() => setShowGetStarted(false)} />}
+        </AnimatePresence>
+      </>
     );
   }
   const h = effectiveHoldings(holdings, sims);
@@ -73,16 +108,12 @@ export default function Home() {
 
   return (
     <div className="min-h-full dive-app-surface pb-24 lg:pb-10" data-testid="home-screen">
-      <div className="px-6 pt-8 flex items-center justify-between lg:px-8">
-        <div>
-          <p className="text-sm text-[var(--text-secondary)]">Welcome back</p>
-          <h1 className="font-heading font-black text-2xl">Hi {user?.name?.split(" ")[0] || "there"} 👋</h1>
-        </div>
-        <div className="flex items-center gap-3 text-[var(--text-secondary)]">
-          <button data-testid="home-search-btn" onClick={() => setScreen("ask")}><Search size={20} /></button>
-          <button data-testid="home-notif-btn" onClick={() => setScreen("insights")}><Bell size={20} /></button>
-          <button data-testid="home-settings-btn" onClick={() => setScreen("profile")}><Settings size={20} /></button>
-        </div>
+      <div className="px-6 pt-8 lg:px-8">
+        {/* Search/Your Journey (formerly the bell here)/profile are now the
+            global AppHeader (components/AppHeader.jsx) — reachable from
+            every screen, not just Home, so they're no longer duplicated here. */}
+        <p className="text-sm text-[var(--text-secondary)]">Welcome back</p>
+        <h1 className="font-heading font-black text-2xl">Hi {user?.name?.split(" ")[0] || "there"} 👋</h1>
       </div>
 
       {simulating && (
@@ -103,32 +134,58 @@ export default function Home() {
           lg:max-w-5xl centered, which just moved the "dead space on both
           sides" problem from the page level down to the screen level. This
           fills whatever width the sidebar layout actually gives it. */}
-      <div className="lg:grid lg:grid-cols-5 lg:gap-6 lg:items-start lg:px-8 lg:mt-8">
-        <div className="px-6 mt-6 lg:px-0 lg:mt-0 lg:col-span-2">
-          <motion.button data-testid="home-score-ring-btn" onClick={() => setScreen("scoreBreakdown")}
+      {/* lg:items-start deliberately dropped — grid's default align-items
+          (stretch) makes both columns exactly the right column's height, so
+          the score card (lg:flex-1 inside a lg:flex lg:flex-col column, see
+          just below) can fill that entire height: its top naturally lines
+          up with the top of "Insights" on the right (both are just the
+          first thing in their column), and its bottom lands exactly on
+          "Add more investments"'s bottom, since the column is now exactly
+          that tall. */}
+      <div className="lg:grid lg:grid-cols-5 lg:gap-6 lg:px-8 lg:mt-8">
+        <div className="px-6 mt-6 lg:px-0 lg:mt-0 lg:col-span-2 lg:flex lg:flex-col">
+          {/* Not a button anymore, deliberately — the "See the full
+              breakdown →" link into ScoreBreakdown.jsx used to sit here.
+              Score Breakdown is being held back from direct site access for
+              now (we already offer the same resilience data as the paid PDF
+              report below); this is a display-only card until that
+              screen/route comes back post-subscription-plans. ScoreBreakdown.jsx
+              itself is untouched — only this one entry point is removed.
+              No spacer above this anymore — the column's top now lines up
+              directly with the top of the "Insights" WORD on the right
+              (both are simply the first thing in their column, and the grid
+              row's default stretch — see the comment above — keeps both
+              columns exactly the same height). lg:flex-1 makes the card's
+              own box fill that entire column height, so its BOTTOM lands
+              exactly on "Add more investments"'s bottom on the right.
+              Content stays centered vertically (lg:justify-center) so the
+              extra room this taller box now has reads as intentional
+              breathing space, not a stray gap — the stat boxes below are
+              also a bit taller (p-5, not p-4) for the same reason: more of
+              that room is deliberately filled, not left empty. */}
+          <motion.div data-testid="home-score-ring-card"
             initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
-            className="w-full text-left bg-[var(--surface-card)] rounded-3xl p-6 shadow-sm border border-[var(--border)] flex flex-col items-center hover:shadow-md transition-shadow">
+            className="w-full lg:flex-1 bg-[var(--surface-card)] rounded-3xl p-6 shadow-sm border border-[var(--border)] flex flex-col items-center lg:justify-center">
             <ScoreRing score={score} size={160} />
-            <p className="text-xs font-bold text-[var(--dive-blue)] mt-3">See the full breakdown →</p>
-            <div className="grid grid-cols-2 gap-3 w-full mt-6">
-              <div className="rounded-2xl bg-[var(--red)]/10 border border-[var(--red)]/20 p-4 text-center">
+            <div className="grid grid-cols-2 gap-3 w-full mt-8">
+              <div className="rounded-2xl bg-[var(--red)]/10 border border-[var(--red)]/20 p-5 text-center">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--red)]">Apparent div.</p>
                 <AnimatedNumber value={app} format={(v) => `${Math.round(v)}%`} className="font-heading font-black text-2xl text-[var(--red)]" />
               </div>
-              <div className="rounded-2xl bg-[var(--green)]/10 border border-[var(--green)]/20 p-4 text-center">
+              <div className="rounded-2xl bg-[var(--green)]/10 border border-[var(--green)]/20 p-5 text-center">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--green)]">Real div.</p>
                 <AnimatedNumber value={real} format={(v) => `${Math.round(v)}%`} className="font-heading font-black text-2xl text-[var(--green)]" />
               </div>
             </div>
-            <div className="flex justify-between w-full mt-4 text-sm">
+            <div className="flex justify-between w-full mt-6 text-sm">
               <span className="text-[var(--text-secondary)]">Total invested</span>
               <span className="font-bold">{fmtINR(total)}</span>
             </div>
-            <div className="flex justify-between w-full mt-1 text-sm">
+            <div className="flex justify-between w-full mt-2 text-sm">
               <span className="text-[var(--text-secondary)]">Segments</span>
               <span className="font-bold">{segs.length}</span>
             </div>
-          </motion.button>
+          </motion.div>
         </div>
 
         <div className="lg:col-span-3">
@@ -165,6 +222,64 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      <div className="px-6 mt-10 lg:px-8 flex flex-col items-center">
+        <DownloadReportButton testId="home-download-report-btn" />
+      </div>
     </div>
+  );
+}
+
+// First-run nudge shown on Home whenever the portfolio is genuinely empty —
+// a fresh signup, or a login/session-restore that found no saved holdings
+// (see DiveContext.js's session-restore effect and login()) now land here
+// instead of being dropped straight into the fetch-method chooser with no
+// dashboard in sight. Same floating centered-modal pattern already
+// established by Suggestions.jsx's WhatIfSheet/MarketStressSheet, for visual
+// consistency across the app. Purely a navigational nudge — no numbers of
+// any kind, so there's nothing here that could ever be a fabricated figure.
+function GetStartedPopup({ setScreen, onClose }) {
+  return (
+    <motion.div className="absolute inset-0 z-40 bg-black/40 flex items-center justify-center p-4"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
+      <motion.div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-xl bg-[var(--surface-card)] rounded-3xl p-8 max-h-[85vh] overflow-y-auto no-scrollbar"
+        initial={{ opacity: 0, scale: 0.94, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 8 }}
+        transition={{ type: "spring", stiffness: 320, damping: 28 }} data-testid="get-started-popup">
+        <div className="flex items-start justify-between mb-5">
+          <div className="w-12 h-12 rounded-2xl bg-[var(--dive-blue-light)] flex items-center justify-center shrink-0">
+            <Sparkles size={24} className="text-[var(--dive-blue)]" />
+          </div>
+          <button data-testid="get-started-close-btn" onClick={onClose}><X size={22} className="text-[var(--text-secondary)]" /></button>
+        </div>
+        <h2 className="font-heading font-black text-2xl mb-2.5">Let's see your real diversification</h2>
+        <p className="text-sm text-[var(--text-secondary)] mb-6">Add what you already hold, or tell us how much you have — either way, DIVVE scores it in under a minute.</p>
+        <div className="space-y-3.5">
+          <button data-testid="get-started-fetch-btn" onClick={() => setScreen("chooseMethod")}
+            className="w-full flex items-center gap-4 text-left bg-[var(--surface-card-hover)] rounded-2xl p-5 border border-[var(--border)] hover:shadow-md transition-all">
+            <div className="w-12 h-12 rounded-xl bg-[var(--dive-blue-light)] flex items-center justify-center shrink-0">
+              <Link2 size={22} className="text-[var(--dive-blue)]" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="font-bold text-base">Fetch my investments</p>
+              <p className="text-sm text-[var(--text-secondary)] mt-0.5">Connect, scan, upload, or add manually — pick whatever's easiest.</p>
+            </div>
+            <ChevronRight size={20} className="text-[var(--text-tertiary)] shrink-0" />
+          </button>
+          <button data-testid="get-started-planner-btn" onClick={() => setScreen("planner")}
+            className="w-full flex items-center gap-4 text-left bg-[var(--surface-card-hover)] rounded-2xl p-5 border border-[var(--border)] hover:shadow-md transition-all">
+            <div className="w-12 h-12 rounded-xl bg-[var(--dive-blue-light)] flex items-center justify-center shrink-0">
+              <Compass size={22} className="text-[var(--dive-blue)]" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="font-bold text-base">Start my investment journey</p>
+              <p className="text-sm text-[var(--text-secondary)] mt-0.5">New to investing? We'll map out exactly how to split your money.</p>
+            </div>
+            <ChevronRight size={20} className="text-[var(--text-tertiary)] shrink-0" />
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }

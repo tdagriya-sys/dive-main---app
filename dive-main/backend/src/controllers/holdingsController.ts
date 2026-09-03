@@ -17,6 +17,7 @@ import { ApiError } from "../middleware/errorHandler";
 import { computeHoldingQuality } from "../services/holdingQualityService";
 import { fetchInstrumentDetail } from "../services/instrumentDetailService";
 import { invalidateDiveScoreCache } from "../services/diveScoreService";
+import { invalidateReportPurchase } from "../services/paymentService";
 
 export async function listHoldings(req: AuthedRequest, res: Response) {
   const holdings = await Holding.find({ userId: req.userId })
@@ -76,7 +77,7 @@ export async function createManualHolding(req: AuthedRequest, res: Response) {
     const holding = await Holding.create({
       userId: req.userId,
       assetClass: "FD",
-      name: `${input.bank} Fixed Deposit`,
+      name: `${input.bank} Fixed Deposit / RD`,
       investedValue: input.principal,
       currentValue,
       extraFields: {
@@ -91,6 +92,7 @@ export async function createManualHolding(req: AuthedRequest, res: Response) {
       source: input.source ?? "MANUAL",
     });
     invalidateDiveScoreCache(req.userId!);
+    await invalidateReportPurchase(req.userId!);
     return res.status(201).json({ holding });
   }
 
@@ -114,6 +116,7 @@ export async function createManualHolding(req: AuthedRequest, res: Response) {
       source: input.source ?? "MANUAL",
     });
     invalidateDiveScoreCache(req.userId!);
+    await invalidateReportPurchase(req.userId!);
     return res.status(201).json({ holding });
   }
 
@@ -137,6 +140,7 @@ export async function createManualHolding(req: AuthedRequest, res: Response) {
     source: input.source ?? "MANUAL",
   });
   invalidateDiveScoreCache(req.userId!);
+  await invalidateReportPurchase(req.userId!);
   return res.status(201).json({ holding });
 }
 
@@ -162,7 +166,7 @@ export async function updateHolding(req: AuthedRequest, res: Response) {
       interestRate: input.interestRate ?? (holding.extraFields.interestRate as number),
     };
     const { currentValue, maturityValue, maturityDate } = computeFdValues(merged);
-    holding.name = `${merged.bank} Fixed Deposit`;
+    holding.name = `${merged.bank} Fixed Deposit / RD`;
     holding.investedValue = merged.principal;
     holding.currentValue = currentValue;
     holding.extraFields = {
@@ -217,6 +221,7 @@ export async function updateHolding(req: AuthedRequest, res: Response) {
 
   await holding.save();
   invalidateDiveScoreCache(req.userId!);
+  await invalidateReportPurchase(req.userId!);
   res.json({ holding });
 }
 
@@ -224,5 +229,6 @@ export async function deleteHolding(req: AuthedRequest, res: Response) {
   const holding = await Holding.findOneAndDelete({ _id: req.params.id, userId: req.userId });
   if (!holding) throw new ApiError(404, "HOLDING_NOT_FOUND", "Holding not found.");
   invalidateDiveScoreCache(req.userId!);
+  await invalidateReportPurchase(req.userId!);
   res.json({ message: "Holding deleted." });
 }

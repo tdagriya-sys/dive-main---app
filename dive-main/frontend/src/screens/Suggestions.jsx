@@ -86,7 +86,7 @@ const TAX_NOTES = {
   Bonds: "Interest is added to your income and taxed at your slab rate. Capital gains on listed bonds held over 12 months are taxed at a flat 12.5% (no indexation). Exception: specific government-backed bonds (NHAI, IRFC, PFC, REC, HUDCO) pay interest that's fully tax-exempt under Section 10(15).",
   "Gold/Silver": "Physical gold, gold funds, and gold ETFs are taxed at 12.5% LTCG (24 months for physical/funds, 12 for ETFs) — under that, it's your slab rate. Sovereign Gold Bonds redeem fully tax-free only for the original buyer holding to maturity; the 2.5%/year interest along the way is still taxable.",
   "REIT/InvIT": "Capital gains work like equity — 20% STCG within 12 months, or 12.5% LTCG beyond that — but without the ₹1.25 lakh exemption equity shares get. The interest and rental portion of every payout is taxed at your slab rate; the dividend/capital-return portion is often tax-free, depending on how the trust is structured.",
-  FD: "Interest is fully taxable at your income slab rate, with no exemption. Banks deduct 10% TDS once your interest from them crosses ₹50,000 in a year (₹1,00,000 if you're a senior citizen) — that's a withholding rule, not a tax break.",
+  "FD/RD": "Interest is fully taxable at your income slab rate, with no exemption. Banks deduct 10% TDS once your interest from them crosses ₹50,000 in a year (₹1,00,000 if you're a senior citizen) — that's a withholding rule, not a tax break.",
   ETF: "Index and equity ETFs are taxed exactly like stocks: 20% STCG if sold within 12 months, or a flat 12.5% LTCG on gains above ₹1.25 lakh a year if held longer.",
   Insurance: "ULIP maturity proceeds are tax-free under Section 10(10D) — but only if your total annual premium across all your ULIPs stays at ₹2.5 lakh or less. Cross that in even one policy year and the exemption is lost entirely, not just on the excess: the gain (proceeds minus premiums paid) is then taxed like an equity fund instead — 20% if held ≤12 months, or 12.5% above a ₹1.25 lakh/year exemption if held longer. The death benefit stays 100% tax-free regardless of premium.",
   Crypto: "Every gain is taxed at a flat 30% (Section 115BBH) no matter how long you held it, and losses can't be set off against any other gains. A 1% TDS is also deducted on most sell transactions above ₹10,000–₹50,000 a year.",
@@ -679,12 +679,12 @@ const MARKET_STRESS_SENSITIVITY = {
   geopolitical: {
     Equity: 0.35, "Mutual Funds": 0.26, ETF: 0.32, Bonds: 0.08,
     "Gold/Silver": -0.09, "REIT/InvIT": 0.17, Insurance: 0.12,
-    FD: 0, PF: 0, Crypto: 0.45,
+    "FD/RD": 0, PF: 0, Crypto: 0.45,
   },
   rateHike: {
     Equity: 0.25, "Mutual Funds": 0.19, ETF: 0.22, Bonds: 0.55,
     "Gold/Silver": 0.17, "REIT/InvIT": 0.43, Insurance: 0.20,
-    FD: 0, PF: 0, Crypto: 0.50,
+    "FD/RD": 0, PF: 0, Crypto: 0.50,
   },
 };
 

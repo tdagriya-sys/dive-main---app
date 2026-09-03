@@ -187,3 +187,54 @@ export function TermsPage({ onBack }) {
 export function PrivacyPage({ onBack }) {
   return <LegalPage eyebrow="Privacy Policy" title="Your data, on your terms." sections={PRIVACY_SECTIONS} onBack={onBack} />;
 }
+
+// Divve's only paid feature today is the Rs. 99 resilience-score PDF
+// (Razorpay-powered — see backend/src/services/paymentService.ts and
+// docs/RAZORPAY_SETUP_GUIDE.md). Written specifically around that one
+// product, not a generic multi-SKU template, since that's genuinely all
+// there is to cover right now — this should be revisited (and this comment
+// updated) the day a second paid feature exists.
+const REFUND_SECTIONS = [
+  {
+    heading: "What this policy covers",
+    body: [
+      "This policy applies to Divve's one paid feature today: the Rs. 99 resilience score PDF report, purchased via Razorpay from your Home screen or Profile. Every other part of Divve — connecting accounts, the Divve Score, Suggestions, X-Ray, Divve Planner, Divve Bot — is free, with nothing to refund.",
+    ],
+  },
+  {
+    heading: "It's a digital product, delivered instantly",
+    body: [
+      "Your report generates and downloads immediately after a successful payment — there's no shipping, no waiting, no separate delivery step that can go wrong. Because of that instant delivery, and in line with how digital goods are generally treated, we don't offer refunds for a report that was generated and downloaded correctly simply because you changed your mind afterward.",
+    ],
+  },
+  {
+    heading: "When you ARE entitled to a refund",
+    body: ["We'll refund you in full, no argument, for any of these:"],
+    list: [
+      "You were charged but the report never downloaded, and re-downloading it from Profile still doesn't work",
+      "You were charged twice for the same report by mistake",
+      "Money was deducted from your bank/card/UPI but Razorpay or Divve never actually marked the payment successful",
+      "Any other genuine technical failure on our end that meant you paid without getting a working report",
+    ],
+  },
+  {
+    heading: "How to request one",
+    body: [
+      "Reach us through the Contact Us page or at hello@divve.in with your registered email and roughly when you paid — Razorpay's own payment ID if you have it (from your bank/UPI app's transaction history) helps us find it faster, but isn't required. We'll look into it and get back to you within 2 business days.",
+    ],
+  },
+  {
+    heading: "Timeline once approved",
+    body: [
+      "Approved refunds are issued back to your original payment method (card, UPI, netbanking, whichever you paid with) through Razorpay. Razorpay's own processing typically takes 5-7 business days to reflect, occasionally longer depending on your bank — that part is Razorpay/your bank's timeline, not something Divve can speed up once we've approved it on our end.",
+    ],
+  },
+  {
+    heading: "Changes to this policy",
+    body: ["We may update this policy as Divve adds more paid features. We'll notify you of any material change through the app or site."],
+  },
+];
+
+export function RefundPolicyPage({ onBack }) {
+  return <LegalPage eyebrow="Refund Policy" title="Fair, and over quickly if something's genuinely wrong." sections={REFUND_SECTIONS} onBack={onBack} />;
+}

@@ -7,7 +7,7 @@ import HeroScene from "./dive/HeroScene";
 import FeatureShowcaseSections from "./dive/FeatureShowcase";
 import OurStoryPage from "./dive/OurStoryPage";
 import ContactPage from "./dive/ContactPage";
-import { TermsPage, PrivacyPage } from "./dive/LegalPages";
+import { TermsPage, PrivacyPage, RefundPolicyPage } from "./dive/LegalPages";
 
 // Fully static marketing page — no live app instance, no auth-gated actions,
 // no dependency on any real user data. Every number/card below is
@@ -211,6 +211,7 @@ export default function LandingPage() {
       {page === "contact" && <ContactPage onBack={() => goToPage("home")} />}
       {page === "terms" && <TermsPage onBack={() => goToPage("home")} />}
       {page === "privacy" && <PrivacyPage onBack={() => goToPage("home")} />}
+      {page === "refund" && <RefundPolicyPage onBack={() => goToPage("home")} />}
 
       {page === "home" && <>
       {/* Hero — the isometric 3D scene. Its background sits behind the page's
@@ -371,6 +372,10 @@ export default function LandingPage() {
                 <button data-testid="footer-privacy-btn" onClick={() => goToPage("privacy")}
                   className="text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors">
                   Privacy Policy
+                </button>
+                <button data-testid="footer-refund-btn" onClick={() => goToPage("refund")}
+                  className="text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors">
+                  Refund Policy
                 </button>
               </div>
             </div>

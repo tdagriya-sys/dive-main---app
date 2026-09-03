@@ -39,7 +39,7 @@ export const CORPUS_TIERS: CorpusTier[] = [
     maxAmount: 200000,
     expectedClassCount: 3,
     reasoning:
-      "₹25,000–₹2,00,000 comfortably supports 3 classes at ₹8,000+ each even at the low end — enough to clear practical minimums for equity, a mutual fund, and gold (digital/SGB) or a starter FD, without any single slice being fee-inefficient.",
+      "₹25,000–₹2,00,000 comfortably supports 3 classes at ₹8,000+ each even at the low end — enough to clear practical minimums for equity, a mutual fund, and gold (digital/SGB) or a starter FD/RD, without any single slice being fee-inefficient.",
   },
   {
     id: "established",
@@ -47,7 +47,7 @@ export const CORPUS_TIERS: CorpusTier[] = [
     maxAmount: 1000000,
     expectedClassCount: 5,
     reasoning:
-      "₹2,00,000–₹10,00,000 supports 5 classes at meaningful (₹20,000–40,000+) ticket sizes — room for a first ULIP/insurance commitment or a REIT/InvIT slice worth the lower liquidity, alongside equity, mutual funds, gold, and debt (bond/FD).",
+      "₹2,00,000–₹10,00,000 supports 5 classes at meaningful (₹20,000–40,000+) ticket sizes — room for a first ULIP/insurance commitment or a REIT/InvIT slice worth the lower liquidity, alongside equity, mutual funds, gold, and debt (bond/FD/RD).",
   },
   {
     id: "substantial",
@@ -125,7 +125,7 @@ export const PERSONA_BRACKETS: PersonaBracket[] = [
     volatilityWorstAt: 0.45,
     drawdownWorstAt: -0.6,
     reasoning:
-      "Typically the highest income and capacity of any stage — growth and preservation are both reasonable to expect side by side, across the broadest priority list of any persona. Treated as the baseline risk-capacity level (these were the model's original, persona-blind defaults). PF sits ahead of FD here specifically: this bracket is most likely to be in the highest tax slab, where PF's EEE edge over FD's fully-taxable interest matters most.",
+      "Typically the highest income and capacity of any stage — growth and preservation are both reasonable to expect side by side, across the broadest priority list of any persona. Treated as the baseline risk-capacity level (these were the model's original, persona-blind defaults). PF sits ahead of FD/RD here specifically: this bracket is most likely to be in the highest tax slab, where PF's EEE edge over FD/RD's fully-taxable interest matters most.",
   },
   {
     id: "preRetirement",

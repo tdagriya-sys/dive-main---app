@@ -59,6 +59,34 @@ function correlationColor(v: number): string {
   return COLOR.green;
 }
 
+// This downloadable report is the one place DIVE_SCORE_V2_WEIGHTS' literal
+// numbers would otherwise leave the server in an easily-shared, screenshot-
+// and-forward form — unlike the in-app screen or the raw /score/breakdown
+// JSON, a PDF is built to be handed to someone else. A reader still deserves
+// an honest answer to "does this dimension matter a lot or a little", so
+// this buckets the real weight into a coarse, qualitative tier instead of
+// hiding it outright — enough to explain the score, not enough to hand a
+// competitor the exact recipe. Exported so it's unit-tested directly against
+// the real DIVE_SCORE_V2_WEIGHTS values rather than only indirectly via
+// rendered PDF output.
+export function weightTierLabel(weight: number): string {
+  if (weight >= 0.15) return "Major factor";
+  if (weight >= 0.08) return "Contributing factor";
+  return "Minor factor";
+}
+// Color-coded heat for the methodology chart below — warmer/brighter reads
+// as "matters more", same intuition a weight-proportional bar gave, without
+// a length a reader could measure back into the precise underlying
+// percentage. A fixed-width chip (see "How Your Composite Score Is Built"
+// below) also sidesteps the bug a free-width bar + right-aligned label had:
+// once the label text got long enough ("Contributing factor" vs the old
+// "17%"), it started drawing on top of the bar instead of past its end.
+const WEIGHT_TIER_CHIP_COLOR: Record<string, string> = {
+  "Major factor": COLOR.gold,
+  "Contributing factor": COLOR.amber,
+  "Minor factor": "#8A8A92", // muted neutral grey — deliberately NOT one of this file's semantic colors (red/green/amber), since "minor" isn't a warning
+};
+
 const ASSET_CLASS_LABELS: Record<string, string> = {
   EQUITY: "Equity",
   MUTUAL_FUND: "Mutual Funds",
@@ -69,7 +97,7 @@ const ASSET_CLASS_LABELS: Record<string, string> = {
   GOLD: "Gold/Silver",
   SILVER: "Gold/Silver",
   ULIP_INSURANCE: "Insurance",
-  FD: "FD",
+  FD: "FD/RD",
   CRYPTO: "Crypto",
   PF: "PF",
 };
@@ -451,7 +479,7 @@ export async function generateScoreReportPdf(
   for (const key of SUB_SCORE_ORDER) {
     const sub = breakdown.subScores[key];
     const meta = SUB_SCORE_META[key];
-    const weightPct = Math.round(DIVE_SCORE_V2_WEIGHTS[key] * 100);
+    const weightTier = weightTierLabel(DIVE_SCORE_V2_WEIGHTS[key]);
     const blurbH = doc.font("Helvetica").fontSize(8.5).heightOfString(meta.blurb, { width: CONTENT_W - 32 });
     const directionH = doc.font("Helvetica-Oblique").fontSize(8).heightOfString(meta.direction, { width: CONTENT_W - 32 });
     const rawH = doc.font("Helvetica").fontSize(8).heightOfString(rawValueText(key, sub, breakdown), { width: CONTENT_W - 32 });
@@ -460,7 +488,7 @@ export async function generateScoreReportPdf(
     cardBg(doc, MARGIN, cursor.y, CONTENT_W, cardH);
     let iy = cursor.y + 14;
     doc.fillColor(COLOR.textPrimary).font("Helvetica-Bold").fontSize(11).text(meta.label, MARGIN + 16, iy);
-    doc.fillColor(COLOR.textTertiary).font("Helvetica").fontSize(8).text(`${weightPct}% of composite`, MARGIN + 16, iy + 14);
+    doc.fillColor(COLOR.textTertiary).font("Helvetica").fontSize(8).text(`${weightTier} in your score`, MARGIN + 16, iy + 14);
     doc
       .fillColor(scoreColor(sub.score))
       .font("Helvetica-Bold")
@@ -622,7 +650,7 @@ export async function generateScoreReportPdf(
   sectionTitle("Data Quality", { gap: 4 });
   const dq = breakdown.dataQuality;
   const dqExplain =
-    "The rest (mutual funds, bonds, REIT/InvIT units not separately listed, ULIP, FD) uses clearly-labeled, illustrative synthetic return assumptions — there's no cheap public daily-price source for those in India yet.";
+    "The rest (mutual funds, bonds, REIT/InvIT units not separately listed, ULIP, FD/RD) uses clearly-labeled, illustrative synthetic return assumptions — there's no cheap public daily-price source for those in India yet.";
   const dqHeadline = `${dq.realPriceCoveragePct}% of your portfolio's value is backed by real historical price data`;
   const dqExplainH = doc.font("Helvetica").fontSize(8.5).heightOfString(dqExplain, { width: CONTENT_W - 32 });
   const marketNote = dq.marketFactorIsSynthetic
@@ -671,15 +699,41 @@ export async function generateScoreReportPdf(
   cursor.y += 16;
 
   // ==================== METHODOLOGY / WEIGHTS ====================
+  // Deliberately qualitative (weightTierLabel), not the literal
+  // DIVE_SCORE_V2_WEIGHTS percentages — see that function's comment. This is
+  // a downloadable, shareable document, not the in-app screen or an
+  // authenticated API response, so the exact weighting recipe stays internal
+  // here specifically.
+  //
+  // Rendered as a fixed-width, color-coded chip (a small heat map) per row
+  // rather than the free-width bar + right-aligned text this used to be —
+  // that combo overlapped once the label went from a short "17%" to a much
+  // longer "Contributing factor". A chip sized to fit the LONGEST tier label
+  // and pinned to the page's right margin can never collide with the
+  // dimension name on the left, however long either string is.
   sectionTitle("How Your Composite Score Is Built", { gap: 4 });
-  paragraph("Each dimension above contributes this share of your final 0-100 composite score:", { size: 8.5, gap: 10 });
-  const weightRowH = 15;
+  paragraph("Each dimension above plays a role in your final 0-100 composite score — some carry more weight than others:", { size: 8.5, gap: 10 });
+
+  const chipFont = "Helvetica-Bold";
+  const chipFontSize = 7.5;
+  const chipPadX = 10;
+  doc.font(chipFont).fontSize(chipFontSize);
+  const chipW = Math.max(...Object.keys(WEIGHT_TIER_CHIP_COLOR).map((label) => doc.widthOfString(label) + chipPadX * 2));
+  const chipH = 15;
+  const weightRowH = chipH + 7;
+  const labelColW = CONTENT_W - chipW - 16; // 16pt gap between the label and the chip
+
   ensureSpace(weightRowH * SUB_SCORE_ORDER.length + 10);
   for (const key of SUB_SCORE_ORDER) {
-    const pct = Math.round(DIVE_SCORE_V2_WEIGHTS[key] * 100);
-    doc.fillColor(COLOR.textSecondary).font("Helvetica").fontSize(8.5).text(SUB_SCORE_META[key].label, MARGIN, cursor.y, { width: 200 });
-    drawBar(doc, MARGIN + 210, cursor.y + 2, CONTENT_W - 250, 6, pct * 2, COLOR.gold);
-    doc.fillColor(COLOR.textPrimary).font("Helvetica-Bold").fontSize(8.5).text(`${pct}%`, MARGIN, cursor.y, { width: CONTENT_W, align: "right" });
+    const tier = weightTierLabel(DIVE_SCORE_V2_WEIGHTS[key]);
+    const chipColor = WEIGHT_TIER_CHIP_COLOR[tier];
+    const chipX = PAGE.width - MARGIN - chipW;
+    doc.fillColor(COLOR.textSecondary).font("Helvetica").fontSize(8.5).text(SUB_SCORE_META[key].label, MARGIN, cursor.y + 3, { width: labelColW });
+    doc.roundedRect(chipX, cursor.y, chipW, chipH, chipH / 2).fill(chipColor);
+    // Every chip color above (gold/amber/muted grey) is light enough that
+    // near-black text reads cleanly on top of all three, so one text color
+    // works across the whole tier set.
+    doc.fillColor(COLOR.bg).font(chipFont).fontSize(chipFontSize).text(tier, chipX, cursor.y + 4, { width: chipW, align: "center" });
     cursor.y += weightRowH;
   }
 

@@ -3,7 +3,7 @@
 // into (REIT+InvIT and Gold+Silver each share one label — see
 // ASSET_CLASS_LABELS below) — every one of them gets a Suggestions card,
 // a missing-category nudge, and an ideal-range target, not just a subset.
-export const CORE_CATEGORIES = ["Equity", "Mutual Funds", "Bonds", "Gold/Silver", "REIT/InvIT", "FD", "PF", "ETF", "Insurance", "Crypto"];
+export const CORE_CATEGORIES = ["Equity", "Mutual Funds", "Bonds", "Gold/Silver", "REIT/InvIT", "FD/RD", "PF", "ETF", "Insurance", "Crypto"];
 
 // Maps the backend's canonical 12-way assetClass enum to the human-readable
 // segment labels this engine (and the existing UI copy) was built around.
@@ -17,7 +17,7 @@ export const ASSET_CLASS_LABELS = {
   GOLD: "Gold/Silver",
   SILVER: "Gold/Silver",
   ULIP_INSURANCE: "Insurance",
-  FD: "FD",
+  FD: "FD/RD",
   CRYPTO: "Crypto",
   PF: "PF",
 };
@@ -46,17 +46,17 @@ export const ASSET_CLASS_LABELS = {
 export const IDEAL_RANGES = {
   Conservative: {
     Equity: [20, 30], "Mutual Funds": [15, 25], Bonds: [20, 30],
-    "Gold/Silver": [8, 12], "REIT/InvIT": [5, 10], FD: [10, 20], PF: [10, 18],
+    "Gold/Silver": [8, 12], "REIT/InvIT": [5, 10], "FD/RD": [10, 20], PF: [10, 18],
     ETF: [3, 8], Insurance: [5, 10], Crypto: [0, 2],
   },
   Balanced: {
     Equity: [25, 35], "Mutual Funds": [20, 30], Bonds: [15, 25],
-    "Gold/Silver": [8, 12], "REIT/InvIT": [8, 12], FD: [8, 15], PF: [8, 14],
+    "Gold/Silver": [8, 12], "REIT/InvIT": [8, 12], "FD/RD": [8, 15], PF: [8, 14],
     ETF: [5, 10], Insurance: [3, 7], Crypto: [0, 5],
   },
   Aggressive: {
     Equity: [35, 50], "Mutual Funds": [20, 30], Bonds: [5, 15],
-    "Gold/Silver": [5, 10], "REIT/InvIT": [8, 15], FD: [3, 8], PF: [3, 6],
+    "Gold/Silver": [5, 10], "REIT/InvIT": [8, 15], "FD/RD": [3, 8], PF: [3, 6],
     ETF: [5, 12], Insurance: [2, 5], Crypto: [2, 8],
   },
 };
@@ -116,7 +116,7 @@ export const SEGMENT_COLORS = {
   "Gold/Silver": "#F59E0B",
   "REIT/InvIT": "#FB923C",
   ETF: "#38BDF8",
-  FD: "#94A3B8",
+  "FD/RD": "#94A3B8",
   Insurance: "#F472B6",
   // Was missing entirely — fell back to the generic "#A1A1AA" gray on the
   // segment donut, same monochrome issue fixed for per-company colors earlier.
@@ -147,7 +147,7 @@ const SIM_TEMPLATES = {
   Bonds: [{ company: "Govt / Bank", pct: 100 }],
   "Gold/Silver": [{ company: "Gold", pct: 100 }],
   "REIT/InvIT": [{ company: "Embassy REIT", pct: 55 }, { company: "IndiGrid InvIT", pct: 45 }],
-  FD: [{ company: "Govt / Bank", pct: 100 }],
+  "FD/RD": [{ company: "Govt / Bank", pct: 100 }],
   PF: [{ company: "EPFO / Govt", pct: 100 }],
   Insurance: [{ company: "Govt / Bank", pct: 60 }, { company: "Others (diversified)", pct: 40 }],
   Crypto: [{ company: "Bitcoin", pct: 40 }, { company: "Ethereum", pct: 30 }, { company: "Others (diversified)", pct: 30 }],
@@ -483,7 +483,7 @@ export function buildSuggestions(holdings, ranges, risk) {
 // ahead of defensive ones (and vice-versa for "Modest"); it does not change
 // what "on track"/"over its ideal band" means for any category.
 export const RETURN_TIER = {
-  FD: "low", PF: "low", Bonds: "low", Insurance: "low",
+  "FD/RD": "low", PF: "low", Bonds: "low", Insurance: "low",
   "Gold/Silver": "medium", "REIT/InvIT": "medium", "Mutual Funds": "medium",
   Equity: "high", ETF: "high", Crypto: "high",
 };

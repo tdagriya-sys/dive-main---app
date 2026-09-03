@@ -80,6 +80,32 @@ describe("planner state persistence", () => {
   });
 });
 
+// Guided tour (frontend/src/components/Walkthrough.jsx) — must auto-start
+// exactly once ever, not once per session/login, so it's backed by a real
+// account field rather than sessionStorage/localStorage.
+describe("walkthrough seen flag", () => {
+  it("defaults to false for a brand-new account", async () => {
+    const token = await signupAndLogin("9200000008", "walkthroughdefault@example.com");
+    const me = await request(app).get("/api/auth/me").set({ Authorization: `Bearer ${token}` });
+    expect(me.body.user.hasSeenWalkthrough).toBe(false);
+  });
+
+  it("PATCH sets it true and it stays true on the next login", async () => {
+    const token = await signupAndLogin("9200000009", "walkthroughseen@example.com");
+    const mark = await request(app).patch("/api/users/me/walkthrough").set({ Authorization: `Bearer ${token}` });
+    expect(mark.status).toBe(200);
+    expect(mark.body.user.hasSeenWalkthrough).toBe(true);
+
+    const login = await request(app).post("/api/auth/login").send({ identifier: "walkthroughseen@example.com", password: "Passw0rd!" });
+    expect(login.body.user.hasSeenWalkthrough).toBe(true);
+  });
+
+  it("requires authentication", async () => {
+    const res = await request(app).patch("/api/users/me/walkthrough");
+    expect(res.status).toBe(401);
+  });
+});
+
 describe("account deletion", () => {
   it("deletes the account and cascades its holdings", async () => {
     const token = await signupAndLogin("9200000004", "deleteme@example.com");

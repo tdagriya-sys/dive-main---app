@@ -183,6 +183,8 @@ Your app needs a file with real passwords and settings to run properly and safel
 
    - `ADMIN_EMAILS=` → add the email address you'll sign up with on your own site (comma-separated if more than one), e.g. `ADMIN_EMAILS=you@example.com`. This is what's allowed to manually trigger an instrument-list refresh (`POST /api/admin/instruments/refresh`, used elsewhere in this guide's maintenance steps) — leaving it empty means *no one* can call that, including you.
 
+   - `RAZORPAY_KEY_ID=`, `RAZORPAY_KEY_SECRET=`, `RAZORPAY_WEBHOOK_SECRET=` — powers the paid (Rs. 99) resilience-score PDF download. Its own full walkthrough is `docs/RAZORPAY_SETUP_GUIDE.md` (bigger topic than the rest of this section — a real business/banking step, not just "click create key"); if you already use Razorpay for another product, that guide covers reusing the same key (recommended, with a `SCORE_REPORT_PDF` order-note tag so the two products' payments stay easy to tell apart) as well as the fully-separate-account alternative. Leave these as placeholders for now and that download runs in a clearly-labeled "Dev Mode" (simulated payment, no real Razorpay call) instead of failing.
+
 3. Once you've edited everything, save and exit `nano`: press **Ctrl+O**, then **Enter** (this saves), then **Ctrl+X** (this exits).
 
 4. Lock this file down so only you can read it:

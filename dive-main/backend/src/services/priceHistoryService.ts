@@ -291,7 +291,7 @@ const SYNTHETIC_PARAMS: Record<AssetClass, { drift: number; vol: number; beta: n
   GOLD: { drift: 0.08, vol: 0.14, beta: -0.15, label: "Gold" },
   SILVER: { drift: 0.08, vol: 0.2, beta: 0.15, label: "Silver" },
   ULIP_INSURANCE: { drift: 0.08, vol: 0.09, beta: 0.35, label: "ULIP/Insurance" },
-  FD: { drift: 0.07, vol: 0.003, beta: 0, label: "Fixed Deposit" },
+  FD: { drift: 0.07, vol: 0.003, beta: 0, label: "Fixed Deposit / RD" },
   CRYPTO: { drift: 0.25, vol: 0.6, beta: 0.3, label: "Crypto" },
   // Blended PPF(7.1%)/EPF(8.25%) fallback drift — superseded by the actual
   // holding's own declared rate below (pfInterestRatePercent) whenever it's

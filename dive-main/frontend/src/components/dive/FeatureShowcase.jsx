@@ -88,7 +88,7 @@ const USP_PANELS = [
       <>
         <div className="fs-acc-visual">
           <div className="fs-plan-row"><span className="fs-plan-dot" /><span><b>Month 1:</b> start Equity</span></div>
-          <div className="fs-plan-row"><span className="fs-plan-dot" /><span><b>Month 4:</b> add FD</span></div>
+          <div className="fs-plan-row"><span className="fs-plan-dot" /><span><b>Month 4:</b> add FD/RD</span></div>
           <div className="fs-plan-row"><span className="fs-plan-dot" /><span><b>Month 67:</b> add REIT / InvIT</span></div>
         </div>
         <div className="fs-popup-card fs-year-pop">

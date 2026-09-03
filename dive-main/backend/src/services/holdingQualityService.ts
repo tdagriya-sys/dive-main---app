@@ -148,7 +148,7 @@ export function computeHoldingQuality(
       return {
         label: "DICGC insured up to Rs. 5,00,000",
         detail:
-          "Deposits at scheduled commercial banks (including this FD) are insured up to Rs. 5,00,000 per depositor per bank by the DICGC, an RBI subsidiary — beyond that, you carry the bank's own credit risk. Company/NBFC FDs are NOT covered by this insurance.",
+          "Deposits at scheduled commercial banks (including this FD/RD) are insured up to Rs. 5,00,000 per depositor per bank by the DICGC, an RBI subsidiary — beyond that, you carry the bank's own credit risk. Company/NBFC FDs/RDs are NOT covered by this insurance.",
         tier: "good",
       };
 
@@ -156,7 +156,7 @@ export function computeHoldingQuality(
       return {
         label: "Sovereign/EPFO-backed — no bank credit risk",
         detail:
-          "PPF is backed directly by the Government of India via the National Small Savings Fund; EPF is administered by EPFO, a statutory body under the Ministry of Labour & Employment. Neither carries a bank's credit/default risk the way an FD does, so there's no DICGC-style deposit insurance here — none is needed. The government-declared interest rate (reviewed quarterly for PPF, annually for EPF) can change over time, but your principal and already-declared interest aren't at credit risk.",
+          "PPF is backed directly by the Government of India via the National Small Savings Fund; EPF is administered by EPFO, a statutory body under the Ministry of Labour & Employment. Neither carries a bank's credit/default risk the way an FD/RD does, so there's no DICGC-style deposit insurance here — none is needed. The government-declared interest rate (reviewed quarterly for PPF, annually for EPF) can change over time, but your principal and already-declared interest aren't at credit risk.",
         tier: "good",
       };
 

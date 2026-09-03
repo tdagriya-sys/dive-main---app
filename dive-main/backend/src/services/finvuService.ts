@@ -91,7 +91,7 @@ function buildSyntheticFiData(): FiRecord[] {
   return [
     { fiType: "EQUITIES", name: "Infosys", investedValue: 32000, currentValue: 34500, quantity: 20 },
     { fiType: "MUTUAL_FUNDS", name: "SBI Blue Chip Fund", investedValue: 45000, currentValue: 48200 },
-    { fiType: "DEPOSIT", name: "State Bank of India Fixed Deposit", investedValue: 60000, currentValue: 63000,
+    { fiType: "DEPOSIT", name: "State Bank of India Fixed Deposit / RD", investedValue: 60000, currentValue: 63000,
       extraFields: { bank: "State Bank of India", interestRate: 6.8 } },
     { fiType: "INSURANCE_POLICIES", name: "SBI Life Smart Wealth Builder", investedValue: 15000, currentValue: 15900 },
   ];

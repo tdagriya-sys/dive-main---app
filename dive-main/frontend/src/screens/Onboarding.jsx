@@ -113,7 +113,9 @@ function SignUp({ setScreen }) {
     setLoading(true);
     try {
       await signupVerify(form.mobile.replace(/\D/g, ""), otp);
-      setScreen("chooseMethod");
+      // Land on Home (dashboard + a dismissible "get started" popup), not the
+      // fetch-method chooser directly — see Home.jsx's GetStartedPopup.
+      setScreen("home");
     } catch (err) {
       setError(err?.response?.data?.message || "That OTP didn't work.");
     } finally {

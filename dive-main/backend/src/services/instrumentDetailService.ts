@@ -41,7 +41,7 @@ export interface InstrumentDetail {
 const NOT_AVAILABLE_REASONS: Record<string, string> = {
   BOND: "There's no free, reliable public API for individual Indian bond/NCD pricing.",
   ULIP_INSURANCE: "ULIP/insurance plans aren't publicly quoted instruments — pricing is policy-specific.",
-  FD: "Fixed deposits aren't publicly quoted instruments — the rate is fixed at booking.",
+  FD: "Fixed deposits/recurring deposits aren't publicly quoted instruments — the rate is fixed at booking.",
   GOLD: "This isn't exchange-listed (SGB/digital/physical gold don't have a live public quote here).",
   SILVER: "This isn't exchange-listed (digital/physical silver doesn't have a live public quote here).",
 };

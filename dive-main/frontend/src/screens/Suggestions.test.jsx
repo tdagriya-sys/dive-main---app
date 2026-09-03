@@ -71,11 +71,11 @@ describe("Suggestions — per-category tax note strip", () => {
     // guards against a copy-paste bug that gave every category the same text.
     const equityNote = within(screen.getByTestId("sugg-card-Equity")).getByTestId("sugg-tax-note-Equity").textContent;
     const cryptoNote = within(screen.getByTestId("sugg-card-Crypto")).getByTestId("sugg-tax-note-Crypto").textContent;
-    const fdNote = within(screen.getByTestId("sugg-card-FD")).getByTestId("sugg-tax-note-FD").textContent;
+    const fdNote = within(screen.getByTestId("sugg-card-FD/RD")).getByTestId("sugg-tax-note-FD/RD").textContent;
     const pfNote = within(screen.getByTestId("sugg-card-PF")).getByTestId("sugg-tax-note-PF").textContent;
     expect(equityNote).not.toBe(cryptoNote);
     expect(equityNote).not.toBe(fdNote);
-    expect(fdNote).not.toBe(pfNote); // PF ≠ FD despite both being "low return tier" — distinct tax treatment (EEE vs fully taxable)
+    expect(fdNote).not.toBe(pfNote); // PF ≠ FD/RD despite both being "low return tier" — distinct tax treatment (EEE vs fully taxable)
   });
 
   it("cites the specific researched numbers for Equity, Insurance (ULIP), Bonds, Crypto, and PF", () => {
@@ -102,7 +102,7 @@ describe("Suggestions — per-category tax note strip", () => {
     expect(cryptoNote).toHaveTextContent("30%"); // flat VDA rate, Sec 115BBH
     expect(cryptoNote).toHaveTextContent("115BBH");
 
-    const fdNote = within(screen.getByTestId("sugg-card-FD")).getByTestId("sugg-tax-note-FD");
+    const fdNote = within(screen.getByTestId("sugg-card-FD/RD")).getByTestId("sugg-tax-note-FD/RD");
     expect(fdNote).toHaveTextContent("50,000"); // Budget 2025 TDS threshold
     expect(fdNote).toHaveTextContent("1,00,000"); // senior citizen TDS threshold
 

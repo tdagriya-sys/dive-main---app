@@ -12,6 +12,44 @@ const baseContext = {
   setScreen: jest.fn(),
 };
 
+// Signup -> Home routing: regression guard for the "land on Home with a
+// get-started popup instead of the fetch-method chooser" change — a fresh
+// signup used to setScreen("chooseMethod") straight after OTP verify.
+describe("Onboarding — Signup", () => {
+  let setScreen;
+
+  beforeEach(() => {
+    setScreen = jest.fn();
+  });
+
+  it("lands on Home (not the fetch-method chooser) after a successful signup + OTP verify", async () => {
+    const user = userEvent.setup();
+    useDive.mockReturnValue({
+      ...baseContext,
+      screen: "signup",
+      setScreen,
+      signupStart: jest.fn().mockResolvedValue({ devOtp: "123456" }),
+      signupVerify: jest.fn().mockResolvedValue({ id: "u1", name: "Test User" }),
+    });
+    render(<Onboarding />);
+
+    await user.type(screen.getByTestId("name-input"), "Test User");
+    await user.type(screen.getByTestId("phone-input"), "9876543210");
+    await user.type(screen.getByTestId("email-input"), "test@example.com");
+    await user.type(screen.getByTestId("age-input"), "30");
+    await user.type(screen.getByTestId("password-input"), "TestPass123!");
+    await user.type(screen.getByTestId("confirm-password-input"), "TestPass123!");
+    await user.click(screen.getByTestId("send-otp-btn"));
+
+    await screen.findByTestId("signup-otp-screen");
+    await user.click(screen.getByTestId("autofill-otp-btn"));
+    await user.click(screen.getByTestId("verify-otp-btn"));
+
+    await waitFor(() => expect(setScreen).toHaveBeenCalledWith("home"));
+    expect(setScreen).not.toHaveBeenCalledWith("chooseMethod");
+  });
+});
+
 // Forgot-password: mirrors the exact 3-step backend flow (send OTP -> verify
 // OTP -> set new password), so these tests drive the UI through all three
 // steps plus the branches where each step can fail, the same way a real user

@@ -45,6 +45,12 @@ export function DiveProvider({ children }) {
   }, []);
   const [authLoading, setAuthLoading] = useState(true);
   const [user, setUser] = useState(null);
+  // Guided tour (components/Walkthrough.jsx) — open/close state lives here,
+  // not locally in whichever component happens to render it, because three
+  // independent places need to read or set it: DiveShell.jsx (auto-opens it
+  // once, and its sidebar replay button), and Home.jsx (suppresses its own
+  // GetStartedPopup while this is open, so the two never stack).
+  const [walkthroughOpen, setWalkthroughOpen] = useState(false);
 
   const [holdings, setHoldings] = useState([]);
   const [holdingsLoading, setHoldingsLoading] = useState(false);
@@ -183,8 +189,12 @@ export function DiveProvider({ children }) {
         }));
         skipNextPlannerSaveRef.current = true;
         loadPlannerStateFrom(data.user);
-        const loaded = await loadHoldings();
-        setScreen(loaded.length ? "home" : "chooseMethod");
+        await loadHoldings();
+        // Always land on Home — even with zero holdings, it shows the
+        // dashboard's own empty state plus a dismissible "get started" popup
+        // (see Home.jsx's GetStartedPopup), rather than dropping the user
+        // straight into the fetch-method chooser with no dashboard in sight.
+        setScreen("home");
       } catch (e) {
         // no valid session — stay on splash/onboarding
       } finally {
@@ -247,8 +257,10 @@ export function DiveProvider({ children }) {
     skipNextPlannerSaveRef.current = true;
     loadPlannerStateFrom(data.user);
     setSims([]);
-    const loaded = await loadHoldings();
-    setScreen(loaded.length ? "home" : "chooseMethod");
+    await loadHoldings();
+    // Always land on Home — see the matching comment on the session-restore
+    // effect above for why.
+    setScreen("home");
     return data.user;
   };
 
@@ -320,6 +332,14 @@ export function DiveProvider({ children }) {
     return data.user;
   };
 
+  // Only ever flips one way (see backend/src/controllers/userController.ts's
+  // markWalkthroughSeen) — called on both finishing AND skipping the tour,
+  // since either one means "don't auto-start this again."
+  const markWalkthroughSeen = async () => {
+    const { data } = await api.patch("/users/me/walkthrough");
+    setUser(data.user);
+  };
+
   // Unlike savePrefs/updateProfile, this is never optimistic — there's
   // nothing locally cached to update either way, and a wrong current-password
   // guess needs to surface as a real error, not something to silently retry.
@@ -341,6 +361,7 @@ export function DiveProvider({ children }) {
     signupStart, signupVerify, login, logout, deleteAccount,
     forgotPasswordStart, forgotPasswordVerify, resetPassword,
     updateProfile, changePassword,
+    walkthroughOpen, setWalkthroughOpen, markWalkthroughSeen,
     holdings, holdingsLoading, holdingsError, loadHoldings, deleteHolding, updateHolding,
     scoreBreakdown, loadScoreBreakdown,
     ranges, prefs, setPrefs, savePrefs,

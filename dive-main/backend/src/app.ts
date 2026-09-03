@@ -1,4 +1,4 @@
-import express from "express";
+import express, { Request } from "express";
 import cors from "cors";
 import helmet from "helmet";
 import cookieParser from "cookie-parser";
@@ -16,6 +16,9 @@ import botscanRoutes from "./routes/botscan.routes";
 import aaRoutes from "./routes/aa.routes";
 import scoreRoutes from "./routes/score.routes";
 import contactRoutes from "./routes/contact.routes";
+import extensionRoutes from "./routes/extension.routes";
+import shareRoutes from "./routes/share.routes";
+import paymentRoutes from "./routes/payment.routes";
 
 export function createApp() {
   const app = express();
@@ -42,7 +45,20 @@ export function createApp() {
       credentials: true,
     })
   );
-  app.use(express.json({ limit: "2mb" }));
+  app.use(
+    express.json({
+      limit: "2mb",
+      // Stashes the exact raw bytes of every request body onto req.rawBody —
+      // needed only by POST /api/payments/webhook (Razorpay signs the raw
+      // body, not the parsed-then-reserialized object, which can differ
+      // byte-for-byte even for an equivalent JSON value), but cheap enough
+      // to capture globally rather than special-casing that one route's
+      // body-parsing middleware order.
+      verify: (req, _res, buf) => {
+        (req as Request & { rawBody?: Buffer }).rawBody = buf;
+      },
+    })
+  );
   app.use(express.urlencoded({ extended: true }));
   app.use(cookieParser());
   if (env.nodeEnv !== "test") {
@@ -88,6 +104,9 @@ export function createApp() {
   api.use("/aa", aaRoutes);
   api.use("/score", scoreRoutes);
   api.use("/contact", contactRoutes);
+  api.use("/extension", extensionRoutes);
+  api.use("/share", shareRoutes);
+  api.use("/payments", paymentRoutes);
   api.use("/admin", adminInstrumentsRouter);
 
   app.use("/api", api);

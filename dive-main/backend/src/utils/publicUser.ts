@@ -13,5 +13,6 @@ export function publicUser(user: InstanceType<typeof User>) {
     preferences: user.preferences,
     portfolio: user.portfolio,
     plannerState: user.plannerState,
+    hasSeenWalkthrough: user.hasSeenWalkthrough,
   };
 }

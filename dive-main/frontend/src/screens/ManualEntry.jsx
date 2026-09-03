@@ -16,7 +16,7 @@ const ASSET_CLASSES = [
   { value: "GOLD", label: "Gold" },
   { value: "SILVER", label: "Silver" },
   { value: "ULIP_INSURANCE", label: "ULIP / Insurance" },
-  { value: "FD", label: "Fixed Deposit" },
+  { value: "FD", label: "Fixed Deposit (FD/RD)" },
   { value: "PF", label: "Provident Fund (PPF/EPF)" },
   { value: "CRYPTO", label: "Crypto" },
 ];

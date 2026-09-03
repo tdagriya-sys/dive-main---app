@@ -174,7 +174,7 @@ describe("apparentDiversification / realDiversification / diveScore", () => {
       { segment: "Equity", amount: 300, name: "A", lookthrough: [{ company: "A", pct: 100 }] },
       { segment: "Bonds", amount: 300, name: "B", lookthrough: [{ company: "B", pct: 100 }] },
       { segment: "Gold/Silver", amount: 200, name: "C", lookthrough: [{ company: "C", pct: 100 }] },
-      { segment: "FD", amount: 200, name: "D", lookthrough: [{ company: "D", pct: 100 }] },
+      { segment: "FD/RD", amount: 200, name: "D", lookthrough: [{ company: "D", pct: 100 }] },
     ];
     for (const h of [concentrated, diversified]) {
       const score = diveScore(h);
@@ -210,12 +210,12 @@ describe("PF (Provident Fund) — diveEngine.js wiring", () => {
       expect(hi).toBeGreaterThan(lo);
       expect(lo).toBeGreaterThan(0);
     });
-    // FD-shaped (declining with risk appetite), pulled below FD's own
+    // FD/RD-shaped (declining with risk appetite), pulled below FD/RD's own
     // ceiling at every step — see diveEngine.js's own IDEAL_RANGES comment
-    // for why (PPF/EPF have hard practical contribution ceilings FD doesn't).
-    expect(IDEAL_RANGES.Conservative.PF[1]).toBeLessThan(IDEAL_RANGES.Conservative.FD[1]);
-    expect(IDEAL_RANGES.Balanced.PF[1]).toBeLessThan(IDEAL_RANGES.Balanced.FD[1]);
-    expect(IDEAL_RANGES.Aggressive.PF[1]).toBeLessThan(IDEAL_RANGES.Aggressive.FD[1]);
+    // for why (PPF/EPF have hard practical contribution ceilings FD/RD doesn't).
+    expect(IDEAL_RANGES.Conservative.PF[1]).toBeLessThan(IDEAL_RANGES.Conservative["FD/RD"][1]);
+    expect(IDEAL_RANGES.Balanced.PF[1]).toBeLessThan(IDEAL_RANGES.Balanced["FD/RD"][1]);
+    expect(IDEAL_RANGES.Aggressive.PF[1]).toBeLessThan(IDEAL_RANGES.Aggressive["FD/RD"][1]);
   });
 
   it("has a distinct SEGMENT_COLORS hex, not the generic gray fallback", () => {

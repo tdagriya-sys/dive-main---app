@@ -66,6 +66,15 @@ PF was wired through every layer that understands an asset class (scoring, Sugge
 - **Account Aggregator (Finvu) sourcing for PF is not implemented.** Real India AA frameworks do expose an EPFO FI type, but `finvuService.ts`'s `FI_TYPE_TO_ASSET_CLASS` map only covers 4 of the (now 12) classes today, and the whole module runs against Finvu's sandbox (`MOCK_MODE`) regardless — designing real EPFO-via-AA ingestion was deferred as a separate, larger integration decision, not attempted as part of adding the PF asset class itself. PF is manual-entry / Bot Scan / File Upload only for now (all three do support it).
 - **Browser extension support is minimal.** `extension/shared/diveEngine.js`'s `ASSET_CLASS_LABELS`/`IDEAL_RANGES` were not updated to include PF — a PF-labeled holding would degrade gracefully there (falls back to the raw `"PF"` string and skips the ideal-band check) rather than crash, but isn't fully wired. Considered low-priority since the extension evaluates trade-fitness on brokerage pages, and PPF/EPF isn't something you "trade" on one.
 
-## 9. Maintenance
+## 9. Resilience score report payment (Razorpay, added 2026-09-03) simplifications
+
+The Rs. 99 paid PDF download is a real, working Razorpay integration (not a mock UI), but a few adjacent things are deliberately out of scope for v1:
+
+- **No refund flow.** If a user wants their Rs. 99 back, there's no in-app button for it — refunds have to be issued manually from the Razorpay Dashboard (`Payments` → find the payment → `Refund`). `models/Payment.ts` doesn't even have a `refunded` status yet; a manually-refunded payment stays marked `"paid"` in Divve's own DB (harmless — it just means that portfolio snapshot stays downloadable for free, which is a reasonable outcome for a refunded purchase anyway) and there's no dedicated refund-received webhook handler.
+- **The webhook only handles `payment.captured`.** `paymentController.ts`'s `razorpayWebhook` acknowledges (200 OK) every other event type without acting on it — `payment.failed`, `refund.processed`, disputes, etc. all currently pass through unprocessed. Fine today since nothing in the app reacts to those yet, but worth widening if refund handling (above) is ever added.
+- **One flat price for everyone.** `REPORT_PRICE_PAISE` is a single global amount — no coupons, no per-user pricing, no currency other than INR.
+- **`hasPaidForReport`'s "stays valid until the portfolio changes" rule (see `models/User.ts`'s `portfolioVersion`) is a coarse, all-or-nothing signal**, not a diff — ANY holdings create/update/delete, AA sync, or age change invalidates the purchase, even one that wouldn't meaningfully move the score (e.g. correcting a typo in a holding's current value by ₹1). Deliberately simple and impossible to game rather than precisely tuned — the alternative (deciding which changes are "small enough" not to count) is a real design question with no obviously-correct answer, deferred rather than guessed at.
+
+## 10. Maintenance
 
 Whenever a limitation here gets fixed or a new one is deliberately introduced, update this document in the same change — add or remove the relevant entry, and note the date/reason if it's non-obvious. Keep score-model-specific gaps in `DIVE_SCORE_MODEL.md` §13 rather than duplicating them here; this document should stay the broader, cross-cutting complement to it.

@@ -4,6 +4,7 @@ import { ApiError } from "../middleware/errorHandler";
 import { AaConsent } from "../models/AaConsent";
 import { Holding } from "../models/Holding";
 import { invalidateDiveScoreCache } from "../services/diveScoreService";
+import { invalidateReportPurchase } from "../services/paymentService";
 import * as finvuService from "../services/finvuService";
 import { FI_TYPE_TO_ASSET_CLASS } from "../services/finvuService";
 
@@ -79,5 +80,6 @@ export async function fetchFiDataAndSave(req: AuthedRequest, res: Response) {
   );
 
   invalidateDiveScoreCache(req.userId!);
+  await invalidateReportPurchase(req.userId!);
   res.status(200).json({ holdings, isMock });
 }

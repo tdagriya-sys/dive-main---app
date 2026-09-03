@@ -36,6 +36,21 @@ export interface IUser extends Document {
   portfolio: IPortfolioMeta;
   preferences: IPreferences;
   plannerState: IPlannerState;
+  // Guided in-app tour (frontend/src/components/Walkthrough.jsx) — set true
+  // the first time the user finishes OR skips it, so it auto-starts exactly
+  // once ever (not once per session/login), and never auto-starts again
+  // unless they replay it themselves from the sidebar. Real account field,
+  // not sessionStorage/localStorage, deliberately — see this field's own
+  // changelog entry for why session-scoped storage wasn't durable enough.
+  hasSeenWalkthrough: boolean;
+  // Bumped by every holdings/AA-sync/age mutation — the exact same trigger
+  // set as diveScoreService.ts's invalidateDiveScoreCache (see
+  // paymentService.ts's invalidateReportPurchase, called alongside it at
+  // every one of those call sites). Lets a paid resilience-score PDF
+  // (models/Payment.ts) stay freely re-downloadable for as long as the
+  // portfolio it was generated from hasn't changed, then requires a fresh
+  // Rs. 99 purchase once it has — a stale report isn't what was paid for.
+  portfolioVersion: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -86,6 +101,8 @@ const userSchema = new Schema<IUser>(
     portfolio: { type: portfolioMetaSchema, default: () => ({ lastSyncedAt: null, sources: [] }) },
     preferences: { type: preferencesSchema, default: () => ({}) },
     plannerState: { type: plannerStateSchema, default: () => ({}) },
+    hasSeenWalkthrough: { type: Boolean, default: false },
+    portfolioVersion: { type: Number, default: 0 },
   },
   { timestamps: true }
 );

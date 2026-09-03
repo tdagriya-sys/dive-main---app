@@ -11,10 +11,10 @@ const APPS = [
       a: "Proceed Anyway", b: "Show Me Alternatives" },
   },
   {
-    id: "fd", name: "SafeBank", tag: "Banking / FD", accent: "#6D28D9", bg: "#FAFAFA", dark: false, Icon: Landmark,
+    id: "fd", name: "SafeBank", tag: "Banking / FD/RD", accent: "#6D28D9", bg: "#FAFAFA", dark: false, Icon: Landmark,
     action: "Open a new Fixed Deposit", detail: "₹50,000 · 7.1% · 1 year",
-    verdict: { tone: "warn", title: "You've got solid FD coverage", reason: "FDs are already at a healthy level for your profile. A debt mutual fund could give better post-tax returns for the same safety tier.",
-      a: "Continue FD", b: "Explore Debt Funds" },
+    verdict: { tone: "warn", title: "You've got solid FD/RD coverage", reason: "FDs and RDs are already at a healthy level for your profile. A debt mutual fund could give better post-tax returns for the same safety tier.",
+      a: "Continue FD/RD", b: "Explore Debt Funds" },
   },
   {
     id: "bonds", name: "BondBazaar", tag: "Bonds platform", accent: "#0F766E", bg: "#FFFFFF", dark: false, Icon: FileText,

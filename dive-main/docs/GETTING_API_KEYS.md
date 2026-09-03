@@ -6,6 +6,8 @@ Every key goes into one file: `backend/.env`. If that file doesn't exist yet, ma
 
 **Looking for MongoDB setup?** That's covered step-by-step in `docs/SERVER_DEPLOYMENT_GUIDE.md` instead, as part of the full deploy walkthrough — not here.
 
+**Looking for Razorpay (the paid resilience score report)?** That's covered separately in `docs/RAZORPAY_SETUP_GUIDE.md` — it's a bigger topic than the rest of this file (a real business/banking step, not just "click create key"), including how to reuse a Razorpay account you already have for another product (and still tell the two products' payments apart later) or, if you'd rather, keep it fully separate instead.
+
 ---
 
 ## 1. Email OTP — for real sign-up codes
