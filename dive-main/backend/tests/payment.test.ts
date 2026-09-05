@@ -87,7 +87,16 @@ describe("POST /api/payments/report/verify", () => {
     expect(unlockedAfter.headers["content-type"]).toBe("application/pdf");
   });
 
-  it("can't be replayed — verifying the same order id twice fails the second time", async () => {
+  // Bug report: once RAZORPAY_WEBHOOK_SECRET was configured live, real
+  // payments started showing "Payment succeeded, but we couldn't verify it
+  // just now" — Razorpay's webhook (handleReportWebhookPaymentCaptured)
+  // routinely wins the race against this browser round-trip and marks the
+  // order "paid" FIRST, so this endpoint's own verify call was rejecting an
+  // already-genuinely-paid order as INVALID_ORDER. Calling verify twice with
+  // the exact same, already-matching proof (same order id + same payment id)
+  // must be a harmless no-op, not an error — it's indistinguishable from the
+  // webhook-then-frontend race that's now routine in production.
+  it("verifying the same already-paid order again with the same payment id is a harmless no-op (webhook-then-frontend race)", async () => {
     const token = await signupAndLogin("9600000005", "pay5@example.com");
     const auth = { Authorization: `Bearer ${token}` };
     const order = await request(app).post("/api/payments/report/order").set(auth).send();
@@ -97,8 +106,54 @@ describe("POST /api/payments/report/verify", () => {
     expect(first.status).toBe(200);
 
     const second = await request(app).post("/api/payments/report/verify").set(auth).send(payload);
-    expect(second.status).toBe(400);
-    expect(second.body.error).toBe("INVALID_ORDER");
+    expect(second.status).toBe(200);
+    expect(second.body.verified).toBe(true);
+  });
+
+  // The actual regression this bug report was about: the webhook (not a
+  // second frontend call) settles the order first, then the frontend's own
+  // post-checkout verify call arrives with the real payment id Razorpay's
+  // Checkout handler gave it — this must succeed and unlock the download,
+  // not throw INVALID_ORDER just because status was already "paid" by the
+  // time it got here.
+  it("succeeds when the webhook already settled the order before the frontend's own verify call arrives", async () => {
+    const paymentService = require("../src/services/paymentService");
+    const token = await signupAndLogin("9600000021", "pay21@example.com");
+    const auth = { Authorization: `Bearer ${token}` };
+    await addEquityHolding(auth);
+    const order = await request(app).post("/api/payments/report/order").set(auth).send();
+    const paymentId = `mock_payment_${order.body.orderId}`;
+
+    // Webhook wins the race.
+    await paymentService.handleReportWebhookPaymentCaptured(order.body.orderId, paymentId);
+    expect((await request(app).get("/api/score/breakdown/pdf").set(auth)).status).toBe(200);
+
+    // Frontend's own verify call arrives after — must not be treated as an error.
+    const verify = await request(app)
+      .post("/api/payments/report/verify")
+      .set(auth)
+      .send({ razorpay_order_id: order.body.orderId, razorpay_payment_id: paymentId, razorpay_signature: "mock" });
+    expect(verify.status).toBe(200);
+    expect(verify.body.verified).toBe(true);
+  });
+
+  // A mismatched payment id against an already-settled order is still a
+  // genuinely invalid request (someone guessing/forging an order id that
+  // isn't backed by the payment id they're claiming) — the idempotent
+  // success above only applies when the two actually match.
+  it("still rejects a mismatched payment id against an already-paid order", async () => {
+    const token = await signupAndLogin("9600000022", "pay22@example.com");
+    const auth = { Authorization: `Bearer ${token}` };
+    const order = await request(app).post("/api/payments/report/order").set(auth).send();
+    const payload = { razorpay_order_id: order.body.orderId, razorpay_payment_id: `mock_payment_${order.body.orderId}`, razorpay_signature: "mock" };
+    await request(app).post("/api/payments/report/verify").set(auth).send(payload);
+
+    const res = await request(app)
+      .post("/api/payments/report/verify")
+      .set(auth)
+      .send({ ...payload, razorpay_payment_id: "mock_payment_some_other_id" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("INVALID_ORDER");
   });
 
   it("rejects an order id that belongs to a different user", async () => {

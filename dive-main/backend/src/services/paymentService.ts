@@ -73,11 +73,32 @@ export interface VerifyPaymentInput {
 }
 
 export async function verifyReportPayment(userId: string, input: VerifyPaymentInput): Promise<void> {
-  const payment = await Payment.findOne({ razorpayOrderId: input.razorpay_order_id, userId, status: "created" });
+  const payment = await Payment.findOne({ razorpayOrderId: input.razorpay_order_id, userId });
   if (!payment) {
-    // Either a garbage/replayed order id, someone else's order, or an order
-    // already verified once before — none of these should be treated as
-    // "try again", they're all a genuinely invalid request.
+    // Either a garbage/replayed order id or someone else's order — not
+    // something a retry can fix.
+    throw new ApiError(400, "INVALID_ORDER", "This order can't be verified. Please start the payment again.");
+  }
+
+  // Already settled — almost always the webhook (handleReportWebhookPaymentCaptured)
+  // winning the race and getting here first, which is routine once a real
+  // RAZORPAY_WEBHOOK_SECRET is configured: Razorpay fires the webhook
+  // server-to-server the instant it captures the payment, frequently faster
+  // than this browser round-trip (Checkout's own handler callback, then this
+  // API call). Treat it as success rather than INVALID_ORDER as long as the
+  // payment id genuinely matches what was actually captured — the whole
+  // point of the webhook is to be a reliability net *alongside* this path,
+  // not something that starts intermittently breaking it the moment it's
+  // turned on. A mismatched payment id for an already-paid order is still
+  // rejected below, same as any other invalid request.
+  if (payment.status === "paid") {
+    if (payment.razorpayPaymentId === input.razorpay_payment_id) return;
+    throw new ApiError(400, "INVALID_ORDER", "This order can't be verified. Please start the payment again.");
+  }
+
+  if (payment.status !== "created") {
+    // "failed" (signature verification genuinely failed before) — not
+    // something a plain retry with the same payload can fix either.
     throw new ApiError(400, "INVALID_ORDER", "This order can't be verified. Please start the payment again.");
   }
 

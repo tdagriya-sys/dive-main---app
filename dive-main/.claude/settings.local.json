@@ -341,7 +341,19 @@
       "Bash(grep -n \"bottom-nav\\\\|nav-\\\\${id}\\\\|data-testid={\\\\`nav-\" src/components/DiveShell.test.jsx src/components/DiveShell.jsx)",
       "Bash(curl -s -o /tmp/webhook_test_body.json -w \"HTTP_STATUS:%{http_code}\\\\n\" -X POST \"https://www.divve.in/api/payments/webhook\" -H \"Content-Type: application/json\" -d '{\"event\":\"payment.captured\",\"payload\":{}}' --max-time 15)",
       "Read(//c/Users/Dagriya Fin-Tech/.ssh/**)",
-      "Bash(awk '{print $1}')"
+      "Bash(awk '{print $1}')",
+      "Bash(curl -s -o /tmp/webhook_test_body2.json -w \"HTTP_STATUS:%{http_code}\\\\n\" -X POST \"https://www.divve.in/api/payments/webhook\" -H \"Content-Type: application/json\" -d '{\"event\":\"payment.captured\",\"payload\":{}}' --max-time 15)",
+      "Bash(RAZORPAY_KEY_ID=REPLACE_ME RAZORPAY_KEY_SECRET=REPLACE_ME RAZORPAY_WEBHOOK_SECRET=REPLACE_ME npx jest tests/payment.test.ts --runInBand)",
+      "Bash(RAZORPAY_KEY_ID=REPLACE_ME RAZORPAY_KEY_SECRET=REPLACE_ME RAZORPAY_WEBHOOK_SECRET=REPLACE_ME npx jest --runInBand)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8000/api/health --max-time 5)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8001/api/health --max-time 3)",
+      "Bash(pkill -f \"PORT=8001\")",
+      "Bash(curl -s http://localhost:8001/api/health --max-time 5)",
+      "Bash(curl -s -w \"\\\\nHTTP:%{http_code}\\\\n\" -X POST http://localhost:8001/api/payments/webhook -H \"Content-Type: application/json\" -d '{\"event\":\"payment.captured\"}' --max-time 5)",
+      "Bash(taskkill //F //PID 24220)",
+      "Bash(curl -s -w '\\\\nHTTP:%{http_code}\\\\n' -X POST http://localhost:8001/api/payments/report/verify -H 'Authorization: Bearer __CMDSUB_OUTPUT__' -H 'Content-Type: application/json' -d '{\"razorpay_order_id\":\"__TRACKED_VAR__\",\"razorpay_payment_id\":\"some_other_payment_id\",\"razorpay_signature\":\"mock\"}')",
+      "Bash(taskkill //F //PID 30880)",
+      "Bash(rm -rf \"D:/Dive/dive-main - app/dive-main/.tmp_webhook_test\" /tmp/race_token.txt /tmp/order_id.txt /tmp/holding_res.json /tmp/webhook_test_body*.json)"
     ]
   }
 }
