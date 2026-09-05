@@ -39,15 +39,14 @@ const baseContext = {
 describe("DiveShell — responsive nav (Phase 3)", () => {
   beforeEach(() => jest.clearAllMocks());
 
-  it("shows both the sidebar nav and the bottom nav on a real nav'd screen (Home)", () => {
+  it("shows the sidebar nav and the mobile menu hamburger on a real nav'd screen (Home)", () => {
     useDive.mockReturnValue({ ...baseContext, screen: "home" });
     render(<DiveShell />);
 
     expect(screen.getByTestId("sidebar-nav")).toBeInTheDocument();
-    expect(screen.getByTestId("bottom-nav")).toBeInTheDocument();
+    expect(screen.getByTestId("header-menu-btn")).toBeInTheDocument();
     ["home", "xray", "suggestions", "planner", "profile"].forEach((id) => {
       expect(screen.getByTestId(`sidebar-nav-${id}`)).toBeInTheDocument();
-      expect(screen.getByTestId(`nav-${id}`)).toBeInTheDocument();
     });
   });
 
@@ -65,19 +64,17 @@ describe("DiveShell — responsive nav (Phase 3)", () => {
     expect(contentColumn.className).toContain("relative");
   });
 
-  it("shows neither nav on a full-screen flow (chooseMethod) or during onboarding (signup)", () => {
+  it("shows no sidebar on a full-screen flow (chooseMethod) or during onboarding (signup)", () => {
     useDive.mockReturnValue({ ...baseContext, screen: "chooseMethod" });
     const { rerender } = render(<DiveShell />);
     expect(screen.queryByTestId("sidebar-nav")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("bottom-nav")).not.toBeInTheDocument();
 
     useDive.mockReturnValue({ ...baseContext, screen: "signup" });
     rerender(<DiveShell />);
     expect(screen.queryByTestId("sidebar-nav")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("bottom-nav")).not.toBeInTheDocument();
   });
 
-  it("navigates when a sidebar item is clicked, same as the bottom nav", async () => {
+  it("navigates when a sidebar item is clicked", async () => {
     const setScreen = jest.fn();
     useDive.mockReturnValue({ ...baseContext, screen: "home", setScreen });
     const user = userEvent.setup();
@@ -104,6 +101,78 @@ describe("DiveShell — responsive nav (Phase 3)", () => {
     const logoutBtn = screen.getByTestId("sidebar-logout-btn");
     expect(logoutBtn).toBeInTheDocument();
     await user.click(logoutBtn);
+    expect(logout).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Mobile off-canvas nav drawer (Phase 4) — replaces the old bottom nav bar,
+// which only ever showed ~20-30% of itself above the real fold on a phone
+// browser (a `h-screen`/100vh viewport bug, fixed separately in App.js) and
+// had no room for anything beyond the 5 NAV items anyway. Opened from
+// AppHeader's hamburger (header-menu-btn), it carries the exact same links
+// as the desktop sidebar, plus Walkthrough/Get Extension/Support/Log out.
+describe("DiveShell — mobile nav drawer", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("is closed by default and opens from the header hamburger button", async () => {
+    useDive.mockReturnValue({ ...baseContext, screen: "home" });
+    const user = userEvent.setup();
+    render(<DiveShell />);
+
+    expect(screen.queryByTestId("mobile-nav-drawer")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("header-menu-btn"));
+    expect(screen.getByTestId("mobile-nav-drawer")).toBeInTheDocument();
+  });
+
+  it("carries every nav link and action the desktop sidebar has", async () => {
+    useDive.mockReturnValue({ ...baseContext, screen: "home" });
+    const user = userEvent.setup();
+    render(<DiveShell />);
+    await user.click(screen.getByTestId("header-menu-btn"));
+
+    ["home", "xray", "suggestions", "planner", "profile"].forEach((id) => {
+      expect(screen.getByTestId(`mobile-nav-${id}`)).toBeInTheDocument();
+    });
+    ["walkthrough", "extension", "support", "logout"].forEach((action) => {
+      expect(screen.getByTestId(`mobile-${action}-btn`)).toBeInTheDocument();
+    });
+  });
+
+  it("navigating from the drawer changes screen and closes it", async () => {
+    const setScreen = jest.fn();
+    useDive.mockReturnValue({ ...baseContext, screen: "home", setScreen });
+    const user = userEvent.setup();
+    render(<DiveShell />);
+
+    await user.click(screen.getByTestId("header-menu-btn"));
+    await user.click(screen.getByTestId("mobile-nav-xray"));
+
+    expect(setScreen).toHaveBeenCalledWith("xray");
+    await waitForElementToBeRemoved(() => screen.queryByTestId("mobile-nav-drawer"));
+  });
+
+  it("closes on its own close button and on a backdrop click", async () => {
+    useDive.mockReturnValue({ ...baseContext, screen: "home" });
+    const user = userEvent.setup();
+    render(<DiveShell />);
+
+    await user.click(screen.getByTestId("header-menu-btn"));
+    await user.click(screen.getByTestId("mobile-nav-close-btn"));
+    await waitForElementToBeRemoved(() => screen.queryByTestId("mobile-nav-drawer"));
+
+    await user.click(screen.getByTestId("header-menu-btn"));
+    await user.click(screen.getByTestId("mobile-nav-backdrop"));
+    await waitForElementToBeRemoved(() => screen.queryByTestId("mobile-nav-drawer"));
+  });
+
+  it("logging out from the drawer calls logout the same as the desktop sidebar", async () => {
+    const logout = jest.fn();
+    useDive.mockReturnValue({ ...baseContext, screen: "home", logout });
+    const user = userEvent.setup();
+    render(<DiveShell />);
+
+    await user.click(screen.getByTestId("header-menu-btn"));
+    await user.click(screen.getByTestId("mobile-logout-btn"));
     expect(logout).toHaveBeenCalledTimes(1);
   });
 });
@@ -166,6 +235,43 @@ describe("DiveShell — extension download card", () => {
     await user.click(screen.getByTestId("sidebar-extension-btn"));
     await user.click(screen.getByTestId("extension-download-close-btn"));
     await waitForElementToBeRemoved(() => screen.queryByTestId("extension-download-card"));
+  });
+});
+
+// SupportCard — same popup, opened from either the header button
+// (AppHeader) or the sidebar button (DiveShell's own nav column), so its
+// open/close state lives here in their shared parent (same pattern as
+// ExtensionDownloadCard above).
+describe("DiveShell — support card", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("opens from the sidebar button", async () => {
+    useDive.mockReturnValue({ ...baseContext, screen: "home" });
+    const user = userEvent.setup();
+    render(<DiveShell />);
+
+    expect(screen.queryByTestId("support-card")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("sidebar-support-btn"));
+    expect(screen.getByTestId("support-card")).toBeInTheDocument();
+  });
+
+  it("opens from the header button too", async () => {
+    useDive.mockReturnValue({ ...baseContext, screen: "home" });
+    const user = userEvent.setup();
+    render(<DiveShell />);
+
+    await user.click(screen.getByTestId("header-support-btn"));
+    expect(screen.getByTestId("support-card")).toBeInTheDocument();
+  });
+
+  it("closes on its own close button", async () => {
+    useDive.mockReturnValue({ ...baseContext, screen: "home" });
+    const user = userEvent.setup();
+    render(<DiveShell />);
+
+    await user.click(screen.getByTestId("sidebar-support-btn"));
+    await user.click(screen.getByTestId("support-close-btn"));
+    await waitForElementToBeRemoved(() => screen.queryByTestId("support-card"));
   });
 });
 

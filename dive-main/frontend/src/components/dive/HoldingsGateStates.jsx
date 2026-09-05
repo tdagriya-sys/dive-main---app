@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { AlertTriangle, RefreshCw, Loader2 } from "lucide-react";
 
-// Shared across every bottom-nav screen that can't render without holdings
+// Shared across every nav'd screen that can't render without holdings
 // (Home, Suggestions, X-Ray) — three distinct states, not one blank screen:
 // actively loading, failed to load (retryable), or genuinely empty (nothing
 // saved yet — e.g. a freshly signed-up account before its first holding).

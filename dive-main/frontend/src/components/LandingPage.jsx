@@ -1,6 +1,6 @@
 import React from "react";
 import { motion } from "framer-motion";
-import { Sparkles, ArrowRight, ShieldCheck, Users, TrendingUp, Layers, ChevronDown } from "lucide-react";
+import { Sparkles, ArrowRight, ShieldCheck, Users, TrendingUp, Layers, ChevronDown, Menu, X } from "lucide-react";
 import { useDive } from "../context/DiveContext";
 import { StatChip } from "./dive/FeatureMocks";
 import HeroScene from "./dive/HeroScene";
@@ -160,8 +160,15 @@ export default function LandingPage() {
   // reached from the header and footer without leaving the static site or
   // routing through DiveShell's post-login screens.
   const [page, setPage] = React.useState("home");
+  // Below `md`, "Our Story"/"Contact us" (the `nav`) and "Log in" all
+  // disappear (see their own `hidden md:flex`/`hidden sm:inline-flex`
+  // classes below) — this hamburger is the mobile-only way back to them,
+  // rather than cramming three extra text links into an already-tight
+  // mobile header next to the logo and the primary "Get started" CTA.
+  const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
   const goToPage = React.useCallback((next) => {
     setPage(next);
+    setMobileMenuOpen(false);
     window.scrollTo(0, 0);
   }, []);
 
@@ -174,6 +181,28 @@ export default function LandingPage() {
           just the very top. */}
       <div className="fixed top-0 right-0 w-[45vw] h-[45vw] rounded-full bg-[var(--dive-blue)] blur-3xl opacity-[0.08] -z-0 pointer-events-none" />
       <div className="fixed bottom-0 left-0 w-[40vw] h-[40vw] rounded-full bg-[var(--dive-blue)] blur-3xl opacity-[0.06] -z-0 pointer-events-none" />
+
+      {/* Click-outside catcher for the mobile menu below — deliberately a
+          sibling of `<header>`, not nested inside it: `<header>` has
+          `backdrop-blur-lg` (a `backdrop-filter`), which makes it the
+          containing block for any `position: fixed` descendant nested
+          inside it (the same way `filter`/`transform`/`perspective` do),
+          confining `inset-0` to the header's own ~80px box instead of the
+          full viewport — the backdrop only ever covered a sliver at the
+          very top and never reached anything below it, so a tap anywhere
+          on the actual page silently did nothing. Living outside that
+          ancestor, its containing block is the real viewport again.
+          Plain conditional rendering, not AnimatePresence/motion — this
+          dropdown doesn't need an exit transition, and framer-motion's
+          exit animations have already proven unreliable elsewhere in this
+          app's dev sandbox tab (no real compositor driving it — see
+          StepCard's own comment below), which for THIS element wouldn't
+          just be a cosmetic stutter: an exit that never fires leaves the
+          backdrop (and the menu it goes with) permanently covering the
+          page, an unrecoverable dead end for a real visitor. */}
+      {mobileMenuOpen && (
+        <div className="md:hidden fixed inset-0 z-10" onClick={() => setMobileMenuOpen(false)} data-testid="landing-mobile-menu-backdrop" />
+      )}
 
       <header className="sticky top-0 z-20 backdrop-blur-lg bg-[var(--wrapper-bg)]/80 border-b border-[var(--border-light)]">
         <div className="max-w-7xl mx-auto px-6 lg:px-10 py-5 flex items-center justify-between">
@@ -203,8 +232,35 @@ export default function LandingPage() {
               className="gold-btn rounded-full px-5 py-2.5 font-bold text-sm transition-transform hover:scale-[1.03]">
               Get started
             </button>
+            <button data-testid="landing-menu-btn" onClick={() => setMobileMenuOpen((v) => !v)}
+              aria-expanded={mobileMenuOpen}
+              className="md:hidden w-9 h-9 rounded-full flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-card-hover)] transition-colors">
+              {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+            </button>
           </div>
         </div>
+
+        {mobileMenuOpen && (
+          <div
+            className="md:hidden relative z-20 border-t border-[var(--border-light)] bg-[var(--wrapper-bg)]"
+            data-testid="landing-mobile-menu"
+          >
+            <nav className="max-w-7xl mx-auto px-6 py-3 flex flex-col">
+              <button data-testid="mobile-menu-story-btn" onClick={() => goToPage("story")}
+                className="text-left text-sm font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors px-2 py-3">
+                Our Story
+              </button>
+              <button data-testid="mobile-menu-contact-btn" onClick={() => goToPage("contact")}
+                className="text-left text-sm font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors px-2 py-3">
+                Contact us
+              </button>
+              <button data-testid="mobile-menu-login-btn" onClick={() => { setMobileMenuOpen(false); setScreen("login"); }}
+                className="text-left text-sm font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors px-2 py-3">
+                Log in
+              </button>
+            </nav>
+          </div>
+        )}
       </header>
 
       {page === "story" && <OurStoryPage onBack={() => goToPage("home")} onGetStarted={() => setScreen("signup")} />}

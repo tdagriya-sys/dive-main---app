@@ -38,7 +38,15 @@ import ErrorBoundary from "@/components/ErrorBoundary";
 // shouldn't stretch edge-to-edge either.
 function AppShell() {
   return (
-    <div className="relative h-screen w-full bg-[var(--wrapper-bg)] overflow-hidden" data-testid="app-shell">
+    // `h-dvh`, not `h-screen` (`100vh`) — on mobile Chrome/Safari, `100vh`
+    // is measured against the LARGEST possible viewport (address bar
+    // hidden), not the actually-visible one, so this root ends up taller
+    // than the real screen the moment the address bar is showing (i.e. on
+    // load, and after any scroll-up). Everything below inherits its height
+    // from this box via `h-full`, so that overflow silently pushed
+    // DiveShell's bottom-anchored mobile nav mostly off-screen — `dvh`
+    // (dynamic viewport height) tracks the browser chrome live instead.
+    <div className="relative h-dvh w-full bg-[var(--wrapper-bg)] overflow-hidden" data-testid="app-shell">
       <div className="absolute top-0 right-0 w-[45vw] h-[45vw] rounded-full bg-[var(--dive-blue)] blur-3xl opacity-[0.08] pointer-events-none" />
       <div className="absolute bottom-0 left-0 w-[35vw] h-[35vw] rounded-full bg-[var(--dive-blue)] blur-3xl opacity-[0.06] pointer-events-none" />
       <div className="relative h-full w-full overflow-hidden">

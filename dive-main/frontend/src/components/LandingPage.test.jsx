@@ -90,3 +90,69 @@ describe("LandingPage — Refund Policy", () => {
     expect(screen.getByTestId("footer-refund-btn")).toBeInTheDocument(); // back on the real landing page, footer visible again
   });
 });
+
+// Bug report: "Our Story", "Contact us", and "Log in" were only in the
+// desktop nav (`hidden md:flex`) or `hidden sm:inline-flex` — invisible on
+// mobile, with only the logo and "Get started" surviving down to a phone
+// screen. A hamburger-triggered dropdown now carries all three.
+describe("LandingPage — mobile menu", () => {
+  const setScreen = jest.fn();
+  beforeEach(() => {
+    jest.clearAllMocks();
+    useDive.mockReturnValue({ setScreen });
+    mockMatchMedia(true);
+    window.IntersectionObserver = MockIntersectionObserver;
+  });
+
+  it("is closed by default and opens from the hamburger button", async () => {
+    const user = userEvent.setup();
+    render(<LandingPage />);
+
+    expect(screen.queryByTestId("landing-mobile-menu")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("landing-menu-btn"));
+    expect(screen.getByTestId("landing-mobile-menu")).toBeInTheDocument();
+  });
+
+  it("Our Story navigates to the story page and closes the menu", async () => {
+    const user = userEvent.setup();
+    render(<LandingPage />);
+    await user.click(screen.getByTestId("landing-menu-btn"));
+    await user.click(screen.getByTestId("mobile-menu-story-btn"));
+
+    expect(screen.getByTestId("story-page")).toBeInTheDocument();
+    expect(screen.queryByTestId("landing-mobile-menu")).not.toBeInTheDocument();
+  });
+
+  it("Contact us navigates to the contact page and closes the menu", async () => {
+    const user = userEvent.setup();
+    render(<LandingPage />);
+    await user.click(screen.getByTestId("landing-menu-btn"));
+    await user.click(screen.getByTestId("mobile-menu-contact-btn"));
+
+    expect(screen.getByTestId("contact-page")).toBeInTheDocument();
+    expect(screen.queryByTestId("landing-mobile-menu")).not.toBeInTheDocument();
+  });
+
+  it("Log in calls setScreen('login') and closes the menu", async () => {
+    const user = userEvent.setup();
+    render(<LandingPage />);
+    await user.click(screen.getByTestId("landing-menu-btn"));
+    await user.click(screen.getByTestId("mobile-menu-login-btn"));
+
+    expect(setScreen).toHaveBeenCalledWith("login");
+  });
+
+  it("closes on an outside click", async () => {
+    const user = userEvent.setup();
+    render(<LandingPage />);
+    await user.click(screen.getByTestId("landing-menu-btn"));
+    expect(screen.getByTestId("landing-mobile-menu")).toBeInTheDocument();
+
+    // The click-outside catcher visually covers the rest of the page in a
+    // real browser (highest z-index below the header); jsdom does no
+    // hit-testing, so the test targets it directly rather than a page
+    // element it would otherwise sit on top of.
+    await user.click(screen.getByTestId("landing-mobile-menu-backdrop"));
+    expect(screen.queryByTestId("landing-mobile-menu")).not.toBeInTheDocument();
+  });
+});

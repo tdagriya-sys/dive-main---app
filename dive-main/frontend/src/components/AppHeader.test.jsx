@@ -108,4 +108,44 @@ describe("AppHeader", () => {
     expect(screen.getByTestId("profile-dropdown")).toBeInTheDocument();
     await waitForElementToBeRemoved(() => screen.queryByTestId("notification-panel"));
   });
+
+  // Bug report: Get Extension and Your Journey were `hidden sm:flex` —
+  // invisible below 640px, i.e. on essentially every phone. They now render
+  // as bare icon buttons on mobile (matching search/notif/support/profile's
+  // own always-visible circle style) and grow into the full icon+label pill
+  // at `sm:` and up — never actually hidden at any width.
+  it("Get Extension and Your Journey are never hidden (icon-only below sm, icon+label at sm and up)", () => {
+    render(<AppHeader />);
+    const extensionBtn = screen.getByTestId("header-extension-btn");
+    const journeyBtn = screen.getByTestId("header-journey-btn");
+    expect(extensionBtn.className).not.toMatch(/(^|\s)hidden(\s|$)/);
+    expect(journeyBtn.className).not.toMatch(/(^|\s)hidden(\s|$)/);
+    expect(extensionBtn).toHaveTextContent("Get Extension");
+    expect(journeyBtn).toHaveTextContent("Your Journey");
+  });
+
+  it("the hamburger button calls onOpenMobileNav, and is mobile-only (hidden at md and up)", async () => {
+    const u = userEvent.setup();
+    const onOpenMobileNav = jest.fn();
+    render(<AppHeader onOpenMobileNav={onOpenMobileNav} />);
+    const menuBtn = screen.getByTestId("header-menu-btn");
+    expect(menuBtn.className).toMatch(/(^|\s)md:hidden(\s|$)/);
+    await u.click(menuBtn);
+    expect(onOpenMobileNav).toHaveBeenCalledTimes(1);
+  });
+
+  it("the support button calls onOpenSupport (opens the shared SupportCard, owned by DiveShell), sitting between notifications and profile", async () => {
+    const u = userEvent.setup();
+    const onOpenSupport = jest.fn();
+    render(<AppHeader onOpenSupport={onOpenSupport} />);
+    await u.click(screen.getByTestId("header-support-btn"));
+    expect(onOpenSupport).toHaveBeenCalledTimes(1);
+
+    const buttons = screen.getAllByRole("button").map((b) => b.dataset.testid);
+    const notifIdx = buttons.indexOf("header-notif-btn");
+    const supportIdx = buttons.indexOf("header-support-btn");
+    const profileIdx = buttons.indexOf("header-profile-btn");
+    expect(notifIdx).toBeLessThan(supportIdx);
+    expect(supportIdx).toBeLessThan(profileIdx);
+  });
 });

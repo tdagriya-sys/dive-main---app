@@ -151,3 +151,16 @@ describe("FileUpload — \"Done\" routing (bug report: landed on score-reveal wi
     expect(setScreen).toHaveBeenCalledWith("reveal");
   });
 });
+
+// Same notice as ManualEntry/BotScan's own copies — the instrument directory
+// doesn't cover every real-world security yet.
+describe("FileUpload — market data coverage notice", () => {
+  it("tells the user some instruments may not match our directory yet", () => {
+    useDive.mockReturnValue({
+      setScreen: jest.fn(), goBack: jest.fn(), loadHoldings: jest.fn().mockResolvedValue([]),
+      holdings: [], user: { id: "u1", name: "Test", age: 30 },
+    });
+    render(<FileUpload />);
+    expect(screen.getByTestId("market-data-notice")).toHaveTextContent(/limited access to market data/i);
+  });
+});

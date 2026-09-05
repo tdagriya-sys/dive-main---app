@@ -39,7 +39,7 @@ const APPS = [
 export default function DiveBot() {
   const [active, setActive] = useState(null);
   return (
-    <div className="min-h-full dive-app-surface pb-24" data-testid="divebot-hub-screen">
+    <div className="min-h-full dive-app-surface pb-10" data-testid="divebot-hub-screen">
       <div className="px-6 pt-8">
         <p className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)]">The differentiator</p>
         <h1 className="font-heading font-black text-2xl mb-1">See DIVVE in Action</h1>

@@ -232,7 +232,7 @@ export default function AskDive() {
 
   if (selected) {
     return (
-      <div className="min-h-full dive-app-surface pb-24" data-testid="ask-verdict-screen">
+      <div className="min-h-full dive-app-surface pb-10" data-testid="ask-verdict-screen">
         <div className="px-6 pt-8">
           <button data-testid="ask-back-btn" onClick={() => setSelected(null)} className="flex items-center gap-1 text-[var(--text-secondary)] font-semibold text-sm mb-3">
             <ArrowLeft size={18} /> Back
@@ -270,7 +270,7 @@ export default function AskDive() {
   }
 
   return (
-    <div className="min-h-full dive-app-surface pb-24" data-testid="ask-screen">
+    <div className="min-h-full dive-app-surface pb-10" data-testid="ask-screen">
       <div className="px-6 pt-8">
         <div className="flex items-center gap-3 mb-1">
           <button data-testid="ask-screen-back-btn" onClick={goBack}><ChevronLeft size={22} /></button>

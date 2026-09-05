@@ -182,6 +182,10 @@ export default function ManualEntry() {
         <h1 className="font-heading font-black text-2xl">{isEditing ? "Edit holding" : "Add manually"}</h1>
       </div>
 
+      <div data-testid="market-data-notice" className="bg-[var(--amber)]/10 border border-[var(--amber)]/20 rounded-xl px-4 py-3 mb-4 text-xs font-semibold text-[var(--amber)]">
+        We currently have limited access to market data, which may cause some instruments to not match our directory yet. We're working hard to bring in full market coverage as soon as possible, to give you the best experience.
+      </div>
+
       <label className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)] mb-2 block">Investment type</label>
       {isEditing ? (
         // Asset class can't change on edit — a different asset class means a

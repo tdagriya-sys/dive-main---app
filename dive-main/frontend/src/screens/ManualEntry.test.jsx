@@ -101,3 +101,18 @@ describe("ManualEntry — PF (Provident Fund)", () => {
     expect(screen.getByTestId("pf-rate-input")).toHaveValue(7.1);
   });
 });
+
+// The instrument directory doesn't cover every real-world security yet — a
+// visible, honest heads-up here (and on Bot Scan/File Upload's own copies of
+// this exact notice) rather than a silent "instrument not found" surprise
+// mid-search.
+describe("ManualEntry — market data coverage notice", () => {
+  it("tells the user some instruments may not match our directory yet", () => {
+    useDive.mockReturnValue({
+      setScreen: jest.fn(), goBack: jest.fn(), loadHoldings: jest.fn().mockResolvedValue([]),
+      updateHolding: jest.fn(), holdings: [], editingHolding: null, setEditingHolding: jest.fn(),
+    });
+    render(<ManualEntry />);
+    expect(screen.getByTestId("market-data-notice")).toHaveTextContent(/limited access to market data/i);
+  });
+});

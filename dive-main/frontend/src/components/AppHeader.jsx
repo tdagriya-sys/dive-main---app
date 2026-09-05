@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, Trophy, Search, Bell, User, LogOut, X, Download } from "lucide-react";
+import { Sparkles, Trophy, Search, Bell, User, LogOut, X, Download, LifeBuoy, Menu } from "lucide-react";
 import { useDive } from "../context/DiveContext";
 
 // Client-side only — this is a brand-new feature with nothing to persist yet
@@ -22,7 +22,7 @@ const DEFAULT_NOTIFICATIONS = [
 // used to be three Home-only icons (home-search-btn/home-notif-btn/
 // home-settings-btn) to somewhere reachable from any page, plus two
 // genuinely new features (notifications, the richer profile dropdown).
-export default function AppHeader({ onOpenExtension }) {
+export default function AppHeader({ onOpenExtension, onOpenSupport, onOpenMobileNav }) {
   const { user, setScreen, logout } = useDive();
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -43,22 +43,36 @@ export default function AppHeader({ onOpenExtension }) {
   return (
     <header className="relative z-30 shrink-0 border-b border-[var(--border)] px-4 md:px-6" data-testid="app-header">
       <div className="h-16 flex items-center justify-between">
-        <button onClick={() => setScreen("home")} className="flex items-center gap-2" data-testid="app-header-logo-btn">
-          <span className="font-heading font-black text-xl">
-            <span className="text-gold-gradient">Divv</span>
-            <span className="text-gold-gradient inline-block" style={{ transform: "rotate(-9deg)" }}>e</span>
-          </span>
-          <Sparkles size={16} className="text-[var(--dive-blue)]" />
-        </button>
+        <div className="flex items-center gap-1">
+          {/* Hamburger — mobile only, opens DiveShell's off-canvas nav drawer
+              (the same links the desktop sidebar shows permanently). Takes no
+              space at all at md:+, where the sidebar is already visible. */}
+          <button data-testid="header-menu-btn" onClick={onOpenMobileNav}
+            className="md:hidden w-9 h-9 rounded-full flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-card-hover)] transition-colors">
+            <Menu size={20} />
+          </button>
+          <button onClick={() => setScreen("home")} className="flex items-center gap-2" data-testid="app-header-logo-btn">
+            <span className="font-heading font-black text-xl">
+              <span className="text-gold-gradient">Divv</span>
+              <span className="text-gold-gradient inline-block" style={{ transform: "rotate(-9deg)" }}>e</span>
+            </span>
+            <Sparkles size={16} className="text-[var(--dive-blue)]" />
+          </button>
+        </div>
 
         <div className="flex items-center gap-1 md:gap-2">
+          {/* Below `sm`, these collapse to the same bare icon-circle shape as
+              search/notifications/support/profile below (`w-9 h-9`, no
+              label) — visible everywhere now, not hidden below `sm` as
+              before, just too cramped for the full text pill until there's
+              more width to spare. */}
           <button data-testid="header-extension-btn" onClick={onOpenExtension}
-            className="hidden sm:flex items-center gap-1.5 text-sm font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] px-3 py-2 rounded-full hover:bg-[var(--surface-card-hover)] transition-colors">
-            <Download size={16} className="text-[var(--dive-blue)]" /> Get Extension
+            className="w-9 h-9 sm:w-auto sm:h-auto flex items-center justify-center gap-1.5 text-sm font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] sm:px-3 sm:py-2 rounded-full hover:bg-[var(--surface-card-hover)] transition-colors">
+            <Download size={16} className="text-[var(--dive-blue)] shrink-0" /> <span className="hidden sm:inline">Get Extension</span>
           </button>
           <button data-testid="header-journey-btn" onClick={() => setScreen("insights")}
-            className="hidden sm:flex items-center gap-1.5 text-sm font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] px-3 py-2 rounded-full hover:bg-[var(--surface-card-hover)] transition-colors">
-            <Trophy size={16} className="text-[var(--dive-blue)]" /> Your Journey
+            className="w-9 h-9 sm:w-auto sm:h-auto flex items-center justify-center gap-1.5 text-sm font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] sm:px-3 sm:py-2 rounded-full hover:bg-[var(--surface-card-hover)] transition-colors">
+            <Trophy size={16} className="text-[var(--dive-blue)] shrink-0" /> <span className="hidden sm:inline">Your Journey</span>
           </button>
           <button data-testid="header-search-btn" onClick={() => setScreen("ask")}
             className="w-9 h-9 rounded-full flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-card-hover)] transition-colors">
@@ -71,6 +85,10 @@ export default function AppHeader({ onOpenExtension }) {
               {hasUnread && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[var(--red)]" data-testid="header-notif-unread-dot" />}
             </button>
           </div>
+          <button data-testid="header-support-btn" onClick={onOpenSupport}
+            className="w-9 h-9 rounded-full flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-card-hover)] transition-colors">
+            <LifeBuoy size={19} />
+          </button>
           <div className="relative">
             <button data-testid="header-profile-btn" onClick={openProfile}
               className="w-9 h-9 rounded-full bg-[var(--dive-blue-light)] flex items-center justify-center text-[var(--dive-blue)] hover:opacity-80 transition-opacity">

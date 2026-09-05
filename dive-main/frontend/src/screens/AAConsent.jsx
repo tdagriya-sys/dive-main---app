@@ -95,7 +95,7 @@ export default function AAConsent() {
       <p className="text-[var(--text-secondary)] mb-6">We'll read (never touch) these investments via a licensed Account Aggregator.</p>
       {consent?.isMock && (
         <div className="bg-[var(--amber)]/10 border border-[var(--amber)]/20 rounded-xl px-4 py-3 mb-4 text-xs font-semibold text-[var(--amber)]">
-          Sandbox mode — no real Finvu credentials are configured, so this uses realistic sample data instead of your actual accounts. See /docs/GETTING_API_KEYS.md to connect a real sandbox.
+          This is currently mocked and doesn't fetch your real holdings — it's here so you can experience the full platform even if you don't hold any investments yet. If you do have real investments, please add them using one of the other options instead.
         </div>
       )}
       <div className="space-y-2 mb-6">

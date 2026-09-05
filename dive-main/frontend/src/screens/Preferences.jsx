@@ -93,7 +93,7 @@ export default function Preferences() {
   const customized = prefs.risk !== "Balanced" || prefs.excluded.length > 0;
 
   return (
-    <div className="min-h-full dive-app-surface pb-24" data-testid="preferences-screen">
+    <div className="min-h-full dive-app-surface pb-10" data-testid="preferences-screen">
       <div className="px-6 pt-8 flex items-center justify-between gap-4">
         <div>
           <h1 className="font-heading font-black text-2xl">{user.name}</h1>

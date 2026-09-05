@@ -334,7 +334,14 @@
       "Bash(xargs grep -l \"FD\")",
       "Bash(node -e \"console.log\\(require\\('razorpay/package.json'\\).version\\)\")",
       "Bash(powershell -Command 'Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -eq 3000 -or $_.LocalPort -eq 8000 } | Select-Object LocalAddress, LocalPort, OwningProcess')",
-      "PowerShell(Get-CimInstance Win32_Process -Filter \"name='node.exe'\" | Where-Object { $_.CommandLine -match 'backend' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force; Write-Output \"Killed PID $\\($_.ProcessId\\)\" })"
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"name='node.exe'\" | Where-Object { $_.CommandLine -match 'backend' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force; Write-Output \"Killed PID $\\($_.ProcessId\\)\" })",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5000/api/health)",
+      "Bash(curl -s http://localhost:5000/)",
+      "Bash(node -e \"console.log\\(require\\('tailwindcss/package.json'\\).version\\)\")",
+      "Bash(grep -n \"bottom-nav\\\\|nav-\\\\${id}\\\\|data-testid={\\\\`nav-\" src/components/DiveShell.test.jsx src/components/DiveShell.jsx)",
+      "Bash(curl -s -o /tmp/webhook_test_body.json -w \"HTTP_STATUS:%{http_code}\\\\n\" -X POST \"https://www.divve.in/api/payments/webhook\" -H \"Content-Type: application/json\" -d '{\"event\":\"payment.captured\",\"payload\":{}}' --max-time 15)",
+      "Read(//c/Users/Dagriya Fin-Tech/.ssh/**)",
+      "Bash(awk '{print $1}')"
     ]
   }
 }

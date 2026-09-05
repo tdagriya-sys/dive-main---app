@@ -74,7 +74,7 @@ From that point on, real OTP emails will deliver to **any** signup email address
 
 ## 2. Finvu Account Aggregator sandbox — for real "connect my accounts"
 
-**What this does today without a key:** the "Connect via Account Aggregator" option shows a clearly-labeled "Sandbox mode" banner and fills your portfolio with realistic sample holdings instead of your real ones.
+**What this does today without a key:** the "Connect via Account Aggregator" option shows a clearly-labeled notice explaining it's mocked (doesn't fetch real holdings — it's there so someone with no investments yet can still try the full platform) and fills the portfolio with realistic sample holdings instead of real ones.
 
 **How to get real sandbox access:**
 

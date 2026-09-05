@@ -168,7 +168,7 @@ export default function XRay() {
   }));
 
   return (
-    <div className="min-h-full dive-app-surface pb-24" data-testid="xray-screen">
+    <div className="min-h-full dive-app-surface pb-10" data-testid="xray-screen">
       <div className="px-6 pt-8 flex items-center justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)]">The X-Ray</p>

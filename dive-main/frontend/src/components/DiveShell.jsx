@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Home as HomeIcon, ScanLine, Lightbulb, Compass, User, LogOut, Download, HelpCircle } from "lucide-react";
+import { Home as HomeIcon, ScanLine, Lightbulb, Compass, User, LogOut, Download, HelpCircle, LifeBuoy, X } from "lucide-react";
 import { useDive } from "../context/DiveContext";
+import { usePortalEnter } from "../lib/usePortalEnter";
 import AppHeader from "./AppHeader";
 import ExtensionDownloadCard from "./ExtensionDownloadCard";
+import SupportCard from "./SupportCard";
 import Walkthrough from "./Walkthrough";
 import Onboarding from "../screens/Onboarding";
 import Home from "../screens/Home";
@@ -41,6 +43,117 @@ const SCREENS = {
   chooseMethod: ChooseFetchMethod, manualEntry: ManualEntry, fileUpload: FileUpload, botScan: BotScan, aaConsent: AAConsent,
 };
 
+// The nav list + Walkthrough/Get Extension/Support/Log out buttons, shared
+// between the persistent desktop sidebar and the mobile drawer (Phase 4) —
+// same links, same order, same look, just two different containers around
+// them. `testidPrefix` keeps each rendering's testids distinct ("sidebar-*"
+// vs "mobile-*") so a test targeting one copy can never accidentally match
+// the other, even though both mount into the DOM at once (the drawer only
+// while open) at any viewport width the test happens to run at — jsdom
+// doesn't evaluate the `md:` media queries that keep them visually
+// exclusive on a real screen.
+function SidebarLinks({ testidPrefix, activeNav, onNavigate, onWalkthrough, onExtension, onSupport, onLogout }) {
+  return (
+    <>
+      {/* flex-1 makes this <nav> claim all the leftover vertical space in
+          the sidebar column — its own items stay top-anchored, so the
+          slack lands at nav's bottom edge, which is exactly what pushes
+          the logout button below it down to the sidebar's bottom edge. */}
+      <nav className="flex flex-col gap-1 flex-1">
+        {NAV.map(({ id, label, Icon }) => {
+          const active = activeNav === id;
+          return (
+            <button key={id} data-testid={`${testidPrefix}-nav-${id}`} onClick={() => onNavigate(id)}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold text-left transition-colors ${active ? "bg-[var(--dive-blue-light)] text-[var(--dive-blue)]" : "text-[var(--text-tertiary)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-primary)]"}`}>
+              <Icon size={18} strokeWidth={active ? 2.5 : 2} /> {label}
+            </button>
+          );
+        })}
+      </nav>
+      {/* Manual replay of the guided tour — same component the
+          first-time auto-start opens (see the useEffect above), not
+          part of NAV.map/activeNav highlighting for the same reason
+          the Get Extension button below isn't either. */}
+      <button data-testid={`${testidPrefix}-walkthrough-btn`} onClick={onWalkthrough}
+        className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold text-left text-[var(--text-tertiary)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-primary)] transition-colors">
+        <HelpCircle size={18} /> Walkthrough
+      </button>
+      {/* Opens the same ExtensionDownloadCard as AppHeader's header
+          button — not part of NAV.map/activeNav highlighting, since
+          it opens a popup rather than navigating to a real screen. */}
+      <button data-testid={`${testidPrefix}-extension-btn`} onClick={onExtension}
+        className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold text-left text-[var(--text-tertiary)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-primary)] transition-colors">
+        <Download size={18} /> Get Extension
+      </button>
+      {/* Opens the same SupportCard as AppHeader's header button —
+          not part of NAV.map/activeNav highlighting, same reasoning
+          as Walkthrough/Get Extension above. */}
+      <button data-testid={`${testidPrefix}-support-btn`} onClick={onSupport}
+        className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold text-left text-[var(--text-tertiary)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-primary)] transition-colors">
+        <LifeBuoy size={18} /> Support
+      </button>
+      <button data-testid={`${testidPrefix}-logout-btn`} onClick={onLogout}
+        className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold text-left text-[var(--text-tertiary)] hover:bg-[var(--red)]/10 hover:text-[var(--red)] transition-colors">
+        <LogOut size={18} /> Log out
+      </button>
+    </>
+  );
+}
+
+// Mobile off-canvas nav drawer (Phase 4) — opened from AppHeader's hamburger
+// button (md:hidden there too), replacing the old bottom nav bar that only
+// ever showed ~20-30% of itself above the real fold on a phone browser (see
+// App.js's h-dvh fix). Not portaled to document.body, unlike WhatIfSheet/
+// ShareCard/etc. — this mounts at DiveShell's own top level, which never
+// scrolls, so a plain `fixed` here is already correct without needing
+// document.body's help. It still needs usePortalEnter though: verified live
+// that framer-motion's initial/animate auto-trigger got stuck at its
+// `initial` x:"-100%" on mount here too, same as the portaled sheets — the
+// bug isn't actually portal-specific (see usePortalEnter.js's own updated
+// comment), so every mount-triggered transition in this app needs the same
+// treatment regardless. `md:hidden` on the drawer's own root, not just its
+// trigger, so a viewport resized to desktop mid-open can never show it
+// stacked on top of the real sidebar.
+function MobileNavDrawer({ onClose, activeNav, onNavigate, onWalkthrough, onExtension, onSupport, onLogout }) {
+  const { entered, handleClose } = usePortalEnter(onClose);
+  // Every action inside the drawer — a nav link or one of the four buttons
+  // below the list — closes it the same way a backdrop tap or the X button
+  // does, not just an instant unmount, so the same one closing feel applies
+  // everywhere in the drawer.
+  const closeAnd = (fn) => (...args) => { fn(...args); handleClose(); };
+
+  return (
+    <div className="md:hidden fixed inset-0 z-50">
+      <motion.div
+        className="absolute inset-0 bg-black/40"
+        animate={{ opacity: entered ? 1 : 0 }}
+        onClick={handleClose}
+        data-testid="mobile-nav-backdrop"
+      />
+      <motion.div
+        onClick={(e) => e.stopPropagation()}
+        className="absolute inset-y-0 left-0 h-full w-72 max-w-[80vw] bg-[var(--surface-card)] border-r border-[var(--border)] flex flex-col py-6 px-3"
+        animate={{ x: entered ? 0 : "-100%" }}
+        transition={{ type: "spring", stiffness: 340, damping: 32 }}
+        data-testid="mobile-nav-drawer"
+      >
+        <div className="flex items-center justify-between px-3 mb-8">
+          <span className="font-heading font-black text-xl">
+            <span className="text-gold-gradient">Divv</span>
+            <span className="text-gold-gradient inline-block" style={{ transform: "rotate(-9deg)" }}>e</span>
+          </span>
+          <button data-testid="mobile-nav-close-btn" onClick={handleClose}>
+            <X size={22} className="text-[var(--text-secondary)]" />
+          </button>
+        </div>
+        <SidebarLinks testidPrefix="mobile" activeNav={activeNav} onNavigate={closeAnd(onNavigate)}
+          onWalkthrough={closeAnd(onWalkthrough)} onExtension={closeAnd(onExtension)}
+          onSupport={closeAnd(onSupport)} onLogout={closeAnd(onLogout)} />
+      </motion.div>
+    </div>
+  );
+}
+
 export default function DiveShell() {
   const { screen, setScreen, authLoading, logout, user, walkthroughOpen, setWalkthroughOpen, markWalkthroughSeen } = useDive();
   // Triggered from two separate components (AppHeader's header button and
@@ -48,6 +161,16 @@ export default function DiveShell() {
   // parent, rather than into DiveContext, since it's a plain UI toggle, not
   // real app state.
   const [extensionCardOpen, setExtensionCardOpen] = useState(false);
+  // Same lifted-to-shared-parent reasoning as extensionCardOpen above —
+  // triggered from AppHeader's header button and this file's own sidebar
+  // button.
+  const [supportCardOpen, setSupportCardOpen] = useState(false);
+  // Phase 4: replaces the old fixed bottom nav bar on mobile — the same
+  // sidebar links, opened as an off-canvas drawer via the header's hamburger
+  // button instead of being permanently docked (which, combined with the
+  // `h-screen`/100vh mobile viewport bug fixed in App.js, was only ever
+  // ~20-30% visible above the real fold on a phone browser anyway).
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   // Auto-starts the guided tour exactly once ever for this account — see
   // User.ts's hasSeenWalkthrough. The ref (not just the effect's own
@@ -128,9 +251,12 @@ export default function DiveShell() {
   // just the nav'd dashboard screens.
   return (
     <div className="relative h-full w-full flex flex-col dive-app-surface overflow-hidden">
-      <AppHeader onOpenExtension={() => setExtensionCardOpen(true)} />
+      <AppHeader onOpenExtension={() => setExtensionCardOpen(true)} onOpenSupport={() => setSupportCardOpen(true)} onOpenMobileNav={() => setMobileNavOpen(true)} />
       <AnimatePresence>
         {extensionCardOpen && <ExtensionDownloadCard onClose={() => setExtensionCardOpen(false)} />}
+      </AnimatePresence>
+      <AnimatePresence>
+        {supportCardOpen && <SupportCard onClose={() => setSupportCardOpen(false)} />}
       </AnimatePresence>
       {walkthroughOpen && (
         <Walkthrough onDone={() => { markWalkthroughSeen(); setWalkthroughOpen(false); }} />
@@ -138,8 +264,13 @@ export default function DiveShell() {
       <div className="flex-1 min-h-0">
         {isFullScreenFlow ? narrowColumn : (
           <div className="relative h-full w-full overflow-hidden md:flex">
-            {/* Sidebar — desktop only (md:+). Mobile keeps the bottom nav below,
-                unchanged from before this phase. */}
+            {/* Sidebar — desktop only (md:+). Mobile reaches the exact same
+                links through the off-canvas drawer below instead (Phase 4) —
+                the old permanently-docked bottom nav bar only ever showed
+                ~20-30% of itself above the real fold on a phone browser (see
+                App.js's h-dvh fix), and had room for nav items alone, not the
+                Walkthrough/Get Extension/Support/Log out actions this sidebar
+                also carries. */}
             <div className="hidden md:flex md:flex-col md:w-56 md:shrink-0 md:h-full md:border-r md:border-[var(--border)] md:py-6 md:px-3" data-testid="sidebar-nav">
               <div className="flex items-center gap-2 px-3 mb-8">
                 <span className="font-heading font-black text-xl">
@@ -147,40 +278,9 @@ export default function DiveShell() {
                   <span className="text-gold-gradient inline-block" style={{ transform: "rotate(-9deg)" }}>e</span>
                 </span>
               </div>
-              {/* flex-1 makes this <nav> claim all the leftover vertical space in
-                  the sidebar column — its own items stay top-anchored, so the
-                  slack lands at nav's bottom edge, which is exactly what pushes
-                  the logout button below it down to the sidebar's bottom edge. */}
-              <nav className="flex flex-col gap-1 flex-1">
-                {NAV.map(({ id, label, Icon }) => {
-                  const active = activeNav === id;
-                  return (
-                    <button key={id} data-testid={`sidebar-nav-${id}`} onClick={() => setScreen(id)}
-                      className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold text-left transition-colors ${active ? "bg-[var(--dive-blue-light)] text-[var(--dive-blue)]" : "text-[var(--text-tertiary)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-primary)]"}`}>
-                      <Icon size={18} strokeWidth={active ? 2.5 : 2} /> {label}
-                    </button>
-                  );
-                })}
-              </nav>
-              {/* Manual replay of the guided tour — same component the
-                  first-time auto-start opens (see the useEffect above), not
-                  part of NAV.map/activeNav highlighting for the same reason
-                  the Get Extension button below isn't either. */}
-              <button data-testid="sidebar-walkthrough-btn" onClick={() => setWalkthroughOpen(true)}
-                className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold text-left text-[var(--text-tertiary)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-primary)] transition-colors">
-                <HelpCircle size={18} /> Walkthrough
-              </button>
-              {/* Opens the same ExtensionDownloadCard as AppHeader's header
-                  button — not part of NAV.map/activeNav highlighting, since
-                  it opens a popup rather than navigating to a real screen. */}
-              <button data-testid="sidebar-extension-btn" onClick={() => setExtensionCardOpen(true)}
-                className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold text-left text-[var(--text-tertiary)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-primary)] transition-colors">
-                <Download size={18} /> Get Extension
-              </button>
-              <button data-testid="sidebar-logout-btn" onClick={logout}
-                className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold text-left text-[var(--text-tertiary)] hover:bg-[var(--red)]/10 hover:text-[var(--red)] transition-colors">
-                <LogOut size={18} /> Log out
-              </button>
+              <SidebarLinks testidPrefix="sidebar" activeNav={activeNav} onNavigate={setScreen}
+                onWalkthrough={() => setWalkthroughOpen(true)} onExtension={() => setExtensionCardOpen(true)}
+                onSupport={() => setSupportCardOpen(true)} onLogout={logout} />
             </div>
 
             {/* `relative` (not just a plain flex child) — the binding ancestor
@@ -202,23 +302,15 @@ export default function DiveShell() {
                 trapped element sits OUTSIDE the scrolling region (e.g. a
                 pinned header), not inside it, which isn't this shape. */}
             <div className="relative flex-1 h-full overflow-y-auto no-scrollbar">{content}</div>
-
-            {/* Bottom nav — mobile only, hidden once the sidebar takes over at md:+. */}
-            <div className="md:hidden absolute bottom-0 inset-x-0 bg-[var(--surface-card)]/95 backdrop-blur-lg border-t border-[var(--border)] px-2 py-2 flex justify-around" data-testid="bottom-nav">
-              {NAV.map(({ id, label, Icon }) => {
-                const active = activeNav === id;
-                return (
-                  <button key={id} data-testid={`nav-${id}`} onClick={() => setScreen(id)}
-                    className="flex flex-col items-center gap-1 py-1 px-2 flex-1">
-                    <Icon size={20} className={active ? "text-[var(--dive-blue)]" : "text-[var(--text-tertiary)]"} strokeWidth={active ? 2.5 : 2} />
-                    <span className={`text-[10px] font-bold ${active ? "text-[var(--dive-blue)]" : "text-[var(--text-tertiary)]"}`}>{label}</span>
-                  </button>
-                );
-              })}
-            </div>
           </div>
         )}
       </div>
+
+      {mobileNavOpen && (
+        <MobileNavDrawer onClose={() => setMobileNavOpen(false)} activeNav={activeNav} onNavigate={setScreen}
+          onWalkthrough={() => setWalkthroughOpen(true)} onExtension={() => setExtensionCardOpen(true)}
+          onSupport={() => setSupportCardOpen(true)} onLogout={logout} />
+      )}
     </div>
   );
 }

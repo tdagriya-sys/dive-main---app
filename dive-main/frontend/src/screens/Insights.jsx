@@ -42,7 +42,7 @@ export default function Insights() {
   const data = computeBadgesAndFeed(h);
 
   return (
-    <div className="min-h-full dive-app-surface pb-24 relative" data-testid="insights-screen">
+    <div className="min-h-full dive-app-surface pb-10 relative" data-testid="insights-screen">
       <div className="px-6 pt-8 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <button data-testid="insights-back-btn" onClick={goBack}><ChevronLeft size={22} /></button>

@@ -308,6 +308,10 @@ export default function BotScan() {
         <h1 className="font-heading font-black text-2xl">Bot Scan</h1>
       </div>
 
+      <div data-testid="market-data-notice" className="bg-[var(--amber)]/10 border border-[var(--amber)]/20 rounded-xl px-4 py-3 mb-4 text-xs font-semibold text-[var(--amber)]">
+        We currently have limited access to market data, which may cause some instruments to not match our directory yet. We're working hard to bring in full market coverage as soon as possible, to give you the best experience.
+      </div>
+
       {/* Hidden capture surface — never shown to the user, just used to grab frames from the shared stream */}
       <video ref={videoRef} className="hidden" muted playsInline />
       <canvas ref={canvasRef} className="hidden" />

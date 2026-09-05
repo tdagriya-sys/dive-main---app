@@ -215,3 +215,16 @@ describe("BotScan — warns when this tab has been backgrounded during a scan", 
     expect(screen.queryByTestId("bot-scan-tab-hidden-warning")).not.toBeInTheDocument();
   });
 });
+
+// Same notice as ManualEntry/FileUpload's own copies — the instrument
+// directory doesn't cover every real-world security yet.
+describe("BotScan — market data coverage notice", () => {
+  it("tells the user some instruments may not match our directory yet", () => {
+    useDive.mockReturnValue({
+      setScreen: jest.fn(), goBack: jest.fn(), loadHoldings: jest.fn().mockResolvedValue([]),
+      holdings: [], user: { id: "u1", name: "Test", age: 30 },
+    });
+    render(<BotScan />);
+    expect(screen.getByTestId("market-data-notice")).toHaveTextContent(/limited access to market data/i);
+  });
+});

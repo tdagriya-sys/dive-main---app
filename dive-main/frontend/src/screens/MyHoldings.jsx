@@ -29,7 +29,7 @@ export default function MyHoldings() {
   };
 
   return (
-    <div className="min-h-full dive-app-surface pb-24" data-testid="my-holdings-screen">
+    <div className="min-h-full dive-app-surface pb-10" data-testid="my-holdings-screen">
       <div className="px-6 pt-8 flex items-center gap-3">
         <button data-testid="my-holdings-back-btn" onClick={goBack}><ChevronLeft size={22} /></button>
         <h1 className="font-heading font-black text-2xl">Your Holdings</h1>

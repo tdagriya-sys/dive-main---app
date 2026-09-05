@@ -109,7 +109,7 @@ export default function Home() {
   ].filter(Boolean);
 
   return (
-    <div className="min-h-full dive-app-surface pb-24 lg:pb-10" data-testid="home-screen">
+    <div className="min-h-full dive-app-surface pb-10" data-testid="home-screen">
       <div className="px-6 pt-8 lg:px-8">
         {/* Search/Your Journey (formerly the bell here)/profile are now the
             global AppHeader (components/AppHeader.jsx) — reachable from

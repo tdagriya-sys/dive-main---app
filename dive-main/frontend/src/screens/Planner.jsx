@@ -13,7 +13,7 @@ export default function Planner() {
   const isNewInvestor = holdings.length === 0;
 
   return (
-    <div className="min-h-full dive-app-surface pb-24" data-testid="planner-screen">
+    <div className="min-h-full dive-app-surface pb-10" data-testid="planner-screen">
       <div className="px-6 pt-8">
         <p className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)]">Goal planner</p>
         <h1 className="font-heading font-black text-2xl">Divve Planner</h1>

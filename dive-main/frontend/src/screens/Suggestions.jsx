@@ -196,7 +196,7 @@ export default function Suggestions() {
     `We're not actively pushing you to add to ${cat} right now, based on your "${level}" diversification priority — other categories matter more at the moment. You can still add to it below if you'd like.`;
 
   return (
-    <div className="min-h-full dive-app-surface pb-24" data-testid="suggestions-screen">
+    <div className="min-h-full dive-app-surface pb-10" data-testid="suggestions-screen">
       <div className="px-6 pt-8 flex items-center justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)]">Category-level, always quantified</p>
