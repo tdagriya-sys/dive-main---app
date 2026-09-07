@@ -2,6 +2,7 @@ import { createApp } from "./app";
 import { connectDb, disconnectDb } from "./db/connect";
 import { env } from "./config/env";
 import { startInstrumentRefreshCron } from "./jobs/instrumentRefresh.cron";
+import { startValuationRefreshCron } from "./jobs/valuationRefresh.cron";
 import { Instrument } from "./models/Instrument";
 import { runInstrumentRefresh } from "./services/instrumentService";
 
@@ -34,6 +35,7 @@ async function main() {
 
   const app = createApp();
   startInstrumentRefreshCron();
+  startValuationRefreshCron();
   const server = app.listen(env.port, () => {
     // eslint-disable-next-line no-console
     console.log(`[dive-backend] listening on http://localhost:${env.port}`);

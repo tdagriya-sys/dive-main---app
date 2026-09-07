@@ -16,6 +16,7 @@ import { AuthedRequest } from "../middleware/auth";
 import { ApiError } from "../middleware/errorHandler";
 import { computeHoldingQuality } from "../services/holdingQualityService";
 import { fetchInstrumentDetail } from "../services/instrumentDetailService";
+import { resolveHoldingLatestPrice, MARKET_PRICEABLE_CLASSES } from "../services/priceHistoryService";
 import { invalidateDiveScoreCache } from "../services/diveScoreService";
 import { invalidateReportPurchase } from "../services/paymentService";
 
@@ -73,19 +74,27 @@ export async function createManualHolding(req: AuthedRequest, res: Response) {
   const input = parseManualHolding(req.body);
 
   if (input.assetClass === "FD") {
-    const { currentValue, maturityValue, maturityDate } = computeFdValues(input);
+    const { currentValue, maturityValue, maturityDate, investedToDate } = computeFdValues(input);
     const holding = await Holding.create({
       userId: req.userId,
       assetClass: "FD",
       name: `${input.bank} Fixed Deposit / RD`,
-      investedValue: input.principal,
+      investedValue: investedToDate,
       currentValue,
       extraFields: {
         bank: input.bank,
+        // Stored separately from the top-level investedValue above (which
+        // becomes investedToDate — grows with monthlyContribution) so a
+        // later edit can recover the original lump sum rather than
+        // mistaking an already-grown value for it — same reasoning as PF's
+        // own openingBalance living in extraFields, distinct from its own
+        // investedValue/investedToDate.
+        principal: input.principal,
         tenureMonths: input.tenureMonths,
         startMonth: input.startMonth,
         startYear: input.startYear,
         interestRate: input.interestRate,
+        monthlyContribution: input.monthlyContribution ?? 0,
         maturityValue,
         maturityDate,
       },
@@ -121,10 +130,38 @@ export async function createManualHolding(req: AuthedRequest, res: Response) {
   }
 
   let instrumentName = input.name;
+  let instrument: { name: string; symbol: string; metadata?: Record<string, unknown> } | null = null;
   if (input.instrumentId) {
-    const instrument = await Instrument.findById(input.instrumentId).lean();
+    instrument = await Instrument.findById(input.instrumentId).lean();
     if (!instrument) throw new ApiError(404, "INSTRUMENT_NOT_FOUND", "Selected instrument was not found.");
     instrumentName = instrument.name;
+  }
+
+  const currentValue = input.currentValue ?? input.investedValue;
+
+  // A user who picks a real instrument but doesn't know/enter a share count
+  // (or types a value first and lets quantity default) would otherwise never
+  // be eligible for holdingValuationService.ts's daily currentValue refresh —
+  // that job can only reprice quantity × price, and there'd be no quantity
+  // to multiply. Back-solving quantity = value ÷ today's price the moment a
+  // real, live-priceable instrument is linked means this holding starts
+  // getting real daily updates from day one instead of staying frozen at
+  // whatever was typed today until a future manual edit happens to add a
+  // quantity. Deliberately NOT rounded to a whole share count — this is a
+  // back-solved figure for future revaluation math, not literally "the user
+  // owns exactly this many shares," and rounding it would make
+  // quantity × today's price drift away from the value just entered.
+  let quantity = input.quantity;
+  if (quantity === undefined && instrument && MARKET_PRICEABLE_CLASSES.includes(input.assetClass)) {
+    const price = await resolveHoldingLatestPrice({
+      assetClass: input.assetClass,
+      symbol: instrument.symbol,
+      coingeckoId: instrument.metadata?.coingeckoId as string | undefined,
+    });
+    // No real price resolvable right now (network down, unsupported
+    // instrument, etc.) — leave quantity unset, exactly today's existing
+    // behavior, rather than block saving the holding on an external API.
+    if (price && price > 0) quantity = currentValue / price;
   }
 
   const holding = await Holding.create({
@@ -133,8 +170,8 @@ export async function createManualHolding(req: AuthedRequest, res: Response) {
     instrumentId: input.instrumentId,
     name: instrumentName,
     investedValue: input.investedValue,
-    currentValue: input.currentValue ?? input.investedValue,
-    quantity: input.quantity,
+    currentValue,
+    quantity,
     purchaseDate: input.purchaseDate,
     extraFields: {},
     source: input.source ?? "MANUAL",
@@ -159,22 +196,31 @@ export async function updateHolding(req: AuthedRequest, res: Response) {
     const merged: FdHoldingInput = {
       assetClass: "FD",
       bank: input.bank ?? (holding.extraFields.bank as string),
-      principal: input.principal ?? holding.investedValue,
+      // extraFields.principal first — the pure lump sum, distinct from
+      // investedValue once monthlyContribution makes investedValue grow
+      // into investedToDate. Falls back to holding.investedValue only for
+      // an FD holding created before this field existed, where investedValue
+      // genuinely still IS the pure principal (monthlyContribution didn't
+      // exist yet, so investedToDate === principal for every such holding).
+      principal: input.principal ?? (holding.extraFields.principal as number | undefined) ?? holding.investedValue,
       tenureMonths: input.tenureMonths ?? (holding.extraFields.tenureMonths as number),
       startMonth: input.startMonth ?? (holding.extraFields.startMonth as number),
       startYear: input.startYear ?? (holding.extraFields.startYear as number),
       interestRate: input.interestRate ?? (holding.extraFields.interestRate as number),
+      monthlyContribution: input.monthlyContribution ?? (holding.extraFields.monthlyContribution as number | undefined) ?? 0,
     };
-    const { currentValue, maturityValue, maturityDate } = computeFdValues(merged);
+    const { currentValue, maturityValue, maturityDate, investedToDate } = computeFdValues(merged);
     holding.name = `${merged.bank} Fixed Deposit / RD`;
-    holding.investedValue = merged.principal;
+    holding.investedValue = investedToDate;
     holding.currentValue = currentValue;
     holding.extraFields = {
       bank: merged.bank,
+      principal: merged.principal,
       tenureMonths: merged.tenureMonths,
       startMonth: merged.startMonth,
       startYear: merged.startYear,
       interestRate: merged.interestRate,
+      monthlyContribution: merged.monthlyContribution ?? 0,
       maturityValue,
       maturityDate,
     };

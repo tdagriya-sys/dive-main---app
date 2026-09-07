@@ -58,20 +58,38 @@ export default function ManualEntry() {
     isEditingFd
       ? {
           bank: editingHolding.extraFields?.bank || "",
-          principal: String(editingHolding.investedValue ?? ""),
+          // extraFields.principal first — the pure lump sum, distinct from
+          // investedValue once monthlyContribution makes investedValue grow
+          // into investedToDate (see holdingsController.ts's own identical
+          // fallback). Falls back to investedValue for an FD holding
+          // created before this field existed, where investedValue still
+          // genuinely IS the principal.
+          principal: String(editingHolding.extraFields?.principal ?? editingHolding.investedValue ?? ""),
+          monthlyContribution: String(editingHolding.extraFields?.monthlyContribution ?? ""),
           tenureMonths: String(editingHolding.extraFields?.tenureMonths ?? ""),
           startMonth: String(editingHolding.extraFields?.startMonth ?? new Date().getMonth() + 1),
           startYear: String(editingHolding.extraFields?.startYear ?? new Date().getFullYear()),
           interestRate: String(editingHolding.extraFields?.interestRate ?? ""),
         }
-      : { bank: "", principal: "", tenureMonths: "", startMonth: String(new Date().getMonth() + 1), startYear: String(new Date().getFullYear()), interestRate: "" }
+      : { bank: "", principal: "", monthlyContribution: "", tenureMonths: "", startMonth: String(new Date().getMonth() + 1), startYear: String(new Date().getFullYear()), interestRate: "" }
   );
   const [pf, setPf] = useState(
     isEditingPf
       ? {
           subType: editingHolding.extraFields?.subType || "PPF",
           institution: editingHolding.extraFields?.institution || "",
-          openingBalance: String(editingHolding.investedValue ?? ""),
+          // extraFields.openingBalance — the true original balance, distinct
+          // from investedValue once monthlyContribution makes it grow into
+          // investedToDate (same bug class just fixed for FD's own
+          // principal — see holdingsController.ts's identical fallback
+          // comment). Pre-filling from investedValue here was a real,
+          // silently-compounding bug: every edit that resubmitted this
+          // field (even untouched) fed the already-grown value back in as
+          // if it were a fresh opening balance, permanently inflating it a
+          // little more on top of itself each time. Falls back to
+          // investedValue only for a PF holding old enough to predate
+          // extraFields.openingBalance existing at all.
+          openingBalance: String(editingHolding.extraFields?.openingBalance ?? editingHolding.investedValue ?? ""),
           monthlyContribution: String(editingHolding.extraFields?.monthlyContribution ?? ""),
           startMonth: String(editingHolding.extraFields?.startMonth ?? new Date().getMonth() + 1),
           startYear: String(editingHolding.extraFields?.startYear ?? new Date().getFullYear()),
@@ -96,7 +114,7 @@ export default function ManualEntry() {
     setInvestedValue("");
     setCurrentValue("");
     setQuantity("");
-    setFd({ bank: "", principal: "", tenureMonths: "", startMonth: String(new Date().getMonth() + 1), startYear: String(new Date().getFullYear()), interestRate: "" });
+    setFd({ bank: "", principal: "", monthlyContribution: "", tenureMonths: "", startMonth: String(new Date().getMonth() + 1), startYear: String(new Date().getFullYear()), interestRate: "" });
     setPf({
       subType: "PPF",
       institution: "",
@@ -123,6 +141,7 @@ export default function ManualEntry() {
           assetClass: "FD",
           bank: fd.bank,
           principal: Number(fd.principal),
+          monthlyContribution: fd.monthlyContribution ? Number(fd.monthlyContribution) : undefined,
           tenureMonths: Number(fd.tenureMonths),
           startMonth: Number(fd.startMonth),
           startYear: Number(fd.startYear),
@@ -210,7 +229,12 @@ export default function ManualEntry() {
         {assetClass === "FD" ? (
           <>
             <TextField label="Bank / institution" testId="fd-bank-input" value={fd.bank} onChange={(e) => setFd((f) => ({ ...f, bank: e.target.value }))} required />
-            <TextField label="Invested (principal) amount" testId="fd-principal-input" type="number" min="1" value={fd.principal} onChange={(e) => setFd((f) => ({ ...f, principal: e.target.value }))} required />
+            {/* min="0", not "1" — a pure RD (no lump sum, just the monthly
+                contribution below) is a real, valid case, same as PF's own
+                opening balance allowing 0. */}
+            <TextField label="Invested (principal) amount" testId="fd-principal-input" type="number" min="0" value={fd.principal} onChange={(e) => setFd((f) => ({ ...f, principal: e.target.value }))} required />
+            <TextField label="Monthly contribution (₹) — optional, for an RD" testId="fd-monthly-contribution-input" type="number" min="0" value={fd.monthlyContribution}
+              onChange={(e) => setFd((f) => ({ ...f, monthlyContribution: e.target.value }))} />
             <TextField label="Tenure (months)" testId="fd-tenure-input" type="number" min="1" value={fd.tenureMonths} onChange={(e) => setFd((f) => ({ ...f, tenureMonths: e.target.value }))} required />
             <div className="grid grid-cols-2 gap-3">
               <div className="mb-4">

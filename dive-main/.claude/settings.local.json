@@ -353,7 +353,30 @@
       "Bash(taskkill //F //PID 24220)",
       "Bash(curl -s -w '\\\\nHTTP:%{http_code}\\\\n' -X POST http://localhost:8001/api/payments/report/verify -H 'Authorization: Bearer __CMDSUB_OUTPUT__' -H 'Content-Type: application/json' -d '{\"razorpay_order_id\":\"__TRACKED_VAR__\",\"razorpay_payment_id\":\"some_other_payment_id\",\"razorpay_signature\":\"mock\"}')",
       "Bash(taskkill //F //PID 30880)",
-      "Bash(rm -rf \"D:/Dive/dive-main - app/dive-main/.tmp_webhook_test\" /tmp/race_token.txt /tmp/order_id.txt /tmp/holding_res.json /tmp/webhook_test_body*.json)"
+      "Bash(rm -rf \"D:/Dive/dive-main - app/dive-main/.tmp_webhook_test\" /tmp/race_token.txt /tmp/order_id.txt /tmp/holding_res.json /tmp/webhook_test_body*.json)",
+      "Bash(xargs grep -l \"Holding\")",
+      "Bash(RAZORPAY_KEY_ID=REPLACE_ME RAZORPAY_KEY_SECRET=REPLACE_ME RAZORPAY_WEBHOOK_SECRET=REPLACE_ME npx jest tests/holdingValuationService.test.ts --runInBand)",
+      "Bash(curl -s \"https://api.mfapi.in/mf/100016\" --max-time 10)",
+      "Bash(curl -s \"https://api.mfapi.in/mf/search?q=HDFC%20Flexi%20Cap\" --max-time 10)",
+      "Bash(curl -s -w \"\\\\nHTTP:%{http_code}\\\\n\" \"https://api.coingecko.com/api/v3/coins/markets?vs_currency=inr&ids=bitcoin&price_change_percentage=24h,7d\" --max-time 15)",
+      "Bash(RAZORPAY_KEY_ID=REPLACE_ME RAZORPAY_KEY_SECRET=REPLACE_ME RAZORPAY_WEBHOOK_SECRET=REPLACE_ME npx jest tests/holdings.test.ts --runInBand)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8000/api/health --max-time 3)",
+      "Bash(taskkill //F //PID 9812)",
+      "Bash(curl -s 'http://localhost:8001/api/instruments/search?assetClass=EQUITY&q=Reliance%20Industries' -H 'Authorization: Bearer __CMDSUB_OUTPUT__')",
+      "Bash(curl -s -X POST http://localhost:8001/api/holdings/manual -H 'Authorization: Bearer __CMDSUB_OUTPUT__' -H 'Content-Type: application/json' -d '{\"assetClass\":\"EQUITY\",\"instrumentId\":\"6a9e6191716c5a1b3d34772a\",\"name\":\"Reliance Industries Limited\",\"investedValue\":100000}')",
+      "Bash(curl -s -X POST http://localhost:8001/api/holdings/manual -H 'Authorization: Bearer __CMDSUB_OUTPUT__' -H 'Content-Type: application/json' -d '{\"assetClass\":\"EQUITY\",\"instrumentId\":\"6a9e6191716c5a1b3d34772a\",\"name\":\"Reliance Industries Limited\",\"investedValue\":100000,\"currentValue\":130000}')",
+      "Bash(curl -s \"https://query1.finance.yahoo.com/v8/finance/chart/SILVERBEES.NS?range=5d&interval=1d\" -H \"User-Agent: Mozilla/5.0\" --max-time 10)",
+      "Bash(curl -s \"https://query1.finance.yahoo.com/v8/finance/chart/DIGITAL_GOLD.NS?range=5d&interval=1d\" -H \"User-Agent: Mozilla/5.0\" --max-time 10)",
+      "Bash(break)",
+      "Bash(taskkill //F //PID 13088)",
+      "Bash(curl -s -X POST http://localhost:8001/api/holdings/manual -H 'Authorization: Bearer __CMDSUB_OUTPUT__' -H 'Content-Type: application/json' -d '{\"assetClass\":\"GOLD\",\"instrumentId\":\"6a9e6a16252f61fdaa2c76bc\",\"name\":\"Digital Gold\",\"investedValue\":100000}')",
+      "Bash(taskkill //F //PID 31380)",
+      "Bash(rm -f /tmp/gold_token.txt /tmp/gold_verify.log /tmp/gold_verify2.log)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000 --max-time 3)",
+      "Bash(cp src/screens/ManualEntry.jsx /tmp/ManualEntry.jsx.bak)",
+      "Bash(sed -i 's/openingBalance: String\\(editingHolding.extraFields?.openingBalance ?? editingHolding.investedValue ?? \"\"\\),/openingBalance: String\\(editingHolding.investedValue ?? \"\"\\),/' src/screens/ManualEntry.jsx)",
+      "Bash(cp \"/tmp/ManualEntry.jsx.bak\" \"D:/Dive/dive-main - app/dive-main/frontend/src/screens/ManualEntry.jsx\")",
+      "Bash(rm -f /tmp/ManualEntry.jsx.bak)"
     ]
   }
 }

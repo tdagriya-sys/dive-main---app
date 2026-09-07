@@ -1,6 +1,7 @@
 import axios from "axios";
 import { env } from "../config/env";
 import { AssetClass } from "../models/Instrument";
+import { fetchInstrumentDetail } from "./instrumentDetailService";
 
 /**
  * Resolves a daily-return history for one holding, for the Dive Score v2
@@ -33,6 +34,21 @@ interface CacheEntry {
 }
 const cache = new Map<string, CacheEntry>();
 
+// Separate Map (not a second key-namespace in `cache` above) so its value
+// type — (timestamp, price) pairs, not a plain-number series — never has to
+// share CacheEntry's shape with a runtime cast.
+interface PricesCacheEntry {
+  prices: Array<[number, number]>;
+  expiresAt: number;
+}
+const pricesCache = new Map<string, PricesCacheEntry>();
+
+interface MfApiRowsCacheEntry {
+  rows: Array<{ date: string; nav: string }>;
+  expiresAt: number;
+}
+const mfApiRowsCache = new Map<string, MfApiRowsCacheEntry>();
+
 function getCached(key: string): number[] | null {
   const hit = cache.get(key);
   if (hit && hit.expiresAt > Date.now()) return hit.returns;
@@ -42,7 +58,12 @@ function setCached(key: string, returns: number[]) {
   cache.set(key, { returns, expiresAt: Date.now() + CACHE_TTL_MS });
 }
 
-async function fetchYahooDailyReturns(symbol: string): Promise<number[] | null> {
+// Raw close-price series, cached — shared by both fetchYahooDailyReturns
+// below (return-history for the score's risk math) AND
+// fetchYahooLatestClose (holdingValuationService.ts's daily currentValue
+// refresh, added later): a symbol fetched for either purpose within the same
+// 12h window serves both, one real HTTP call instead of two.
+async function fetchYahooCloses(symbol: string): Promise<number[] | null> {
   const cacheKey = `yahoo:${symbol}`;
   const cached = getCached(cacheKey);
   if (cached) return cached;
@@ -54,44 +75,72 @@ async function fetchYahooDailyReturns(symbol: string): Promise<number[] | null> 
     });
     const result = data?.chart?.result?.[0];
     const closes: Array<number | null> = result?.indicators?.quote?.[0]?.close || [];
-    const returns: number[] = [];
-    for (let i = 1; i < closes.length; i++) {
-      const prev = closes[i - 1];
-      const cur = closes[i];
-      if (prev == null || cur == null || prev === 0) continue;
-      returns.push((cur - prev) / prev);
-    }
-    if (returns.length < 30) return null; // too little real data to be meaningful — fall back to synthetic
-    setCached(cacheKey, returns);
-    return returns;
+    const clean = closes.filter((c): c is number => c != null);
+    if (clean.length < 30) return null; // too little real data to be meaningful — fall back to synthetic
+    setCached(cacheKey, clean);
+    return clean;
   } catch {
     return null;
   }
 }
 
-async function fetchCoinGeckoDailyReturns(coingeckoId: string): Promise<number[] | null> {
-  const cacheKey = `coingecko:${coingeckoId}`;
-  const cached = getCached(cacheKey);
-  if (cached) return cached;
+async function fetchYahooDailyReturns(symbol: string): Promise<number[] | null> {
+  const closes = await fetchYahooCloses(symbol);
+  if (!closes) return null;
+  const returns: number[] = [];
+  for (let i = 1; i < closes.length; i++) {
+    const prev = closes[i - 1];
+    const cur = closes[i];
+    if (prev === 0) continue;
+    returns.push((cur - prev) / prev);
+  }
+  return returns.length >= 30 ? returns : null;
+}
+
+// Latest real closing price — for holdingValuationService.ts's daily
+// currentValue refresh (currentValue = quantity × this), NOT for the score's
+// risk math above. `fetchYahooCloses` already caches a full year of history
+// per symbol; this just reads the newest entry off the same cache instead of
+// firing a second request.
+async function fetchYahooLatestClose(symbol: string): Promise<number | null> {
+  const closes = await fetchYahooCloses(symbol);
+  return closes && closes.length ? closes[closes.length - 1] : null;
+}
+
+// Raw (timestamp, price) series, cached — same one-fetch-serves-both-callers
+// reasoning as fetchYahooCloses above. Distinct cache key from
+// fetchCoinGeckoDailyReturns's pre-refactor `coingecko:${id}` key (now
+// unused) so a price-pair array can never collide with a plain-number
+// returns array in the shared cache Map.
+async function fetchCoinGeckoPrices(coingeckoId: string): Promise<Array<[number, number]> | null> {
+  const cacheKey = `coingecko-prices:${coingeckoId}`;
+  const cached = pricesCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.prices;
   try {
     const { data } = await axios.get(`https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coingeckoId)}/market_chart`, {
       params: { vs_currency: "usd", days: 365, interval: "daily" },
       timeout: 8000,
     });
     const prices: Array<[number, number]> = data?.prices || [];
-    const returns: number[] = [];
-    for (let i = 1; i < prices.length; i++) {
-      const prev = prices[i - 1][1];
-      const cur = prices[i][1];
-      if (!prev) continue;
-      returns.push((cur - prev) / prev);
-    }
-    if (returns.length < 30) return null;
-    setCached(cacheKey, returns);
-    return returns;
+    if (prices.length < 30) return null;
+    pricesCache.set(cacheKey, { prices, expiresAt: Date.now() + CACHE_TTL_MS });
+    return prices;
   } catch {
     return null;
   }
+}
+
+async function fetchCoinGeckoDailyReturns(coingeckoId: string): Promise<number[] | null> {
+  const prices = await fetchCoinGeckoPrices(coingeckoId);
+  if (!prices) return null;
+  const returns: number[] = [];
+  for (let i = 1; i < prices.length; i++) {
+    const prev = prices[i - 1][1];
+    const cur = prices[i][1];
+    if (!prev) continue;
+    returns.push((cur - prev) / prev);
+  }
+  return returns.length >= 30 ? returns : null;
 }
 
 interface MfApiResponse {
@@ -111,10 +160,14 @@ async function fetchMfApiRaw(schemeCode: string) {
   });
 }
 
-async function fetchMfApiDailyReturns(schemeCode: string): Promise<number[] | null> {
-  const cacheKey = `mfapi:${schemeCode}`;
-  const cached = getCached(cacheKey);
-  if (cached) return cached;
+// Raw newest-first NAV rows, cached — same one-fetch-serves-both-callers
+// reasoning as fetchYahooCloses/fetchCoinGeckoPrices above: the returns
+// series below and holdingValuationService.ts's latest-NAV lookup both need
+// this same response, just read differently.
+async function fetchMfApiRows(schemeCode: string): Promise<Array<{ date: string; nav: string }> | null> {
+  const cacheKey = `mfapi-rows:${schemeCode}`;
+  const cached = mfApiRowsCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.rows;
 
   let data: MfApiResponse | undefined;
   try {
@@ -133,6 +186,13 @@ async function fetchMfApiDailyReturns(schemeCode: string): Promise<number[] | nu
 
   const rows: Array<{ date: string; nav: string }> = data?.data || [];
   if (rows.length < 30) return null;
+  mfApiRowsCache.set(cacheKey, { rows, expiresAt: Date.now() + CACHE_TTL_MS });
+  return rows;
+}
+
+async function fetchMfApiDailyReturns(schemeCode: string): Promise<number[] | null> {
+  const rows = await fetchMfApiRows(schemeCode);
+  if (!rows) return null;
   // MFAPI returns newest-first and can carry years of history — take the
   // most recent ~400 calendar days (comfortably more than the 252 trading
   // days this module aligns to) and reverse to oldest-first, matching the
@@ -146,9 +206,17 @@ async function fetchMfApiDailyReturns(schemeCode: string): Promise<number[] | nu
     if (!prev || !isFinite(prev) || !isFinite(cur)) continue;
     returns.push((cur - prev) / prev);
   }
-  if (returns.length < 30) return null;
-  setCached(cacheKey, returns);
-  return returns;
+  return returns.length >= 30 ? returns : null;
+}
+
+// Latest real NAV — for holdingValuationService.ts's daily currentValue
+// refresh. Rows are newest-first (per fetchMfApiDailyReturns's own comment
+// above), so the freshest NAV is simply rows[0], no reversal needed.
+async function fetchMfApiLatestNav(schemeCode: string): Promise<number | null> {
+  const rows = await fetchMfApiRows(schemeCode);
+  if (!rows || !rows.length) return null;
+  const nav = parseFloat(rows[0].nav);
+  return isFinite(nav) && nav > 0 ? nav : null;
 }
 
 let syntheticNiftyCache: number[] | null = null;
@@ -324,6 +392,20 @@ export interface HoldingReturnSeries {
 // Live-priceable via Yahoo's `<SYMBOL>.NS` endpoint (NSE-listed).
 const NSE_PRICEABLE_CLASSES: AssetClass[] = ["EQUITY", "ETF", "GOLD", "SILVER"];
 
+// Every asset class holdingValuationService.ts's daily currentValue refresh
+// can actually act on — a real, resolvable-in-INR price source. CRYPTO is
+// included via resolveHoldingLatestPrice's reuse of
+// instrumentDetailService.ts's fetchInstrumentDetail, which asks CoinGecko
+// for INR pricing directly (vs_currency: "inr") — a separate, genuinely
+// INR-denominated CoinGecko call, not a USD-to-INR conversion of the
+// return-history fetch above (that one stays USD on purpose: a % change is
+// currency-agnostic, and it's the same feed Ask DIVVE's own crypto detail
+// card already relies on). Everything else not listed here (BOND, REIT,
+// INVIT, ULIP_INSURANCE) has no cheap public daily-price API in India at
+// all; their currentValue stays exactly what the user last entered, same as
+// before this job existed.
+export const MARKET_PRICEABLE_CLASSES: AssetClass[] = [...NSE_PRICEABLE_CLASSES, "MUTUAL_FUND", "CRYPTO"];
+
 export async function resolveHoldingReturns(holding: HoldingReturnInput, marketFactor: number[]): Promise<HoldingReturnSeries> {
   const useNetwork = env.nodeEnv !== "test";
 
@@ -351,4 +433,72 @@ export async function resolveHoldingReturns(holding: HoldingReturnInput, marketF
   const length = marketFactor.length || 252;
   const returns = generateSyntheticReturns(seedKey, drift, params.vol, length, params.beta, marketFactor);
   return { returns, isSynthetic: true, label: `Synthetic — ${params.label} assumption`, assumedBeta: params.beta };
+}
+
+export interface LatestPriceInput {
+  assetClass: AssetClass;
+  symbol?: string;
+  coingeckoId?: string;
+}
+
+// backend/src/seed/staticInstruments.ts seeds GOLD/SILVER with a mix of two
+// genuinely different kinds of instrument under the same asset class: real
+// NSE-listed ETFs (GOLDBEES, SILVERBEES, etc. — auto-fetched via the NSE_ETF
+// refresh, each with its own real, Yahoo-resolvable symbol) alongside static
+// placeholder entries for non-exchange-traded exposure — "Digital Gold"
+// (symbol DIGITAL_GOLD), "Physical Gold" (PHYSICAL_GOLD), a generic
+// "Sovereign Gold Bond" (SGB — real SGBs are one instrument PER ISSUE
+// TRANCHE, each with its own ticker; there's no single tradeable "SGB"
+// symbol), and the silver equivalents. None of the placeholder symbols are
+// real tickers, so a direct `${symbol}.NS` lookup for one of them 404s —
+// confirmed live (`DIGITAL_GOLD.NS` → "No data found, symbol may be
+// delisted") — exactly matching instrumentDetailService.ts's own
+// NOT_AVAILABLE_REASONS text for these ("SGB/digital/physical gold don't
+// have a live public quote here"). Falling back to the real, liquid
+// GOLDBEES/SILVERBEES ETF price for exactly these unresolvable GOLD/SILVER
+// symbols is a genuine real-market reference, not a fabricated number — an
+// ETF tracking gold/silver is *designed* to move with the metal's spot
+// price, so this is a reasonable live-tracking proxy for a holding whose
+// own specific product has no independent live quote anywhere, the same
+// "real data where a resolvable source exists" spirit as everywhere else in
+// this file, just one level indirect. A holding that already resolves via
+// its own real symbol (an actual ETF pick) never reaches this fallback at
+// all — it's purely for the otherwise-unresolvable case.
+const GOLD_SILVER_PROXY_SYMBOL: Partial<Record<AssetClass, string>> = { GOLD: "GOLDBEES", SILVER: "SILVERBEES" };
+
+// For holdingValuationService.ts's daily currentValue refresh — a genuine
+// current price (currentValue = quantity × this), never a synthetic
+// stand-in. Unlike resolveHoldingReturns above (where an illustrative
+// synthetic assumption is a fine fallback for risk-math purposes), inventing
+// a price to write into a holding's actual currentValue would be presenting
+// a fabricated number as this user's real money — so an unresolvable
+// holding here returns null and is simply left untouched by the caller,
+// same as it is today (no worse off than before this job existed).
+export async function resolveHoldingLatestPrice(holding: LatestPriceInput): Promise<number | null> {
+  if (env.nodeEnv === "test") return null;
+
+  if (NSE_PRICEABLE_CLASSES.includes(holding.assetClass) && holding.symbol) {
+    const price = await fetchYahooLatestClose(`${holding.symbol}.NS`);
+    if (price != null) return price;
+  }
+  const proxySymbol = GOLD_SILVER_PROXY_SYMBOL[holding.assetClass];
+  if (proxySymbol) {
+    const price = await fetchYahooLatestClose(`${proxySymbol}.NS`);
+    if (price != null) return price;
+  }
+  if (holding.assetClass === "MUTUAL_FUND" && holding.symbol) {
+    const nav = await fetchMfApiLatestNav(holding.symbol);
+    if (nav != null) return nav;
+  }
+  if (holding.assetClass === "CRYPTO" && holding.coingeckoId) {
+    // Reuses instrumentDetailService.ts's fetchInstrumentDetail — the exact
+    // same CoinGecko INR lookup (vs_currency: "inr") that powers Ask
+    // DIVVE's own crypto detail card — rather than a second, duplicate
+    // CoinGecko integration. Its own 15-minute cache applies here too.
+    const detail = await fetchInstrumentDetail({ assetClass: "CRYPTO", symbol: holding.coingeckoId });
+    const priceInr = detail.fields?.currentPriceInr;
+    if (typeof priceInr === "number") return priceInr;
+  }
+
+  return null;
 }
