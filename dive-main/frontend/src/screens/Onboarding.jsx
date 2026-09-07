@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronRight, ChevronLeft, Loader2, Sparkles, Eye, Layers, Bot, Share2, Eye as EyeIcon, EyeOff } from "lucide-react";
+import { ChevronRight, ChevronLeft, Loader2, Eye, Layers, Bot, Share2, Eye as EyeIcon, EyeOff } from "lucide-react";
 import { useDive } from "../context/DiveContext";
 import { ScoreRing } from "../components/dive/Widgets";
 import ShareCard from "../components/dive/ShareCard";
@@ -33,7 +33,6 @@ function Splash({ setScreen }) {
           {/* Tilted 9° like Google's own wordmark "e", matching the header logo. */}
           <span className="inline-block" style={{ transform: "rotate(-9deg)" }}>e</span>
         </span>
-        <Sparkles size={18} className="text-[var(--dive-blue)]" />
       </div>
       <div className="flex-1 flex flex-col justify-center">
         <AnimatePresence mode="wait">

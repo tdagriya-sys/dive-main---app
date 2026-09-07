@@ -1,7 +1,7 @@
 import React from "react";
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
-import { X, Share2, Link2, Sparkles, Trophy } from "lucide-react";
+import { X, Share2, Link2, Trophy } from "lucide-react";
 import { toast } from "sonner";
 import { ScoreRing } from "./Widgets";
 import { scoreLabel } from "../../lib/diveEngine";
@@ -56,7 +56,6 @@ export default function ShareCard({ score, name, topPct, onClose }) {
           <div className="absolute -top-12 -right-12 w-44 h-44 rounded-full bg-[var(--dive-blue)]/10 blur-2xl" />
           <div className="flex items-center gap-2 mb-4 relative">
             <span className="font-heading font-extrabold text-lg text-gold-gradient">DIVVE</span>
-            <Sparkles size={16} className="text-[var(--dive-blue)]" />
           </div>
           <div className="flex items-center gap-5 relative">
             <div className="bg-black/40 rounded-full p-1 border border-[var(--dive-blue)]/20">

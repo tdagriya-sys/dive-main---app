@@ -1,6 +1,6 @@
 import React from "react";
 import { motion } from "framer-motion";
-import { Sparkles, ArrowRight, ShieldCheck, Users, TrendingUp, Layers, ChevronDown, Menu, X } from "lucide-react";
+import { ArrowRight, ShieldCheck, Users, TrendingUp, Layers, ChevronDown, Menu, X } from "lucide-react";
 import { useDive } from "../context/DiveContext";
 import { StatChip } from "./dive/FeatureMocks";
 import HeroScene from "./dive/HeroScene";
@@ -211,7 +211,6 @@ export default function LandingPage() {
               <span className="text-gold-gradient">Divv</span>
               <span className="text-gold-gradient inline-block" style={{ transform: "rotate(-9deg)" }}>e</span>
             </span>
-            <Sparkles size={18} className="text-[var(--dive-blue)]" />
           </button>
           <div className="flex items-center gap-3">
             <nav className="hidden md:flex items-center gap-1 mr-2">
@@ -373,7 +372,6 @@ export default function LandingPage() {
                   <span className="text-gold-gradient">Divv</span>
                   <span className="text-gold-gradient inline-block" style={{ transform: "rotate(-9deg)" }}>e</span>
                 </span>
-                <Sparkles size={16} className="text-[var(--dive-blue)]" />
               </button>
               <p className="text-sm text-[var(--text-secondary)] mt-4 max-w-xs leading-relaxed">
                 DIVVE looks through every investment you own to find the hidden risk your other apps can't see — one honest score, not a guess.

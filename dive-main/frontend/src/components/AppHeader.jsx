@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, Trophy, Search, Bell, User, LogOut, X, Download, LifeBuoy, Menu } from "lucide-react";
+import { Trophy, Search, Bell, User, LogOut, X, Download, LifeBuoy, Menu } from "lucide-react";
 import { useDive } from "../context/DiveContext";
 
 // Client-side only — this is a brand-new feature with nothing to persist yet
@@ -56,7 +56,6 @@ export default function AppHeader({ onOpenExtension, onOpenSupport, onOpenMobile
               <span className="text-gold-gradient">Divv</span>
               <span className="text-gold-gradient inline-block" style={{ transform: "rotate(-9deg)" }}>e</span>
             </span>
-            <Sparkles size={16} className="text-[var(--dive-blue)]" />
           </button>
         </div>
 

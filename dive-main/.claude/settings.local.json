@@ -376,7 +376,8 @@
       "Bash(cp src/screens/ManualEntry.jsx /tmp/ManualEntry.jsx.bak)",
       "Bash(sed -i 's/openingBalance: String\\(editingHolding.extraFields?.openingBalance ?? editingHolding.investedValue ?? \"\"\\),/openingBalance: String\\(editingHolding.investedValue ?? \"\"\\),/' src/screens/ManualEntry.jsx)",
       "Bash(cp \"/tmp/ManualEntry.jsx.bak\" \"D:/Dive/dive-main - app/dive-main/frontend/src/screens/ManualEntry.jsx\")",
-      "Bash(rm -f /tmp/ManualEntry.jsx.bak)"
+      "Bash(rm -f /tmp/ManualEntry.jsx.bak)",
+      "Bash(curl -s http://localhost:8000/api/health --max-time 3)"
     ]
   }
 }
