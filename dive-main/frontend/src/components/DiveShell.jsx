@@ -138,7 +138,7 @@ function MobileNavDrawer({ onClose, activeNav, onNavigate, onWalkthrough, onExte
         data-testid="mobile-nav-drawer"
       >
         <div className="flex items-center justify-between px-3 mb-8">
-          <span className="font-heading font-black text-xl">
+          <span className="font-heading font-black text-xl whitespace-nowrap">
             <span className="text-gold-gradient">Divv</span>
             <span className="text-gold-gradient inline-block" style={{ transform: "rotate(-9deg)" }}>e</span>
           </span>
@@ -273,7 +273,7 @@ export default function DiveShell() {
                 also carries. */}
             <div className="hidden md:flex md:flex-col md:w-56 md:shrink-0 md:h-full md:border-r md:border-[var(--border)] md:py-6 md:px-3" data-testid="sidebar-nav">
               <div className="flex items-center gap-2 px-3 mb-8">
-                <span className="font-heading font-black text-xl">
+                <span className="font-heading font-black text-xl whitespace-nowrap">
                   <span className="text-gold-gradient">Divv</span>
                   <span className="text-gold-gradient inline-block" style={{ transform: "rotate(-9deg)" }}>e</span>
                 </span>

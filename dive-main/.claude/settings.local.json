@@ -377,7 +377,10 @@
       "Bash(sed -i 's/openingBalance: String\\(editingHolding.extraFields?.openingBalance ?? editingHolding.investedValue ?? \"\"\\),/openingBalance: String\\(editingHolding.investedValue ?? \"\"\\),/' src/screens/ManualEntry.jsx)",
       "Bash(cp \"/tmp/ManualEntry.jsx.bak\" \"D:/Dive/dive-main - app/dive-main/frontend/src/screens/ManualEntry.jsx\")",
       "Bash(rm -f /tmp/ManualEntry.jsx.bak)",
-      "Bash(curl -s http://localhost:8000/api/health --max-time 3)"
+      "Bash(curl -s http://localhost:8000/api/health --max-time 3)",
+      "Bash(grep -iA1 \"warning\\\\|error\")",
+      "Bash(curl -s -o /dev/null -w \"backend: %{http_code}\\\\n\" http://localhost:8000/api/health --max-time 3)",
+      "Bash(curl -sf http://localhost:8000/api/health --max-time 2)"
     ]
   }
 }

@@ -206,8 +206,8 @@ export default function LandingPage() {
 
       <header className="sticky top-0 z-20 backdrop-blur-lg bg-[var(--wrapper-bg)]/80 border-b border-[var(--border-light)]">
         <div className="max-w-7xl mx-auto px-6 lg:px-10 py-5 flex items-center justify-between">
-          <button onClick={() => goToPage("home")} className="flex items-center gap-2" data-testid="landing-logo-btn">
-            <span className="font-heading font-black text-2xl">
+          <button onClick={() => goToPage("home")} className="flex items-center gap-2 shrink-0" data-testid="landing-logo-btn">
+            <span className="font-heading font-black text-2xl whitespace-nowrap">
               <span className="text-gold-gradient">Divv</span>
               <span className="text-gold-gradient inline-block" style={{ transform: "rotate(-9deg)" }}>e</span>
             </span>
@@ -368,7 +368,7 @@ export default function LandingPage() {
           <div className="grid gap-10 sm:grid-cols-[1.4fr_1fr_1fr]">
             <div>
               <button onClick={() => goToPage("home")} className="flex items-center gap-2">
-                <span className="font-heading font-black text-2xl">
+                <span className="font-heading font-black text-2xl whitespace-nowrap">
                   <span className="text-gold-gradient">Divv</span>
                   <span className="text-gold-gradient inline-block" style={{ transform: "rotate(-9deg)" }}>e</span>
                 </span>

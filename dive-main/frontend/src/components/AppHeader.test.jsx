@@ -109,19 +109,96 @@ describe("AppHeader", () => {
     await waitForElementToBeRemoved(() => screen.queryByTestId("notification-panel"));
   });
 
-  // Bug report: Get Extension and Your Journey were `hidden sm:flex` —
-  // invisible below 640px, i.e. on essentially every phone. They now render
-  // as bare icon buttons on mobile (matching search/notif/support/profile's
-  // own always-visible circle style) and grow into the full icon+label pill
-  // at `sm:` and up — never actually hidden at any width.
-  it("Get Extension and Your Journey are never hidden (icon-only below sm, icon+label at sm and up)", () => {
+  // Bug report: on a narrow phone, six inline header icons plus the wordmark
+  // overflow, and the wordmark wraps to "Divv" / "e". The five utility icons
+  // (Get Extension, Your Journey, Search, Notifications, Support) now
+  // collapse into a single quick-actions popover below md, leaving just it
+  // and Profile on mobile; at md:+ they're inline again. Each individual
+  // button carries a `hidden md:...` class AND is reachable through the
+  // popover.
+  it("the five utility icons are inline from md:+ and each carries a hidden-below-md class", () => {
     render(<AppHeader />);
-    const extensionBtn = screen.getByTestId("header-extension-btn");
-    const journeyBtn = screen.getByTestId("header-journey-btn");
-    expect(extensionBtn.className).not.toMatch(/(^|\s)hidden(\s|$)/);
-    expect(journeyBtn.className).not.toMatch(/(^|\s)hidden(\s|$)/);
-    expect(extensionBtn).toHaveTextContent("Get Extension");
-    expect(journeyBtn).toHaveTextContent("Your Journey");
+    ["header-extension-btn", "header-journey-btn", "header-search-btn", "header-support-btn"].forEach((id) => {
+      expect(screen.getByTestId(id).className).toMatch(/(^|\s)hidden md:/);
+    });
+    // header-notif-btn is wrapped in a positioning div that carries the class.
+    expect(screen.getByTestId("header-notif-btn").closest("div").className).toMatch(/(^|\s)hidden md:/);
+    // The wordmark can never wrap.
+    expect(screen.getByTestId("app-header-logo-btn").querySelector("span").className).toMatch(/whitespace-nowrap/);
+  });
+
+  it("the quick-actions popover (mobile-only) collapses the five utility icons and wires each to the same handler", async () => {
+    const u = userEvent.setup();
+    const onOpenExtension = jest.fn();
+    const onOpenSupport = jest.fn();
+    render(<AppHeader onOpenExtension={onOpenExtension} onOpenSupport={onOpenSupport} />);
+
+    const trigger = screen.getByTestId("header-quick-actions-btn");
+    expect(trigger.closest("div").className).toMatch(/(^|\s)md:hidden(\s|$)/); // md:hidden is on the positioning wrapper
+    expect(screen.queryByTestId("quick-actions-menu")).not.toBeInTheDocument();
+
+    await u.click(trigger);
+    expect(screen.getByTestId("quick-actions-menu")).toBeInTheDocument();
+    ["quick-action-extension", "quick-action-journey", "quick-action-search", "quick-action-notifications", "quick-action-support"].forEach((id) => {
+      expect(screen.getByTestId(id)).toBeInTheDocument();
+    });
+
+    await u.click(screen.getByTestId("quick-action-extension"));
+    expect(onOpenExtension).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("quick-actions-menu")).not.toBeInTheDocument(); // closes on selection (plain conditional render, no exit anim)
+  });
+
+  it("quick-actions rows route the same as their desktop icons — Journey/Search navigate, Notifications opens the panel, Support opens its card", async () => {
+    const u = userEvent.setup();
+    const onOpenSupport = jest.fn();
+    render(<AppHeader onOpenSupport={onOpenSupport} />);
+
+    await u.click(screen.getByTestId("header-quick-actions-btn"));
+    await u.click(screen.getByTestId("quick-action-journey"));
+    expect(setScreen).toHaveBeenCalledWith("insights");
+
+    await u.click(screen.getByTestId("header-quick-actions-btn"));
+    await u.click(screen.getByTestId("quick-action-search"));
+    expect(setScreen).toHaveBeenCalledWith("ask");
+
+    await u.click(screen.getByTestId("header-quick-actions-btn"));
+    await u.click(screen.getByTestId("quick-action-support"));
+    expect(onOpenSupport).toHaveBeenCalledTimes(1);
+
+    await u.click(screen.getByTestId("header-quick-actions-btn"));
+    await u.click(screen.getByTestId("quick-action-notifications"));
+    expect(screen.getByTestId("notification-panel")).toBeInTheDocument();
+  });
+
+  it("the unread dot also rides on the quick-actions trigger, and clears once notifications are opened from there", async () => {
+    const u = userEvent.setup();
+    render(<AppHeader />);
+    expect(screen.getByTestId("header-quick-actions-unread-dot")).toBeInTheDocument();
+
+    await u.click(screen.getByTestId("header-quick-actions-btn"));
+    await u.click(screen.getByTestId("quick-action-notifications"));
+    expect(screen.queryByTestId("header-quick-actions-unread-dot")).not.toBeInTheDocument();
+  });
+
+  it("opening the quick-actions popover closes an open profile dropdown or notification panel", async () => {
+    const u = userEvent.setup();
+    render(<AppHeader />);
+
+    await u.click(screen.getByTestId("header-profile-btn"));
+    expect(screen.getByTestId("profile-dropdown")).toBeInTheDocument();
+    await u.click(screen.getByTestId("header-quick-actions-btn"));
+    await waitForElementToBeRemoved(() => screen.queryByTestId("profile-dropdown"));
+    expect(screen.getByTestId("quick-actions-menu")).toBeInTheDocument();
+  });
+
+  it("closes the quick-actions popover on an outside click", async () => {
+    const u = userEvent.setup();
+    render(<AppHeader />);
+    await u.click(screen.getByTestId("header-quick-actions-btn"));
+    expect(screen.getByTestId("quick-actions-menu")).toBeInTheDocument();
+
+    await u.click(screen.getByTestId("quick-actions-backdrop"));
+    expect(screen.queryByTestId("quick-actions-menu")).not.toBeInTheDocument();
   });
 
   it("the hamburger button calls onOpenMobileNav, and is mobile-only (hidden at md and up)", async () => {

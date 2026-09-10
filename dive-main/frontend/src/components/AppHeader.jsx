@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Trophy, Search, Bell, User, LogOut, X, Download, LifeBuoy, Menu } from "lucide-react";
+import { Trophy, Search, Bell, User, LogOut, X, Download, LifeBuoy, Menu, LayoutGrid } from "lucide-react";
 import { useDive } from "../context/DiveContext";
 
 // Client-side only — this is a brand-new feature with nothing to persist yet
@@ -26,24 +26,35 @@ export default function AppHeader({ onOpenExtension, onOpenSupport, onOpenMobile
   const { user, setScreen, logout } = useDive();
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [quickOpen, setQuickOpen] = useState(false); // the mobile quick-actions popover
   const [notifications, setNotifications] = useState(DEFAULT_NOTIFICATIONS);
   const hasUnread = notifications.some((n) => n.unread);
 
+  // The three header popovers (notifications, profile, quick actions) are
+  // mutually exclusive — opening any one closes the other two.
   const openNotifications = () => {
     setProfileOpen(false);
+    setQuickOpen(false);
     setNotifOpen(true);
     setNotifications((list) => list.map((n) => ({ ...n, unread: false })));
   };
 
   const openProfile = () => {
     setNotifOpen(false);
+    setQuickOpen(false);
     setProfileOpen((v) => !v);
+  };
+
+  const openQuick = () => {
+    setNotifOpen(false);
+    setProfileOpen(false);
+    setQuickOpen((v) => !v);
   };
 
   return (
     <header className="relative z-30 shrink-0 border-b border-[var(--border)] px-4 md:px-6" data-testid="app-header">
-      <div className="h-16 flex items-center justify-between">
-        <div className="flex items-center gap-1">
+      <div className="h-16 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1 shrink-0">
           {/* Hamburger — mobile only, opens DiveShell's off-canvas nav drawer
               (the same links the desktop sidebar shows permanently). Takes no
               space at all at md:+, where the sidebar is already visible. */}
@@ -51,8 +62,13 @@ export default function AppHeader({ onOpenExtension, onOpenSupport, onOpenMobile
             className="md:hidden w-9 h-9 rounded-full flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-card-hover)] transition-colors">
             <Menu size={20} />
           </button>
-          <button onClick={() => setScreen("home")} className="flex items-center gap-2" data-testid="app-header-logo-btn">
-            <span className="font-heading font-black text-xl">
+          {/* `shrink-0` + `whitespace-nowrap` — the wordmark must never
+              compress or wrap ("Divv" / "e" on two lines); if the header
+              can't fit everything, the right-hand icons give way (they
+              already collapse into the quick-actions popover below md),
+              not the logo. */}
+          <button onClick={() => setScreen("home")} className="flex items-center gap-2 shrink-0" data-testid="app-header-logo-btn">
+            <span className="font-heading font-black text-xl whitespace-nowrap">
               <span className="text-gold-gradient">Divv</span>
               <span className="text-gold-gradient inline-block" style={{ transform: "rotate(-9deg)" }}>e</span>
             </span>
@@ -60,24 +76,48 @@ export default function AppHeader({ onOpenExtension, onOpenSupport, onOpenMobile
         </div>
 
         <div className="flex items-center gap-1 md:gap-2">
-          {/* Below `sm`, these collapse to the same bare icon-circle shape as
-              search/notifications/support/profile below (`w-9 h-9`, no
-              label) — visible everywhere now, not hidden below `sm` as
-              before, just too cramped for the full text pill until there's
-              more width to spare. */}
+          {/* Quick actions — mobile only. Six inline header icons plus the
+              wordmark don't fit on a narrow phone, and the wordmark is what
+              gave way (wrapping to "Divv" / "e"). This collapses the five
+              utility icons (Get Extension, Your Journey, Search,
+              Notifications, Support) behind one button — the way a launcher
+              grid collapses a row of apps — leaving just this and Profile
+              on mobile. At md:+ (sidebar visible, plenty of width) the five
+              are inline again and this is hidden. */}
+          <div className="relative md:hidden">
+            <button data-testid="header-quick-actions-btn" onClick={openQuick} aria-label="Quick actions"
+              className="relative w-9 h-9 rounded-full flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-card-hover)] transition-colors">
+              <LayoutGrid size={19} />
+              {hasUnread && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[var(--red)]" data-testid="header-quick-actions-unread-dot" />}
+            </button>
+            {quickOpen && (
+              <QuickActionsMenu
+                hasUnread={hasUnread}
+                onClose={() => setQuickOpen(false)}
+                onExtension={() => { setQuickOpen(false); onOpenExtension?.(); }}
+                onJourney={() => { setQuickOpen(false); setScreen("insights"); }}
+                onSearch={() => { setQuickOpen(false); setScreen("ask"); }}
+                onNotifications={() => { setQuickOpen(false); openNotifications(); }}
+                onSupport={() => { setQuickOpen(false); onOpenSupport?.(); }}
+              />
+            )}
+          </div>
+
+          {/* The five utility icons — inline from md:+, collapsed into the
+              quick-actions popover above below md. */}
           <button data-testid="header-extension-btn" onClick={onOpenExtension}
-            className="w-9 h-9 sm:w-auto sm:h-auto flex items-center justify-center gap-1.5 text-sm font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] sm:px-3 sm:py-2 rounded-full hover:bg-[var(--surface-card-hover)] transition-colors">
-            <Download size={16} className="text-[var(--dive-blue)] shrink-0" /> <span className="hidden sm:inline">Get Extension</span>
+            className="hidden md:flex items-center gap-1.5 text-sm font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] px-3 py-2 rounded-full hover:bg-[var(--surface-card-hover)] transition-colors">
+            <Download size={16} className="text-[var(--dive-blue)] shrink-0" /> Get Extension
           </button>
           <button data-testid="header-journey-btn" onClick={() => setScreen("insights")}
-            className="w-9 h-9 sm:w-auto sm:h-auto flex items-center justify-center gap-1.5 text-sm font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] sm:px-3 sm:py-2 rounded-full hover:bg-[var(--surface-card-hover)] transition-colors">
-            <Trophy size={16} className="text-[var(--dive-blue)] shrink-0" /> <span className="hidden sm:inline">Your Journey</span>
+            className="hidden md:flex items-center gap-1.5 text-sm font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] px-3 py-2 rounded-full hover:bg-[var(--surface-card-hover)] transition-colors">
+            <Trophy size={16} className="text-[var(--dive-blue)] shrink-0" /> Your Journey
           </button>
           <button data-testid="header-search-btn" onClick={() => setScreen("ask")}
-            className="w-9 h-9 rounded-full flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-card-hover)] transition-colors">
+            className="hidden md:flex w-9 h-9 rounded-full items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-card-hover)] transition-colors">
             <Search size={19} />
           </button>
-          <div className="relative">
+          <div className="relative hidden md:block">
             <button data-testid="header-notif-btn" onClick={openNotifications}
               className="relative w-9 h-9 rounded-full flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-card-hover)] transition-colors">
               <Bell size={19} />
@@ -85,9 +125,10 @@ export default function AppHeader({ onOpenExtension, onOpenSupport, onOpenMobile
             </button>
           </div>
           <button data-testid="header-support-btn" onClick={onOpenSupport}
-            className="w-9 h-9 rounded-full flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-card-hover)] transition-colors">
+            className="hidden md:flex w-9 h-9 rounded-full items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-card-hover)] transition-colors">
             <LifeBuoy size={19} />
           </button>
+          {/* Profile — always visible, mobile and desktop alike. */}
           <div className="relative">
             <button data-testid="header-profile-btn" onClick={openProfile}
               className="w-9 h-9 rounded-full bg-[var(--dive-blue-light)] flex items-center justify-center text-[var(--dive-blue)] hover:opacity-80 transition-opacity">
@@ -105,6 +146,52 @@ export default function AppHeader({ onOpenExtension, onOpenSupport, onOpenMobile
 
       <AnimatePresence>{notifOpen && <NotificationPanel notifications={notifications} onClose={() => setNotifOpen(false)} />}</AnimatePresence>
     </header>
+  );
+}
+
+// Mobile-only popover collapsing the five utility icons into one list —
+// same anchored-card + click-outside-catcher shape as ProfileDropdown
+// below, just a menu instead of a data panel. The unread-notification dot
+// rides on the trigger button (see header-quick-actions-unread-dot) so an
+// unread notification is still glanceable without opening this.
+//
+// Plain conditional render, no transition at all — exactly what this app's
+// landing-page mobile menu settled on, for the same reason. Framer-motion's
+// mount/exit auto-triggers are unreliable in this environment (see
+// usePortalEnter.js) — verified live here, the motion version froze at
+// opacity ~0.71 mid-exit — and even a pure-CSS `animate-in` was observed
+// still "running" long past its duration. A header dropdown that gets stuck
+// half-faded is worse than one that just appears; instant is fine for a
+// small menu.
+function QuickActionsMenu({ hasUnread, onClose, onExtension, onJourney, onSearch, onNotifications, onSupport }) {
+  const items = [
+    { Icon: Download, label: "Get Extension", onClick: onExtension, testId: "quick-action-extension" },
+    { Icon: Trophy, label: "Your Journey", onClick: onJourney, testId: "quick-action-journey" },
+    { Icon: Search, label: "Search", onClick: onSearch, testId: "quick-action-search" },
+    { Icon: Bell, label: "Notifications", onClick: onNotifications, testId: "quick-action-notifications", showDot: hasUnread },
+    { Icon: LifeBuoy, label: "Support", onClick: onSupport, testId: "quick-action-support" },
+  ];
+  return (
+    <>
+      {/* Same top-16 offset as ProfileDropdown/NotificationPanel — the
+          catcher starts below the header so it never swallows a tap meant
+          for another header button. */}
+      <div className="fixed top-16 inset-x-0 bottom-0 z-40" onClick={onClose} data-testid="quick-actions-backdrop" />
+      <div
+        className="absolute right-0 top-full mt-2 w-56 bg-[var(--surface-card)] rounded-2xl border border-[var(--border)] shadow-xl p-2 z-50"
+        data-testid="quick-actions-menu">
+        {items.map(({ Icon, label, onClick, testId, showDot }) => (
+          <button key={testId} data-testid={testId} onClick={onClick}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold text-left text-[var(--text-secondary)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-primary)] transition-colors">
+            <span className="relative shrink-0">
+              <Icon size={18} className="text-[var(--dive-blue)]" />
+              {showDot && <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-[var(--red)]" />}
+            </span>
+            {label}
+          </button>
+        ))}
+      </div>
+    </>
   );
 }
 

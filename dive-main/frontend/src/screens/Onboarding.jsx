@@ -28,7 +28,7 @@ function Splash({ setScreen }) {
   return (
     <div className="flex flex-col h-full px-7 py-10 dive-app-surface" data-testid="splash-screen">
       <div className="flex items-center gap-2">
-        <span className="font-heading font-black text-2xl text-[var(--dive-blue)]">
+        <span className="font-heading font-black text-2xl text-[var(--dive-blue)] whitespace-nowrap">
           Divv
           {/* Tilted 9° like Google's own wordmark "e", matching the header logo. */}
           <span className="inline-block" style={{ transform: "rotate(-9deg)" }}>e</span>
