@@ -380,7 +380,8 @@
       "Bash(curl -s http://localhost:8000/api/health --max-time 3)",
       "Bash(grep -iA1 \"warning\\\\|error\")",
       "Bash(curl -s -o /dev/null -w \"backend: %{http_code}\\\\n\" http://localhost:8000/api/health --max-time 3)",
-      "Bash(curl -sf http://localhost:8000/api/health --max-time 2)"
+      "Bash(curl -sf http://localhost:8000/api/health --max-time 2)",
+      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\(JSON.stringify\\(p.scripts,null,2\\)\\)\")"
     ]
   }
 }

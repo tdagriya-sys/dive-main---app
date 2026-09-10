@@ -130,9 +130,15 @@ function MobileNavDrawer({ onClose, activeNav, onNavigate, onWalkthrough, onExte
         onClick={handleClose}
         data-testid="mobile-nav-backdrop"
       />
+      {/* overflow-y-auto — same reason as the desktop sidebar: on a
+          landscape phone the drawer's own height can't fit every link plus
+          the four action buttons, so it must scroll rather than clip
+          "Log out" off the bottom. no-scrollbar also brings
+          overscroll-behavior: contain (index.css), so the scroll doesn't
+          chain to the page behind the drawer. */}
       <motion.div
         onClick={(e) => e.stopPropagation()}
-        className="absolute inset-y-0 left-0 h-full w-72 max-w-[80vw] bg-[var(--surface-card)] border-r border-[var(--border)] flex flex-col py-6 px-3"
+        className="absolute inset-y-0 left-0 h-full w-72 max-w-[80vw] bg-[var(--surface-card)] border-r border-[var(--border)] flex flex-col py-6 px-3 overflow-y-auto no-scrollbar"
         animate={{ x: entered ? 0 : "-100%" }}
         transition={{ type: "spring", stiffness: 340, damping: 32 }}
         data-testid="mobile-nav-drawer"
@@ -271,7 +277,14 @@ export default function DiveShell() {
                 App.js's h-dvh fix), and had room for nav items alone, not the
                 Walkthrough/Get Extension/Support/Log out actions this sidebar
                 also carries. */}
-            <div className="hidden md:flex md:flex-col md:w-56 md:shrink-0 md:h-full md:border-r md:border-[var(--border)] md:py-6 md:px-3" data-testid="sidebar-nav">
+            {/* `md:overflow-y-auto` — on a short viewport (a landscape
+                laptop/tablet, or a shrunk desktop window) the nav items plus
+                the Walkthrough/Get Extension/Support/Log out buttons below
+                them can exceed the column height; without this they'd be
+                clipped, unreachable. The `flex-1` on the nav (SidebarLinks)
+                still pins those bottom buttons to the bottom edge whenever
+                there IS enough room, so this only kicks in when it's needed. */}
+            <div className="hidden md:flex md:flex-col md:w-56 md:shrink-0 md:h-full md:overflow-y-auto no-scrollbar md:border-r md:border-[var(--border)] md:py-6 md:px-3" data-testid="sidebar-nav">
               <div className="flex items-center gap-2 px-3 mb-8">
                 <span className="font-heading font-black text-xl whitespace-nowrap">
                   <span className="text-gold-gradient">Divv</span>

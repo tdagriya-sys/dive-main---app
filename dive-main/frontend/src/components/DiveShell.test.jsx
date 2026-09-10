@@ -64,6 +64,19 @@ describe("DiveShell — responsive nav (Phase 3)", () => {
     expect(contentColumn.className).toContain("relative");
   });
 
+  // On a short viewport (landscape phone/tablet, shrunk desktop window) the
+  // nav items + the Walkthrough/Get Extension/Support/Log out buttons below
+  // them can exceed the column height — both the sidebar and the mobile
+  // drawer must scroll rather than clip "Log out" off the bottom.
+  it("the sidebar scrolls its own overflow instead of clipping the bottom action buttons", async () => {
+    useDive.mockReturnValue({ ...baseContext, screen: "home" });
+    const user = userEvent.setup();
+    render(<DiveShell />);
+    expect(screen.getByTestId("sidebar-nav").className).toMatch(/overflow-y-auto/);
+    await user.click(screen.getByTestId("header-menu-btn"));
+    expect(screen.getByTestId("mobile-nav-drawer").className).toMatch(/overflow-y-auto/);
+  });
+
   it("shows no sidebar on a full-screen flow (chooseMethod) or during onboarding (signup)", () => {
     useDive.mockReturnValue({ ...baseContext, screen: "chooseMethod" });
     const { rerender } = render(<DiveShell />);
