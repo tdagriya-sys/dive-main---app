@@ -611,7 +611,14 @@
       "Bash(sed -i 's/^  env.marketingEmailFrom = \"Divve Offers <offers@marketing.example.com>\";$/&\\\\n  env.marketingEmailReplyTo = \"\"; \\\\/\\\\/ a known value — never whatever the developer has in their real .env/' tests/externalListsApi.test.ts)",
       "Bash(node \"C:/Users/DAGRIY~1/AppData/Local/Temp/claude/D--Dive-dive-main---app-dive-main/bdc96a6a-bc3d-4f39-9b09-b028132f43d3/scratchpad/live9.js\")",
       "Bash(git rev-list *)",
-      "Bash(grep -v \"^\\\\s*$\")"
+      "Bash(grep -v \"^\\\\s*$\")",
+      "Bash(git ls-tree *)",
+      "Bash(xargs -I{} git ls-tree --name-only {})",
+      "Bash(git remote *)",
+      "Bash(node -e \"console.log\\(require\\('@sentry/react/package.json'\\).version, JSON.stringify\\(require\\('@sentry/react/package.json'\\).peerDependencies\\)\\)\")",
+      "Bash(grep -rn \"from \\\\\"\\\\.\\\\./lib\\\\|from \\\\\"\\\\.\\\\./\\\\.\\\\./lib\" src/components/*.jsx)",
+      "Bash(grep -vE \"^\\\\s*$\")",
+      "Bash(REACT_APP_SENTRY_DSN=\"https://examplekey@o0.ingest.sentry.io/0\" npm run build)"
     ]
   }
 }

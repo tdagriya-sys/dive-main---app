@@ -244,6 +244,7 @@ Your website's visual side needs to be told, once, exactly where its "brain" (th
    ```
    REACT_APP_BACKEND_URL=https://yourdomain.com
    ```
+   (Optional, to get browser error reports in Sentry: add a second line `REACT_APP_SENTRY_DSN=<your Sentry React project's DSN>` — see `ADMIN_PANEL_SETUP_GUIDE.md` §1.2. Leave it out and error reporting is simply off.)
 3. Save and exit: **Ctrl+O**, **Enter**, **Ctrl+X**.
 4. Install and build:
    ```

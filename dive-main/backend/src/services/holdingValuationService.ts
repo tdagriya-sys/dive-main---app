@@ -5,6 +5,7 @@ import { computeFdValues, computePfValues, FdHoldingInput, PfHoldingInput } from
 import { resolveHoldingLatestPrice, MARKET_PRICEABLE_CLASSES, LatestPriceInput } from "./priceHistoryService";
 import { invalidateDiveScoreCache } from "./diveScoreService";
 import { getPremiumUserIds } from "./entitlementService";
+import { logger } from "../lib/logger";
 
 /**
  * Keeps every holding's `currentValue` fresh on a daily cadence instead of
@@ -46,9 +47,27 @@ export interface ValuationRefreshSummary {
   marketPricedUpdated: number;
   distinctInstrumentsPriced: number;
   usersTouched: number;
+  // Holdings skipped because their recomputed value wasn't a real number
+  // (see isUsableValue) — left exactly as they were, and logged by id.
+  invalidSkipped: number;
 }
 
-interface FdPfHoldingLean {
+// A recomputed value is only safe to WRITE if it's a real, finite number. A
+// holding with a missing/garbled field (say an FD with no startMonth) makes
+// the compound-interest math come out NaN, and one NaN in a bulkWrite makes
+// Mongoose reject the ENTIRE batch — so a single bad holding used to stop
+// every other holding from being repriced, for everyone, and (because the
+// error escaped the job) the market-price pass never ran either. Such a
+// holding is skipped and logged instead; everything else still updates.
+function isUsableValue(n: unknown): n is number {
+  return typeof n === "number" && Number.isFinite(n);
+}
+
+function skipInvalidHolding(kind: string, h: { _id: unknown; userId: unknown }, values: Record<string, unknown>): void {
+  logger.warn({ holdingId: String(h._id), userId: String(h.userId), kind, values }, "[valuationRefresh] skipped a holding whose recomputed value isn't a real number — left unchanged; check its fields");
+}
+
+export interface FdPfHoldingLean {
   _id: unknown;
   userId: unknown;
   assetClass: "FD" | "PF";
@@ -57,67 +76,110 @@ interface FdPfHoldingLean {
   extraFields: Record<string, unknown>;
 }
 
-async function refreshFdPfValuations(touchedUserIds: Set<string>, premiumUserIds: Types.ObjectId[]): Promise<number> {
+// The ONE place an FD/PF holding's stored fields are turned back into inputs
+// for the compound-interest maths — used by the daily job below AND by
+// scripts/listBrokenFdPfHoldings.ts, so the audit can never disagree with what
+// the job would actually do.
+export function recomputeFdPfHolding(h: FdPfHoldingLean): { currentValue: number; investedToDate: number } {
+  if (h.assetClass === "FD") {
+    const input: FdHoldingInput = {
+      assetClass: "FD",
+      bank: h.extraFields.bank as string,
+      // extraFields.principal (the pure lump sum) first, falling back to
+      // investedValue only for an FD holding created before this field
+      // existed — see holdingsController.ts's own identical fallback
+      // comment for why that's safe (investedValue === principal exactly
+      // for every such holding, since monthlyContribution didn't exist
+      // yet to make them diverge).
+      principal: (h.extraFields.principal as number | undefined) ?? h.investedValue,
+      tenureMonths: h.extraFields.tenureMonths as number,
+      startMonth: h.extraFields.startMonth as number,
+      startYear: h.extraFields.startYear as number,
+      interestRate: h.extraFields.interestRate as number,
+      monthlyContribution: h.extraFields.monthlyContribution as number | undefined,
+    };
+    // maturityValue/maturityDate are constants of (start, tenureMonths,
+    // principal, monthlyContribution) alone — they never change with
+    // elapsed time the way currentValue/investedToDate do — so only those
+    // two are worth rewriting. investedToDate grows as monthlyContribution
+    // accrues (an RD-style FD) — must move alongside currentValue, or a
+    // growing contribution would silently read as "gain" (currentValue minus
+    // investedValue) it isn't; a no-op for a plain FD with no
+    // monthlyContribution (investedToDate stays exactly `principal`).
+    const { currentValue, investedToDate } = computeFdValues(input);
+    return { currentValue, investedToDate };
+  }
+  const input: PfHoldingInput = {
+    assetClass: "PF",
+    subType: h.extraFields.subType as PfHoldingInput["subType"],
+    institution: h.extraFields.institution as string,
+    openingBalance: h.extraFields.openingBalance as number,
+    monthlyContribution: h.extraFields.monthlyContribution as number,
+    startMonth: h.extraFields.startMonth as number,
+    startYear: h.extraFields.startYear as number,
+    interestRatePercent: h.extraFields.interestRatePercent as number,
+  };
+  // investedToDate grows as monthlyContribution accrues — must move
+  // alongside currentValue, or a growing contribution would silently read as
+  // "gain" (currentValue minus investedValue) it isn't. Same reasoning as
+  // computePfValues's own doc comment.
+  const { currentValue, investedToDate } = computePfValues(input);
+  return { currentValue, investedToDate };
+}
+
+// Whether a recomputed value can safely be written (see isUsableValue).
+export function isFdPfHoldingBroken(h: FdPfHoldingLean): boolean {
+  const { currentValue, investedToDate } = recomputeFdPfHolding(h);
+  return !isUsableValue(currentValue) || !isUsableValue(investedToDate);
+}
+
+// Which stored fields make the maths come out NaN — a human-readable hint for
+// whoever has to fix the record. (monthlyContribution is optional for both
+// types, so it's never listed.)
+export function fdPfFieldProblems(h: FdPfHoldingLean): string[] {
+  const fields: Array<[string, unknown]> =
+    h.assetClass === "FD"
+      ? [
+          ["principal", (h.extraFields.principal as number | undefined) ?? h.investedValue],
+          ["tenureMonths", h.extraFields.tenureMonths],
+          ["startMonth", h.extraFields.startMonth],
+          ["startYear", h.extraFields.startYear],
+          ["interestRate", h.extraFields.interestRate],
+        ]
+      : [
+          ["openingBalance", h.extraFields.openingBalance],
+          ["startMonth", h.extraFields.startMonth],
+          ["startYear", h.extraFields.startYear],
+          ["interestRatePercent", h.extraFields.interestRatePercent],
+        ];
+  const problems: string[] = [];
+  for (const [name, value] of fields) {
+    if (isUsableValue(value)) continue;
+    problems.push(value === undefined || value === null ? `${name} is missing` : `${name} is not a valid number (${JSON.stringify(value)})`);
+  }
+  return problems;
+}
+
+async function refreshFdPfValuations(touchedUserIds: Set<string>, premiumUserIds: Types.ObjectId[]): Promise<{ updated: number; skipped: number }> {
   const holdings = (await Holding.find({ assetClass: { $in: ["FD", "PF"] }, userId: { $in: premiumUserIds } }).lean()) as unknown as FdPfHoldingLean[];
   const ops: Array<{ updateOne: { filter: { _id: unknown }; update: { $set: Record<string, unknown> } } }> = [];
+  let skipped = 0;
 
   for (const h of holdings) {
-    if (h.assetClass === "FD") {
-      const input: FdHoldingInput = {
-        assetClass: "FD",
-        bank: h.extraFields.bank as string,
-        // extraFields.principal (the pure lump sum) first, falling back to
-        // investedValue only for an FD holding created before this field
-        // existed — see holdingsController.ts's own identical fallback
-        // comment for why that's safe (investedValue === principal exactly
-        // for every such holding, since monthlyContribution didn't exist
-        // yet to make them diverge).
-        principal: (h.extraFields.principal as number | undefined) ?? h.investedValue,
-        tenureMonths: h.extraFields.tenureMonths as number,
-        startMonth: h.extraFields.startMonth as number,
-        startYear: h.extraFields.startYear as number,
-        interestRate: h.extraFields.interestRate as number,
-        monthlyContribution: h.extraFields.monthlyContribution as number | undefined,
-      };
-      // maturityValue/maturityDate are constants of (start, tenureMonths,
-      // principal, monthlyContribution) alone — they never change with
-      // elapsed time the way currentValue/investedToDate do — so only those
-      // two are worth rewriting here. investedToDate grows as
-      // monthlyContribution accrues (an RD-style FD) — must move alongside
-      // currentValue, or a growing contribution would silently read as
-      // "gain" (currentValue minus investedValue) it isn't; same reasoning
-      // as the PF branch below, and a no-op for a plain FD with no
-      // monthlyContribution (investedToDate stays exactly `principal`).
-      const { currentValue, investedToDate } = computeFdValues(input);
-      if (currentValue !== h.currentValue || investedToDate !== h.investedValue) {
-        ops.push({ updateOne: { filter: { _id: h._id }, update: { $set: { currentValue, investedValue: investedToDate } } } });
-        touchedUserIds.add(String(h.userId));
-      }
-    } else {
-      const input: PfHoldingInput = {
-        assetClass: "PF",
-        subType: h.extraFields.subType as PfHoldingInput["subType"],
-        institution: h.extraFields.institution as string,
-        openingBalance: h.extraFields.openingBalance as number,
-        monthlyContribution: h.extraFields.monthlyContribution as number,
-        startMonth: h.extraFields.startMonth as number,
-        startYear: h.extraFields.startYear as number,
-        interestRatePercent: h.extraFields.interestRatePercent as number,
-      };
-      // investedToDate grows as monthlyContribution accrues — must move
-      // alongside currentValue, or a growing contribution would silently
-      // read as "gain" (currentValue minus investedValue) it isn't. Same
-      // reasoning as computePfValues's own doc comment.
-      const { currentValue, investedToDate } = computePfValues(input);
-      if (currentValue !== h.currentValue || investedToDate !== h.investedValue) {
-        ops.push({ updateOne: { filter: { _id: h._id }, update: { $set: { currentValue, investedValue: investedToDate } } } });
-        touchedUserIds.add(String(h.userId));
-      }
+    const { currentValue, investedToDate } = recomputeFdPfHolding(h);
+    if (!isUsableValue(currentValue) || !isUsableValue(investedToDate)) {
+      skipInvalidHolding(h.assetClass, h, { currentValue, investedToDate, problems: fdPfFieldProblems(h) });
+      skipped += 1;
+      continue;
+    }
+    if (currentValue !== h.currentValue || investedToDate !== h.investedValue) {
+      ops.push({ updateOne: { filter: { _id: h._id }, update: { $set: { currentValue, investedValue: investedToDate } } } });
+      touchedUserIds.add(String(h.userId));
     }
   }
 
   if (ops.length) await Holding.bulkWrite(ops);
-  return ops.length;
+  return { updated: ops.length, skipped };
 }
 
 interface MarketPricedHoldingLean {
@@ -140,7 +202,7 @@ async function refreshMarketPricedValuations(
   touchedUserIds: Set<string>,
   priceResolver: (input: LatestPriceInput) => Promise<number | null>,
   premiumUserIds: Types.ObjectId[]
-): Promise<{ updated: number; distinctInstruments: number }> {
+): Promise<{ updated: number; distinctInstruments: number; skipped: number }> {
   const holdings = (await Holding.find({
     assetClass: { $in: MARKET_PRICEABLE_CLASSES },
     instrumentId: { $ne: null },
@@ -174,6 +236,7 @@ async function refreshMarketPricedValuations(
   }
 
   const ops: Array<{ updateOne: { filter: { _id: unknown }; update: { $set: Record<string, unknown> } } }> = [];
+  let skipped = 0;
   // Sequential, not parallel — same known, accepted tradeoff as
   // diveScoreService.ts's own per-holding price fetches (see
   // docs/PRODUCTION_READINESS_AUDIT.md #30): simplest correct thing at
@@ -185,6 +248,11 @@ async function refreshMarketPricedValuations(
     if (price == null) continue; // unresolvable today — every holding in this group is left exactly as it was
     for (const h of group.holdings) {
       const newValue = Math.round(price * h.quantity);
+      if (!isUsableValue(newValue)) {
+        skipInvalidHolding(group.assetClass, { _id: h._id, userId: h.userId }, { price, quantity: h.quantity, newValue });
+        skipped += 1;
+        continue;
+      }
       if (newValue !== h.currentValue) {
         ops.push({ updateOne: { filter: { _id: h._id }, update: { $set: { currentValue: newValue } } } });
         touchedUserIds.add(String(h.userId));
@@ -193,7 +261,7 @@ async function refreshMarketPricedValuations(
   }
 
   if (ops.length) await Holding.bulkWrite(ops);
-  return { updated: ops.length, distinctInstruments: groups.size };
+  return { updated: ops.length, distinctInstruments: groups.size, skipped };
 }
 
 async function runDailyValuationRefreshInternal(
@@ -207,12 +275,12 @@ async function runDailyValuationRefreshInternal(
   // entitlementService.ts's own comment on getPremiumUserIds.
   const premiumUserIds = await getPremiumUserIds();
   const touchedUserIds = new Set<string>();
-  const fdPfUpdated = await refreshFdPfValuations(touchedUserIds, premiumUserIds);
-  const { updated: marketPricedUpdated, distinctInstruments } = await refreshMarketPricedValuations(touchedUserIds, priceResolver, premiumUserIds);
+  const { updated: fdPfUpdated, skipped: fdPfSkipped } = await refreshFdPfValuations(touchedUserIds, premiumUserIds);
+  const { updated: marketPricedUpdated, distinctInstruments, skipped: marketSkipped } = await refreshMarketPricedValuations(touchedUserIds, priceResolver, premiumUserIds);
 
   for (const userId of touchedUserIds) invalidateDiveScoreCache(userId);
 
-  return { fdPfUpdated, marketPricedUpdated, distinctInstrumentsPriced: distinctInstruments, usersTouched: touchedUserIds.size };
+  return { fdPfUpdated, marketPricedUpdated, distinctInstrumentsPriced: distinctInstruments, usersTouched: touchedUserIds.size, invalidSkipped: fdPfSkipped + marketSkipped };
 }
 
 // In-flight dedup — same reasoning/shape as instrumentService.ts's

@@ -13,7 +13,9 @@
     "job:refresh-instruments": "tsx src/jobs/instrumentRefresh.cron.ts --once",
     "create-superadmin": "tsx src/scripts/createSuperadmin.ts",
     "migrate-contact-submissions": "tsx src/scripts/migrateContactSubmissions.ts",
-    "backfill-activity-first-touch": "tsx src/scripts/backfillActivityFirstTouch.ts"
+    "backfill-activity-first-touch": "tsx src/scripts/backfillActivityFirstTouch.ts",
+    "audit-fd-pf-holdings": "tsx src/scripts/listBrokenFdPfHoldings.ts",
+    "inspect-subscription": "tsx src/scripts/inspectSubscription.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",

@@ -1,5 +1,6 @@
 import React from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
+import { captureError } from "../lib/monitoring";
 
 /*
  * A render-time error anywhere below this boundary (a malformed API payload,
@@ -26,11 +27,11 @@ export default class ErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, info) {
-    // No error-tracking service (Sentry/APM) is wired up in this app yet
-    // (docs/PRODUCTION_READINESS_AUDIT.md P3 #24) — this console.error is the
-    // one place that call would go once one exists.
     // eslint-disable-next-line no-console
     console.error("[ErrorBoundary] caught a render error:", error, info?.componentStack);
+    // Reported to Sentry when REACT_APP_SENTRY_DSN is configured (lib/
+    // monitoring.js) — a no-op otherwise.
+    captureError(error, { componentStack: info?.componentStack, boundary: this.props.variant || "app" });
   }
 
   handleRetry = () => {

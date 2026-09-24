@@ -85,15 +85,41 @@ REDIS_URL=redis://:<password>@127.0.0.1:6379
 
 ### 1.2 Error tracking (Sentry) 🟡
 
-Backend only — `SENTRY_DSN` is real, wired in `backend/src/lib/sentry.ts` and initialized in
-`index.ts`. The frontend has **no Sentry integration at all** (see `ErrorBoundary.jsx`'s own
-comment); there is nothing to add on the frontend side, so don't set a `REACT_APP_SENTRY_DSN` —
-it would be read by nothing.
+Two independent switches — each is fully **off** until you give it a DSN:
 
-- Create a free Sentry project (Node).
-- Add to `backend/.env`: `SENTRY_DSN=...`
+- **Backend** (server errors): `SENTRY_DSN`, wired in `backend/src/lib/sentry.ts`.
+- **Frontend** (errors in your users' browsers): `REACT_APP_SENTRY_DSN`, wired in
+  `frontend/src/lib/monitoring.js`. Until now a crash in someone's browser only showed *them*
+  the "Something went wrong" screen and nobody on your side ever knew; with this on, the error
+  (with the React component stack) is reported to you.
 
-☐ Sentry project created · ☐ `SENTRY_DSN` set on the backend
+Steps:
+1. In Sentry create **two projects** — one "Node" (backend), one "React" (frontend). Each gives a DSN.
+2. Backend: add `SENTRY_DSN=...` to `backend/.env`, then `pm2 restart divve-backend`.
+3. Frontend: add `REACT_APP_SENTRY_DSN=...` to `frontend/.env.production` and **rebuild**
+   (`npm run build`) — it is baked into the build, not read at runtime, so editing the file alone
+   does nothing. Optionally also `REACT_APP_RELEASE=<date or git hash>` to label which deploy an
+   error came from.
+
+What the frontend reports — and what it deliberately doesn't:
+- **Reported:** the error, where in the code it happened, the React component stack, and the page
+  path. It also catches errors that never reach the error screen (crashes in event handlers,
+  unhandled promise rejections). Noise from browser extensions and harmless "ResizeObserver"
+  warnings is ignored.
+- **Never sent:** the URL's query string or #fragment (a reset-password link can carry a token
+  there), cookies, request headers, the user's IP address, or any user id/email. No performance
+  tracing and no session replay (a replay would record what's on screen — holdings, balances).
+- A DSN is *meant* to be public (it can only send events, not read them), so it appearing in the
+  built JavaScript is normal.
+- Cost: Sentry loads as a separate ~119 kB (gzipped) file **after** the page has loaded, and only
+  when a DSN was set at build time — with no DSN it is never requested. The main bundle grew by
+  under 1 kB.
+
+To confirm it works after deploying: open your site, then in the browser console run
+`setTimeout(() => { throw new Error("sentry frontend test") })` — the error should appear in the
+React project in Sentry within a minute.
+
+☐ Two Sentry projects created · ☐ `SENTRY_DSN` set + backend restarted · ☐ `REACT_APP_SENTRY_DSN` set in `.env.production` + frontend rebuilt · ☐ Test error seen in Sentry
 
 ### 1.3 New environment variables (Phase 0) 🔴
 
@@ -610,6 +636,16 @@ specific redemption at subscribe time — the customer is actually billed the di
 amount every cycle for as long as that subscription lives, not just the first charge.
 Nothing to configure before use; create your first coupon directly in the admin UI.
 
+**"First charge only" vs "every renewal".** Each coupon has a *duration*: `recurring` (the discount applies to every renewal, for the life of the subscription) or `once` (only the first charge is discounted, then it returns to the normal price). How `once` works: checkout uses a special discounted Razorpay plan, so **Razorpay's checkout / your UPI or card autopay screen will show the discounted amount (e.g. ₹1.19) — that is expected**. Only *after the first charge succeeds* does the app ask Razorpay to switch the subscription to the normal plan from the next cycle. So the autopay showing the discounted amount right after paying is not by itself a fault; what matters is whether that switch was scheduled.
+
+To check a real subscription (read-only — changes nothing, in the database or at Razorpay):
+
+```
+cd ~/divve/dive-main/backend && npm run inspect-subscription -- --email the-users-email@example.com
+```
+
+It prints what the app recorded, what Razorpay itself says (current plan amount, next charge date, any scheduled plan change), and a plain verdict: ✅ the switch to full price is scheduled, or ❌ Razorpay has no scheduled switch and will keep charging the discounted amount. If it's ❌, search the log for the cause: `pm2 logs divve-backend --lines 500 --nostream | grep "failed to revert one-time-coupon"`. **Always test a new coupon with a throwaway account, and cancel the test subscription afterwards** — on the live site it's a real mandate that really charges.
+
 ☐ First real coupon reviewed before sharing a code publicly (redemption cap set
 appropriately — an unlimited coupon has no ceiling on total discount given away)
 
@@ -683,6 +719,7 @@ backend (see `SERVER_DEPLOYMENT_GUIDE.md`). Additions for this work:
 | Phase 6b | Set `GST_SELLER_GSTIN`/`GST_SELLER_NAME`/`GST_SELLER_STATE` in the production `.env` before accepting real payments (§8.1) — invoices generate as "provisional" without a real GSTIN. Review `DUNNING_GRACE_DAYS` if 7 days doesn't match your policy. Watch the new `dunning` cron (7am IST) in `/admin` → System for the first week. |
 | Phase 7 | No new env vars or infra. Decide who gets the `feature_flags.manage`, `system.manage`, and `users.impersonate` permissions before granting roles — maintenance mode and impersonation are both real, if reversible, levers. Write down your DPDP export/delete response-time policy (§9) — the queue is ready, the policy is yours to set. |
 | Post-Phase-7 gap sweep | **Run `npm run backfill-activity-first-touch` once, as soon as possible after this deploy.** `ActivityFirstTouch` (the permanent per-user first-touch marker the admin Analytics funnel now reads instead of raw `ActivityEvent`) is a brand-new collection — without this backfill, the funnel will read near-zero right after deploy until fresh activity slowly repopulates it on its own. The backfill is a best-effort snapshot of whatever raw `ActivityEvent` history is still within its 180-day TTL at the moment it runs, so the sooner it runs after deploy, the less real history has already aged out. Safe to re-run (idempotent). Also confirm the new `activityRollup` cron (7:30am IST) appears in `/admin` → System after its first run. |
+| Daily valuation job | A malformed FD/PF holding (e.g. an FD with no start month) is skipped and logged (`skipped a holding whose recomputed value…`) instead of stopping everyone's repricing. To list them: `cd backend && npm run audit-fd-pf-holdings` (read-only; add `-- --json` for JSON). It names the user, the holding, and the missing field. Fix = the user re-saves the holding in their own Holdings screen, or delete it if junk. Worth running once after go-live, then whenever the System page's valuation job stats show `invalidSkipped` above 0. |
 | Every phase | `npm run build` (frontend + backend), restart PM2, smoke-test `/admin` login + TOTP, check Sentry for new errors. |
 
 ---
@@ -695,7 +732,9 @@ REDIS_URL=redis://localhost:6379
 STAFF_ACCESS_TTL=10m
 TOTP_ISSUER=Divve Admin
 ADMIN_IP_ALLOWLIST=
-SENTRY_DSN=                          # backend only — there is no frontend Sentry wiring, don't set REACT_APP_SENTRY_DSN
+SENTRY_DSN=                          # backend errors
+# (frontend, in frontend/.env.production — baked in at build time)
+# REACT_APP_SENTRY_DSN=                # browser errors; optional REACT_APP_RELEASE=<label>
 ACTIVITY_EVENT_RETENTION_DAYS=180
 EDIT_SESSION_WINDOW_MIN=20
 
@@ -731,7 +770,7 @@ RENEWAL_REMINDER_DAYS_BEFORE=7,3,0   # comma-separated days-before-renewal remin
 
 - [ ] §0 — Dev DB isolated from production `dive`
 - [ ] §1.1 — Redis (dev + prod)
-- [ ] §1.2 — Sentry
+- [ ] §1.2 — Sentry (backend `SENTRY_DSN` and frontend `REACT_APP_SENTRY_DSN`, frontend rebuilt)
 - [ ] §1.3 — Phase 0 env vars
 - [ ] §1.4 — First superadmin bootstrapped
 - [ ] §1.5 — TOTP enrolled + recovery codes saved

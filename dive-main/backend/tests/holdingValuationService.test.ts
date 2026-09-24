@@ -7,6 +7,7 @@ import { Subscription } from "../src/models/Subscription";
 import { runDailyValuationRefresh } from "../src/services/holdingValuationService";
 import { computeFdValues, computePfValues } from "../src/validators/holdings";
 import { seedDefaultSubscriptionPlansIfEmpty } from "../src/services/entitlementService";
+import { logger } from "../src/lib/logger";
 
 const app = createApp();
 
@@ -349,5 +350,105 @@ describe("holdingValuationService — Premium-only gating", () => {
 
     expect((await Holding.findById(premiumHolding.body.holding._id).lean())?.currentValue).not.toBe(1);
     expect((await Holding.findById(freemiumHolding.body.holding._id).lean())?.currentValue).toBe(1);
+  });
+});
+
+// A holding whose recomputed value isn't a real number (a missing/garbled
+// field makes the compound-interest math NaN) used to make Mongoose reject the
+// WHOLE bulkWrite — so one bad holding stopped every other holding being
+// repriced for everyone, and (the error escaping the job) the market-price
+// pass never ran either. It must now be skipped, logged, and left as it was.
+describe("holdingValuationService — one bad holding never blocks the rest", () => {
+  const thisYear = new Date().getFullYear();
+
+  async function makeFd(token: string, bank: string) {
+    const create = await request(app)
+      .post("/api/holdings/manual")
+      .set(auth(token))
+      .send({ assetClass: "FD", bank, principal: 100000, tenureMonths: 24, startMonth: 1, startYear: thisYear - 1, interestRate: 7 });
+    return { id: create.body.holding._id as string, correctValue: create.body.holding.currentValue as number };
+  }
+
+  it("FD: a holding with a missing start month is skipped and logged, and the healthy holdings around it are still corrected", async () => {
+    const { token } = await signupAndLogin();
+    const healthy = await makeFd(token, "Healthy Bank");
+    const broken = await makeFd(token, "Broken Bank");
+    await Holding.updateMany({ _id: { $in: [healthy.id, broken.id] } }, { $set: { currentValue: 1 } });
+    await Holding.updateOne({ _id: broken.id }, { $unset: { "extraFields.startMonth": 1 } });
+    const warn = jest.spyOn(logger, "warn");
+
+    const summary = await runDailyValuationRefresh(); // used to throw a Mongoose cast error
+
+    expect((await Holding.findById(healthy.id).lean())?.currentValue).toBe(healthy.correctValue);
+    expect((await Holding.findById(broken.id).lean())?.currentValue).toBe(1); // left exactly as it was
+    expect(summary.invalidSkipped).toBe(1);
+    expect(summary.fdPfUpdated).toBe(1);
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ holdingId: broken.id, kind: "FD" }), expect.stringContaining("skipped a holding"));
+    warn.mockRestore();
+  });
+
+  it("PF: same — a holding with a missing start year is skipped, the healthy one is corrected", async () => {
+    const { token } = await signupAndLogin();
+    const make = async (institution: string) => {
+      const create = await request(app)
+        .post("/api/holdings/manual")
+        .set(auth(token))
+        .send({ assetClass: "PF", subType: "EPF", institution, openingBalance: 150000, monthlyContribution: 5000, startMonth: 1, startYear: thisYear - 1, interestRatePercent: 8.25 });
+      return { id: create.body.holding._id as string, correctValue: create.body.holding.currentValue as number };
+    };
+    const healthy = await make("Healthy EPFO");
+    const broken = await make("Broken EPFO");
+    await Holding.updateMany({ _id: { $in: [healthy.id, broken.id] } }, { $set: { currentValue: 1 } });
+    await Holding.updateOne({ _id: broken.id }, { $unset: { "extraFields.startYear": 1 } });
+
+    const summary = await runDailyValuationRefresh();
+
+    expect((await Holding.findById(healthy.id).lean())?.currentValue).toBe(healthy.correctValue);
+    expect((await Holding.findById(broken.id).lean())?.currentValue).toBe(1);
+    expect(summary.invalidSkipped).toBe(1);
+  });
+
+  it("a bad FD/PF holding no longer stops the market-price pass from running", async () => {
+    const { token } = await signupAndLogin();
+    const broken = await makeFd(token, "Broken Bank");
+    await Holding.updateOne({ _id: broken.id }, { $set: { currentValue: 1 }, $unset: { "extraFields.startMonth": 1 } });
+    const instrument = await Instrument.create({ assetClass: "EQUITY", symbol: "SURVIVOR", name: "Survivor Ltd", isActive: true, source: "SEED" });
+    const equity = await request(app)
+      .post("/api/holdings/manual")
+      .set(auth(token))
+      .send({ assetClass: "EQUITY", instrumentId: String(instrument._id), name: "Survivor Ltd", investedValue: 10000, currentValue: 10000, quantity: 10 });
+
+    const summary = await runDailyValuationRefresh(jest.fn().mockResolvedValue(200));
+
+    expect((await Holding.findById(equity.body.holding._id).lean())?.currentValue).toBe(2000); // 10 × 200
+    expect(summary.marketPricedUpdated).toBe(1);
+    expect(summary.invalidSkipped).toBe(1);
+  });
+
+  it("market-priced: a price that comes back NaN skips just that instrument's holdings — another instrument is still repriced", async () => {
+    const { token } = await signupAndLogin();
+    const good = await Instrument.create({ assetClass: "EQUITY", symbol: "GOODCO", name: "Good Co", isActive: true, source: "SEED" });
+    const bad = await Instrument.create({ assetClass: "EQUITY", symbol: "BADCO", name: "Bad Co", isActive: true, source: "SEED" });
+    const mk = async (instrument: { _id: unknown }, name: string) =>
+      (await request(app).post("/api/holdings/manual").set(auth(token)).send({ assetClass: "EQUITY", instrumentId: String(instrument._id), name, investedValue: 10000, currentValue: 10000, quantity: 10 })).body.holding._id as string;
+    const goodId = await mk(good, "Good Co");
+    const badId = await mk(bad, "Bad Co");
+    const resolver = jest.fn().mockImplementation(async ({ symbol }: { symbol?: string }) => (symbol === "BADCO" ? NaN : 300));
+
+    const summary = await runDailyValuationRefresh(resolver);
+
+    expect((await Holding.findById(goodId).lean())?.currentValue).toBe(3000);
+    expect((await Holding.findById(badId).lean())?.currentValue).toBe(10000); // untouched
+    expect(summary.marketPricedUpdated).toBe(1);
+    expect(summary.invalidSkipped).toBe(1);
+  });
+
+  it("a normal run reports nothing skipped", async () => {
+    const { token } = await signupAndLogin();
+    const fd = await makeFd(token, "Fine Bank");
+    await Holding.updateOne({ _id: fd.id }, { $set: { currentValue: 1 } });
+    const summary = await runDailyValuationRefresh();
+    expect(summary.invalidSkipped).toBe(0);
+    expect(summary.fdPfUpdated).toBe(1);
   });
 });
