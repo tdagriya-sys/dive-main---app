@@ -12,5 +12,8 @@ router.patch("/me/planner", requireAuth, asyncHandler(userController.updatePlann
 router.patch("/me/walkthrough", requireAuth, asyncHandler(userController.markWalkthroughSeen));
 router.patch("/me/password", requireAuth, authLimiter, asyncHandler(userController.changePassword));
 router.delete("/me", requireAuth, asyncHandler(userController.deleteMe));
+// DPDP data-EXPORT request only — deletion stays the existing DELETE /me
+// above (always instant, self-serve); this queues for staff review instead.
+router.post("/me/data-export-request", requireAuth, asyncHandler(userController.requestDataExport));
 
 export default router;

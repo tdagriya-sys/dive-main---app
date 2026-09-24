@@ -228,3 +228,16 @@ describe("BotScan — market data coverage notice", () => {
     expect(screen.getByTestId("market-data-notice")).toHaveTextContent(/limited access to market data/i);
   });
 });
+
+// docs/ADMIN_PANEL_PLAN.md §7 — proactive Freemium quota surfacing.
+describe("BotScan — usage quota note", () => {
+  it("shows the bot_scan quota for a Freemium user", () => {
+    useDive.mockReturnValue({
+      setScreen: jest.fn(), goBack: jest.fn(), loadHoldings: jest.fn().mockResolvedValue([]),
+      holdings: [], user: { id: "u1", name: "Test", age: 30 },
+      entitlements: { isPremium: false, entitlements: { botScanWeekly: 1, botScanMonthly: 3 }, usage: { bot_scan: { weekly: 1, monthly: 1 } } },
+    });
+    render(<BotScan />);
+    expect(screen.getByTestId("usage-quota-note-bot_scan")).toHaveTextContent(/used all your free Bot Scan/i);
+  });
+});

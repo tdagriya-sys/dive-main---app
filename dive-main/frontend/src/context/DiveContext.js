@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
-import { api, setAccessToken, setSessionExpiredHandler } from "../lib/api";
-import { adaptHolding, IDEAL_RANGES } from "../lib/diveEngine";
+import { api, setAccessToken, setSessionExpiredHandler, setPlanLimitHandler } from "../lib/api";
+import { adaptHolding, IDEAL_RANGES, applyRemoteSuggestionConfig } from "../lib/diveEngine";
+import { captureDeepLink, screenAfterLogin, screenWhenLoggedOut } from "../lib/deepLink";
 
 const DiveContext = createContext(null);
 export const useDive = () => useContext(DiveContext);
@@ -43,8 +44,31 @@ export function DiveProvider({ children }) {
   const goBack = useCallback(() => {
     setScreenState(() => screenHistoryRef.current.pop() ?? "home");
   }, []);
+
+  // Closes whichever portfolio_edit/bot_scan "edit sessions" happen to be
+  // open (usageService.ts::enforceEditSessionUsage) the moment the user
+  // reaches Home — the signal the product wants for "one successful
+  // portfolio update = one consumed limit," regardless of how many
+  // individual mutations led up to it or which screens were visited along
+  // the way (Manage Holdings -> Add Investments -> Home is one trip, one
+  // unit; Add Investments -> Planner -> Home still counts, since this fires
+  // on ARRIVING at Home, not on leaving the edit screen). Best-effort and a
+  // no-op when nothing was open — the backend's own TTL is the real
+  // fallback if this never fires. Deliberately keyed on `screen` alone
+  // (every route back to Home already funnels through setScreen("home")),
+  // not screen-specific wiring in each edit flow.
+  useEffect(() => {
+    if (screen !== "home") return;
+    Promise.resolve(api.post("/usage/close-edit-sessions")).catch(() => undefined);
+  }, [screen]);
   const [authLoading, setAuthLoading] = useState(true);
   const [user, setUser] = useState(null);
+  // Read-only impersonation (Phase 7 of docs/ADMIN_PANEL_PLAN.md §5.1/§8) —
+  // set only when this tab's session came from admin/screens/UserDetail.jsx's
+  // "View as this user" action (sessionStorage.divve_impersonation), never
+  // from a normal login. The backend itself is what actually blocks writes
+  // (middleware/auth.ts's requireAuth) — this flag is purely for the banner.
+  const [isImpersonating, setIsImpersonating] = useState(false);
   // Guided tour (components/Walkthrough.jsx) — open/close state lives here,
   // not locally in whichever component happens to render it, because three
   // independent places need to read or set it: DiveShell.jsx (auto-opens it
@@ -167,13 +191,75 @@ export function DiveProvider({ children }) {
     }
   }, [loadScoreBreakdown]);
 
-  // On mount: try to restore a session from the httpOnly refresh cookie.
+  // On mount: pick up whatever Suggestion methodology config an admin has
+  // published (docs/ADMIN_PANEL_PLAN.md Phase 2) — public, no auth needed,
+  // independent of the session-restore effect below. Best-effort: on
+  // failure (or before this resolves), diveEngine.js's bundled literal
+  // constants stand in unchanged, exactly as if nothing had ever been
+  // published. Mutates diveEngine.js's exports directly rather than storing
+  // the result in React state — nothing here needs a re-render, just the
+  // next natural read of those constants to see the new values.
   useEffect(() => {
     (async () => {
       try {
-        const { data } = await api.post("/auth/refresh");
+        const { data } = await api.get("/score/config");
+        applyRemoteSuggestionConfig(data.suggestion);
+      } catch (e) {
+        // Stay on the bundled defaults — see the comment above.
+      }
+    })();
+  }, []);
+
+  // On mount: an impersonation hand-off (sessionStorage, set by
+  // admin/screens/UserDetail.jsx just before opening this tab) always wins
+  // over the normal cookie-based restore below — there is no refresh cookie
+  // for this session at all, by design; it just expires naturally after 30
+  // minutes (lib/api.js's own refresh attempt on that eventual 401 fails
+  // with no cookie to use, which correctly falls through to the existing
+  // "session expired" handling below).
+  function tryRestoreImpersonation() {
+    try {
+      const raw = sessionStorage.getItem("divve_impersonation");
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed?.accessToken || !parsed?.user || new Date(parsed.expiresAt).getTime() <= Date.now()) {
+        sessionStorage.removeItem("divve_impersonation");
+        return null;
+      }
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  // Guards against React StrictMode's deliberate double-invoke of this effect
+  // in development (mount -> cleanup -> mount again). Without this, TWO
+  // concurrent POST /auth/refresh calls go out sharing the SAME refresh
+  // cookie — the backend's single-use rotation treats the second one
+  // presenting an already-consumed token as theft and revokes every live
+  // token for the account (see authController.ts's refresh()). The first
+  // call still wins and this page load renders logged in, so nothing looks
+  // wrong yet — it's the refresh cookie's replacement that's silently dead,
+  // which only surfaces as a hard logout on the NEXT reload. Mirrors the
+  // identical guard already in admin/AdminAuthContext.jsx (restoreAttemptedRef)
+  // — confirmed live here too: reload right after login looked fine, the very
+  // next reload landed back on splash, logged out.
+  const restoreAttemptedRef = useRef(false);
+
+  // On mount: try to restore a session from the httpOnly refresh cookie.
+  useEffect(() => {
+    if (restoreAttemptedRef.current) return;
+    restoreAttemptedRef.current = true;
+    // A notification/email/pop-up link like `/?go=login` — captured before
+    // anything else so it survives the async session check below.
+    captureDeepLink();
+    (async () => {
+      const impersonation = tryRestoreImpersonation();
+      try {
+        const data = impersonation ? { accessToken: impersonation.accessToken, user: impersonation.user } : (await api.post("/auth/refresh")).data;
         setAccessToken(data.accessToken);
         setUser(data.user);
+        setIsImpersonating(Boolean(impersonation));
         setPrefs((p) => ({
           ...p,
           ...(data.user.preferences || {}),
@@ -194,14 +280,18 @@ export function DiveProvider({ children }) {
         // dashboard's own empty state plus a dismissible "get started" popup
         // (see Home.jsx's GetStartedPopup), rather than dropping the user
         // straight into the fetch-method chooser with no dashboard in sight.
-        setScreen("home");
+        // The one exception: a members-only deep link (`/?go=subscription`).
+        setScreen(screenAfterLogin());
       } catch (e) {
-        // no valid session — stay on splash/onboarding
+        // no valid session — stay on splash/onboarding, unless a deep link
+        // (`/?go=login`, `/?go=signup`) asks for a specific one of them
+        const target = screenWhenLoggedOut();
+        if (target) setScreen(target);
       } finally {
         setAuthLoading(false);
       }
     })();
-  }, [loadHoldings]);
+  }, [loadHoldings, setScreen]);
 
   // Registers the one global handler for "the refresh token is dead mid-
   // session" (lib/api.js's response interceptor calls this after its own
@@ -217,6 +307,35 @@ export function DiveProvider({ children }) {
       setScreen("splash");
     });
   }, [setScreen]);
+
+  // Phase 6a of docs/ADMIN_PANEL_PLAN.md §5.4/§7 — the user's own plan +
+  // limits, refetched whenever the identity changes (login/logout/signup)
+  // and after any subscription action (screens/Subscription.jsx calls
+  // refreshEntitlements itself after subscribing/cancelling, since those
+  // don't change `user`). `null` while unauthenticated or not yet loaded —
+  // consumers should treat that as "unknown", not "Freemium".
+  const [entitlements, setEntitlements] = useState(null);
+  const refreshEntitlements = useCallback(async () => {
+    try {
+      const { data } = await api.get("/me/entitlements");
+      setEntitlements(data);
+    } catch (e) {
+      // best-effort — a failed fetch just leaves paywall UI showing nothing
+    }
+  }, []);
+  useEffect(() => {
+    if (user) refreshEntitlements();
+    else setEntitlements(null);
+  }, [user, refreshEntitlements]);
+
+  // The shared upgrade-prompt trigger — lib/api.js's response interceptor
+  // calls this the instant ANY request hits PLAN_LIMIT_REACHED, wherever
+  // that happened (bot scan, doc upload, a holding mutation), so DiveShell
+  // can show one consistent modal instead of each feature building its own.
+  const [planLimitInfo, setPlanLimitInfo] = useState(null);
+  useEffect(() => {
+    setPlanLimitHandler((info) => setPlanLimitInfo(info));
+  }, []);
 
   const signupStart = async (form) => {
     const { data } = await api.post("/auth/signup/start", form);
@@ -251,6 +370,19 @@ export function DiveProvider({ children }) {
 
   const login = async (identifier, password) => {
     const { data } = await api.post("/auth/login", { identifier, password });
+    // A staff account (backend/src/models/User.ts's staffRole) never gets a
+    // real session from this endpoint alone — it gets a short-lived pending
+    // token instead, pending a separate mandatory TOTP step (see
+    // docs/ADMIN_PANEL_PLAN.md Phase 0.3/0.4). That flow lives entirely in
+    // src/admin/ (a different login screen, at /admin) — surfacing a clear,
+    // specific error here instead of silently trying (and failing) to treat
+    // `data.user`/`data.accessToken` as real when neither exists on this
+    // response shape.
+    if (data.staffAuthRequired) {
+      const err = new Error("This is a staff account — sign in at /admin instead.");
+      err.staffAuthRequired = true;
+      throw err;
+    }
     setAccessToken(data.accessToken);
     setUser(data.user);
     setPrefs((p) => ({ ...p, ...(data.user.preferences || {}) }));
@@ -259,8 +391,8 @@ export function DiveProvider({ children }) {
     setSims([]);
     await loadHoldings();
     // Always land on Home — see the matching comment on the session-restore
-    // effect above for why.
-    setScreen("home");
+    // effect above for why (and for the members-only deep-link exception).
+    setScreen(screenAfterLogin());
     return data.user;
   };
 
@@ -290,6 +422,19 @@ export function DiveProvider({ children }) {
     setAccessToken(null);
     setUser(null);
     setHoldings([]);
+    resetClientOnlyScratchState();
+    setScreen("splash");
+  };
+
+  // No real session to log out of (no refresh cookie exists for an
+  // impersonation token at all — see tryRestoreImpersonation's own comment),
+  // so this just discards the hand-off and returns to the splash screen.
+  const exitImpersonation = () => {
+    sessionStorage.removeItem("divve_impersonation");
+    setAccessToken(null);
+    setUser(null);
+    setHoldings([]);
+    setIsImpersonating(false);
     resetClientOnlyScratchState();
     setScreen("splash");
   };
@@ -369,6 +514,9 @@ export function DiveProvider({ children }) {
     editingHolding, setEditingHolding,
     sims, addSim, resetSims,
     plannerState, setPlannerState,
+    entitlements, refreshEntitlements,
+    planLimitInfo, setPlanLimitInfo,
+    isImpersonating, exitImpersonation,
   };
   return <DiveContext.Provider value={value}>{children}</DiveContext.Provider>;
 }

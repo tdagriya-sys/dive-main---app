@@ -1,6 +1,6 @@
 import PDFDocument from "pdfkit";
 import { AssetClass } from "../models/Instrument";
-import { DiveScoreBreakdown, DIVE_SCORE_V2_WEIGHTS } from "./diveScoreService";
+import { DiveScoreBreakdown } from "./diveScoreService";
 
 /**
  * Full multi-page PDF export of the resilience score breakdown that used to
@@ -59,16 +59,19 @@ function correlationColor(v: number): string {
   return COLOR.green;
 }
 
-// This downloadable report is the one place DIVE_SCORE_V2_WEIGHTS' literal
+// This downloadable report is the one place the composite weights' literal
 // numbers would otherwise leave the server in an easily-shared, screenshot-
 // and-forward form — unlike the in-app screen or the raw /score/breakdown
 // JSON, a PDF is built to be handed to someone else. A reader still deserves
 // an honest answer to "does this dimension matter a lot or a little", so
 // this buckets the real weight into a coarse, qualitative tier instead of
 // hiding it outright — enough to explain the score, not enough to hand a
-// competitor the exact recipe. Exported so it's unit-tested directly against
-// the real DIVE_SCORE_V2_WEIGHTS values rather than only indirectly via
-// rendered PDF output.
+// competitor the exact recipe. Exported so it's unit-tested directly. Reads
+// the weight off `breakdown.weights` (the ACTIVE config at the moment this
+// breakdown was computed — see diveScoreService.ts's Phase 2 config
+// injection), not a static import, so the report always matches whatever
+// model actually produced the score in it, even after an admin publishes a
+// change to the composite weights.
 export function weightTierLabel(weight: number): string {
   if (weight >= 0.15) return "Major factor";
   if (weight >= 0.08) return "Contributing factor";
@@ -479,7 +482,7 @@ export async function generateScoreReportPdf(
   for (const key of SUB_SCORE_ORDER) {
     const sub = breakdown.subScores[key];
     const meta = SUB_SCORE_META[key];
-    const weightTier = weightTierLabel(DIVE_SCORE_V2_WEIGHTS[key]);
+    const weightTier = weightTierLabel(breakdown.weights[key]);
     const blurbH = doc.font("Helvetica").fontSize(8.5).heightOfString(meta.blurb, { width: CONTENT_W - 32 });
     const directionH = doc.font("Helvetica-Oblique").fontSize(8).heightOfString(meta.direction, { width: CONTENT_W - 32 });
     const rawH = doc.font("Helvetica").fontSize(8).heightOfString(rawValueText(key, sub, breakdown), { width: CONTENT_W - 32 });
@@ -699,11 +702,10 @@ export async function generateScoreReportPdf(
   cursor.y += 16;
 
   // ==================== METHODOLOGY / WEIGHTS ====================
-  // Deliberately qualitative (weightTierLabel), not the literal
-  // DIVE_SCORE_V2_WEIGHTS percentages — see that function's comment. This is
-  // a downloadable, shareable document, not the in-app screen or an
-  // authenticated API response, so the exact weighting recipe stays internal
-  // here specifically.
+  // Deliberately qualitative (weightTierLabel), not the literal composite
+  // weight percentages — see that function's comment. This is a downloadable,
+  // shareable document, not the in-app screen or an authenticated API
+  // response, so the exact weighting recipe stays internal here specifically.
   //
   // Rendered as a fixed-width, color-coded chip (a small heat map) per row
   // rather than the free-width bar + right-aligned text this used to be —
@@ -725,7 +727,7 @@ export async function generateScoreReportPdf(
 
   ensureSpace(weightRowH * SUB_SCORE_ORDER.length + 10);
   for (const key of SUB_SCORE_ORDER) {
-    const tier = weightTierLabel(DIVE_SCORE_V2_WEIGHTS[key]);
+    const tier = weightTierLabel(breakdown.weights[key]);
     const chipColor = WEIGHT_TIER_CHIP_COLOR[tier];
     const chipX = PAGE.width - MARGIN - chipW;
     doc.fillColor(COLOR.textSecondary).font("Helvetica").fontSize(8.5).text(SUB_SCORE_META[key].label, MARGIN, cursor.y + 3, { width: labelColW });

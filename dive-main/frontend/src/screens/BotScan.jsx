@@ -5,6 +5,7 @@ import { useDive } from "../context/DiveContext";
 import { api } from "../lib/api";
 import InstrumentAutocomplete from "../components/dive/InstrumentAutocomplete";
 import ScanningLoader from "../components/dive/ScanningLoader";
+import UsageQuotaNote from "../components/UsageQuotaNote";
 import { PF_DECLARED_RATES } from "../lib/diveEngine";
 
 const FRAME_INTERVAL_MS = 1800;
@@ -332,6 +333,7 @@ export default function BotScan() {
             Scan → Save per source instead of switching tabs mid-scan — browsers slow down capturing on this tab while another tab is in front.
             An AI model reviews the captured screens to find your real holdings and filter out watchlists, indices, and summary cards.
           </p>
+          <UsageQuotaNote usageKey="bot_scan" />
           {error && <p className="text-xs text-[var(--red)] font-semibold mb-4">{error}</p>}
           <button data-testid="bot-scan-start-btn" onClick={startScan}
             className="w-full gold-btn rounded-full py-4 font-bold flex items-center justify-center gap-2 hover:bg-[var(--dive-blue-hover)] transition-colors">

@@ -12,6 +12,7 @@ import {
 import { isCategoryExpected, contextSummaryMessage } from "../lib/contextMessaging";
 import { usePortalEnter } from "../lib/usePortalEnter";
 import { DownloadReportButton } from "../lib/useDownloadReport";
+import NotificationPopupCard from "../components/NotificationPopupCard";
 
 export default function Home() {
   const { holdings, holdingsLoading, holdingsError, loadHoldings, user, setScreen, sims, resetSims, scoreBreakdown, loadScoreBreakdown, walkthroughOpen } = useDive();
@@ -67,6 +68,7 @@ export default function Home() {
         <AnimatePresence>
           {showGetStarted && !walkthroughOpen && <GetStartedPopup setScreen={setScreen} onClose={() => setShowGetStarted(false)} />}
         </AnimatePresence>
+        <NotificationPopupCard suppressed={showGetStarted || walkthroughOpen} />
       </>
     );
   }
@@ -109,6 +111,7 @@ export default function Home() {
   ].filter(Boolean);
 
   return (
+    <>
     <div className="min-h-full dive-app-surface pb-10" data-testid="home-screen">
       <div className="px-6 pt-8 lg:px-8">
         {/* Search/Your Journey (formerly the bell here)/profile are now the
@@ -229,6 +232,8 @@ export default function Home() {
         <DownloadReportButton testId="home-download-report-btn" />
       </div>
     </div>
+    <NotificationPopupCard suppressed={walkthroughOpen} />
+    </>
   );
 }
 

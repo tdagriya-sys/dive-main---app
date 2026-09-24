@@ -77,6 +77,24 @@ input:-webkit-autofill:active {
     transition: background-color 600000s 0s, color 600000s 0s;
 }
 
+/* Every <select> across the admin panel (and a handful in the main app) uses
+   bg-transparent on the CLOSED control, which looks correct — it shows this
+   dark theme's own page background behind it. But the OPEN options popup is
+   rendered by the OS/browser chrome, not this page's DOM, and Chrome/Edge on
+   Windows default that popup to a light grey/white background regardless of
+   the trigger's own styling. `color` is inherited into <option> from the
+   <select> (near-white, --text-primary, for this dark theme), so the result
+   was near-white text on that browser-default light popup — invisible until
+   selected. Unlike full custom layout (rounded corners, custom scrollbars),
+   `background-color`/`color` ARE respected on <option> by every major engine,
+   so this alone fixes it, same class of bug as the autofill fix above.
+   https://stackoverflow.com/questions/45538232 (browsers respecting
+   background-color/color, not other properties, on <option>) */
+select, select option {
+    background-color: var(--surface-card);
+    color: var(--text-primary);
+}
+
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar {
     -ms-overflow-style: none;

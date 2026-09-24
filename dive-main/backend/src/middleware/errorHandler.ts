@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from "express";
 import { ZodError } from "zod";
 import { MulterError } from "multer";
+import { logger } from "../lib/logger";
+import { captureException } from "../lib/sentry";
 
 export class ApiError extends Error {
   status: number;
@@ -30,7 +32,7 @@ export function errorHandler(err: unknown, req: Request, res: Response, next: Ne
   if (err instanceof Error && /Unsupported file type/.test(err.message)) {
     return res.status(400).json({ error: "UNSUPPORTED_FILE_TYPE", message: err.message });
   }
-  // eslint-disable-next-line no-console
-  console.error(err);
+  logger.error({ err, reqId: (req as Request & { id?: string | number }).id, path: req.path, method: req.method }, "unhandled error");
+  captureException(err, { path: req.path, method: req.method });
   return res.status(500).json({ error: "INTERNAL_ERROR", message: "Something went wrong." });
 }

@@ -1,8 +1,8 @@
 # DIVE Score Model — Reference Documentation
 
-**Status:** Living document. This must be updated in the same change as any edit to the scoring model's formulas, weights, tiers, or data sources — see [§15 Maintenance](#15-maintenance--change-log) for how.
+**Status:** Living document. This must be updated in the same change as any edit to the scoring model's **formulas, sub-score definitions, data sources, or schema** (a new field, a new tier, a new asset class) — see [§15 Maintenance](#15-maintenance--change-log) for how. As of Phase 2 of `docs/ADMIN_PANEL_PLAN.md` (2026-09-11 reconciliation pass), most of the specific **numbers** below — weights, thresholds, tiers, ranges — are admin-configurable defaults, not immutable constants; see [§1.1](#11-admin-configurability-phase-2) before assuming a number here is still the live value.
 
-**Last verified against source:** 2026-09-01, against the codebase in this repository (`backend/src/services/diveScoreService.ts`, `lookthroughService.ts`, `priceHistoryService.ts`, `contextEngine.ts`, `stats.ts`, `backend/src/seed/*`, `backend/src/services/instrumentSources.ts`, `frontend/src/lib/diveEngine.js`, `frontend/src/lib/contextMessaging.js`, `frontend/src/screens/XRay.jsx`, `frontend/src/screens/Suggestions.jsx`).
+**Last verified against source:** 2026-09-11, against the codebase in this repository (`backend/src/services/diveScoreService.ts`, `lookthroughService.ts`, `priceHistoryService.ts`, `contextEngine.ts`, `stats.ts`, `backend/src/seed/*`, `backend/src/services/instrumentSources.ts`, `backend/src/config/scoringDefaults.ts`, `contextDefaults.ts`, `suggestionDefaults.ts`, `backend/src/services/config/*ConfigService.ts`, `frontend/src/lib/diveEngine.js`, `frontend/src/lib/contextMessaging.js`, `frontend/src/screens/XRay.jsx`, `frontend/src/screens/Suggestions.jsx`). Every number in this document was cross-checked against the current `*_CONFIG_DEFAULTS` and confirmed to match exactly — no drift as of this pass.
 
 ---
 
@@ -14,6 +14,38 @@ The DIVE Score is a 0–100 composite that answers two separate questions about 
 2. **Resilience** — if markets move against this portfolio, how much does it lose, how fast does it recover, and how easily can it be turned into cash?
 
 Concentration is itself split into two numbers shown to the user — **Apparent Diversification** and **Real Diversification** — because a portfolio can *look* diversified (spread across labeled categories) while *actually* carrying hidden, overlapping risk (a mutual fund that holds the same stock you already hold directly, a jewelry-retailer stock that is quietly a leveraged bet on gold prices, two different bank stocks that will fall together in a rate shock). The gap between Apparent and Real is the model's core insight, and it is backed by a look-through / connectedness engine described in [§7](#7-look-through--connectedness-model).
+
+### 1.1 Admin-Configurability (Phase 2)
+
+Every weight/threshold/tier documented below that feeds the Dive Score, Context Engine, or Suggestion layer is now a **runtime-configurable default**, not a hardcoded constant — an admin can change any of them from the in-app admin panel (`/admin/scoring-model`, `/admin/context-model`, `/admin/suggestion-model`) without a code deploy. See `docs/ADMIN_PANEL_PLAN.md` §13b (Phase 2) for the full mechanism (versioned draft → validate → simulate → publish → rollback lifecycle, step-up-gated publish, simulation sandbox, version-diff view).
+
+**This document is the reference for the *methodology* — the formulas, the reasoning behind each number, and the data-source/coverage gaps — not a live snapshot of what's currently active.** The numbers printed in the tables below are the **built-in defaults** (`backend/src/config/scoringDefaults.ts` / `contextDefaults.ts` / `suggestionDefaults.ts` — extracted verbatim from this exact methodology when Phase 2 was built, confirmed still matching as of this pass), used until an admin publishes a change, and restored if every published version is ever rolled back. **To see what's *actually* active right now** — which may have since diverged from what's documented here — open the relevant admin screen: its "Active: vN" line, and the History panel's per-version diff, together already serve the role a separate "auto-generated appendix" would; there's no second copy of the live values to keep in sync here.
+
+**Maintenance consequence (see §15):** an admin publishing a new weight or threshold through the panel is an *operational tuning* of a default, not a change to "the model," and does **not** require an edit to this document. Only a **code** change does — a new formula, a new field/tier on `ScoringConfig`/`ContextConfig`/`SuggestionConfig`, a new asset class, a new data source, or a change to which values are (or aren't) admin-configurable in the first place.
+
+| Section | What it documents | Configurable via | Default source |
+|---|---|---|---|
+| §6.4 concentration sub-weights (0.50/0.15/0.20/0.15) | Apparent/Real/Name/Within-class blend | `ScoringConfig.concentrationSubWeights` | `scoringDefaults.ts` |
+| §6.3 crypto within-class cap, equity sector-spread target | Within-class HHI quality adjustments | `ScoringConfig.cryptoWithinClassCap` / `.equitySectorSpreadTarget` | `scoringDefaults.ts` |
+| §6.5 stock-count band anchor points | Distinct-equity-count piecewise curve | `ScoringConfig.stockCountBreakpoints` | `scoringDefaults.ts` |
+| §8 sub-score worst-at/best-at pairs (Volatility's best/VaR/Beta/Correlation/Diversification Ratio) | `scoreFromRange` thresholds | `ScoringConfig.subScoreBestAt` | `scoringDefaults.ts` |
+| §8 liquidity tiers table | Per-asset-class liquidity score | `ScoringConfig.liquidityTiers` | `scoringDefaults.ts` |
+| §8 drawdown-unrecovered penalty (15 pts) | Drawdown sub-score adjustment | `ScoringConfig.drawdownUnrecoveredPenalty` | `scoringDefaults.ts` |
+| §8/§12.4 single-class correlation scores (20 / 50) | Correlation floor, context-softened | `ScoringConfig.singleClassCorrelationScores` | `scoringDefaults.ts` |
+| §8.1 persona-adjusted volatility/drawdown worst-at | Risk-capacity thresholds per life stage | `ContextConfig.personaBrackets[].volatilityWorstAt`/`.drawdownWorstAt` | `contextDefaults.ts` |
+| §9 composite weights (`DIVE_SCORE_V2_WEIGHTS`) | Top-level 10-way sub-score blend | `ScoringConfig.compositeWeights` | `scoringDefaults.ts` |
+| §12.1 corpus tiers | Expected-class-count by invested amount | `ContextConfig.corpusTiers` | `contextDefaults.ts` |
+| §12.2 persona brackets | Priority/deprioritized classes by age | `ContextConfig.personaBrackets` | `contextDefaults.ts` |
+| §12.3 default class order | Fallback priority ordering | `ContextConfig.defaultClassOrder` | `contextDefaults.ts` |
+| §16.1 ideal allocation ranges | `IDEAL_RANGES` per risk profile/category | `SuggestionConfig.idealRanges` / `.coreCategories` | `suggestionDefaults.ts` |
+| §16.3 return tier / return bias / diversification cap | Suggestion personalization knobs | `SuggestionConfig.returnTier` / `.returnBias` / `.diversificationCap` | `suggestionDefaults.ts` |
+| §11 frontend fast-path concentration blend (0.65/0.15/0.2) | `diveEngine.js`'s `FAST_PATH_BLEND` | `SuggestionConfig.fastPathBlend` | `suggestionDefaults.ts` |
+| §7 look-through tier strengths (exact issuer/same-sector/sectoral-MF) and curated affinity maps (keyword, broad industry, MF segment→NSE industry, MF top-holdings) | Shared-risk-factor overlap detection | `LookthroughConfig.*` | `lookthroughDefaults.ts` |
+
+**Deliberately NOT admin-configurable** (stays hardcoded, by design — see each field's own section for why):
+- §4.2's `SYNTHETIC_PARAMS` (per-asset-class drift/vol/beta assumptions for the synthetic price fallback) — see `ScoringConfig.ts`'s own comment: this lives inside `priceHistoryService.ts`'s cached synthetic-series generator, a materially riskier (cache/determinism-sensitive) refactor than everything else on this list, deferred to a future increment.
+- Every **formula/structure** in §6–§9 and §12.3–§12.4 (how `scoreFromRange` works, the concentration formula's shape, `expectedAssetClasses` derivation, the correlation-floor branching logic itself) — only the *numbers fed into* those formulas are configurable, never the formulas themselves.
+- §16.2's `buildSuggestions()` math and §16.4's `rescaleIdealRanges()` rescaling logic — structure, not configurable inputs.
 
 ## 2. Where This Lives In The Product
 
@@ -32,7 +64,7 @@ Consumers:
 - **`Suggestions.jsx`** — anchors its "before" value on `scoreBreakdown.compositeScore` (the real number), but see [§11](#11-frontend-fast-path-diveenginejs) for how it estimates hypothetical deltas without a round-trip to the backend. Also reads `scoreBreakdown.context` (Layer D, [§12](#12-layer-d--context-engine)) to defer nudges that don't make sense for the user's corpus/age yet.
 - **`Home.jsx`** insights and **`ScoreBreakdown.jsx`**'s "Your situation" card also read `scoreBreakdown.context` — see §12.
 
-**The one deliberate exception:** `frontend/src/lib/diveEngine.js`'s `diveScore()` is a client-side, network-free approximation used *only* where the backend fundamentally cannot help — a hypothetical, unsaved "what if I moved ₹X into gold" state while a user drags a slider, and the pre-login Onboarding preview. It is not a second, independently-invented model — its concentration formula intentionally mirrors the backend's, see §12.
+**The one deliberate exception:** `frontend/src/lib/diveEngine.js`'s `diveScore()` is a client-side, network-free approximation used *only* where the backend fundamentally cannot help — a hypothetical, unsaved "what if I moved ₹X into gold" state while a user drags a slider, and the pre-login Onboarding preview. It is not a second, independently-invented model — its concentration formula intentionally mirrors the backend's, see §12. Its methodology CONSTANTS, however, are not frozen at build time: `DiveContext.js` fetches the public, no-auth `GET /api/score/config` once at app startup and applies whatever an admin has published (Phase 2.6, §1.1/§11) — falling back to the bundled literal defaults on any failure, so this exception's numbers stay in sync with the backend's own admin-configured Suggestion methodology rather than silently drifting from it.
 
 ## 3. Statistical Building Blocks
 
@@ -74,7 +106,7 @@ No free, daily-granularity public price source exists in India for bonds, REIT/I
 - Tied to the same shared Nifty 50 "market factor" used for real-priced holdings, so a synthetic holding's correlation/beta with the rest of the portfolio stays internally coherent rather than being an independent random walk.
 - Every synthetic series is labeled (`isSynthetic: true`, `label: "Synthetic — <Class> assumption"`) and surfaced to the user via `dataQuality.holdings[].isSynthetic` and the aggregate `dataQuality.realPriceCoveragePct` — **never presented as real historical data.**
 
-**`SYNTHETIC_PARAMS`** — illustrative annual assumptions per asset class (drift / volatility / beta vs. Nifty). Only govern the synthetic fallback path — where a real daily price series exists (EQUITY/ETF/GOLD/SILVER/CRYPTO with live data), correlation and volatility are computed empirically instead. Not fitted to any single dataset, but the **ordering and sign** of each value is grounded in widely documented, qualitative asset-allocation relationships, cited below (see the comment block above `SYNTHETIC_PARAMS` in source for the full citations):
+**`SYNTHETIC_PARAMS`** — illustrative annual assumptions per asset class (drift / volatility / beta vs. Nifty). **Not admin-configurable** (see §1.1) — unlike almost every other number in this document, these stay hardcoded for now. Only govern the synthetic fallback path — where a real daily price series exists (EQUITY/ETF/GOLD/SILVER/CRYPTO with live data), correlation and volatility are computed empirically instead. Not fitted to any single dataset, but the **ordering and sign** of each value is grounded in widely documented, qualitative asset-allocation relationships, cited below (see the comment block above `SYNTHETIC_PARAMS` in source for the full citations):
 
 | Asset class | Drift | Vol | Beta | Beta rationale |
 |---|---|---|---|---|
@@ -171,7 +203,7 @@ withinClassConcentrationScore = round( Σ_class (classTotalValue / totalValue) �
 
 Value-weighted across classes, so a concentrated *small* class (e.g. one bond unit that's 5% of the portfolio) drags the score down proportionally less than a concentrated *large* class (e.g. one stock that's 80% of the portfolio).
 
-**Three class-specific quality adjustments** sit on top of the raw name-HHI `classScore` above — a modest step toward "don't use one generic formula for all 12 classes" (the rest of that ask is deferred; see §13.1):
+**Three class-specific quality adjustments** sit on top of the raw name-HHI `classScore` above — a modest step toward "don't use one generic formula for all 12 classes" (the rest of that ask is deferred; see §13.1). The crypto cap and equity sector-spread target below are admin-configurable (§1.1):
 
 - **CRYPTO — capped at 70, however well name-spread.** Most crypto assets are documented to move together, especially in stress periods — spreading across N coins doesn't reduce risk anywhere near as much as spreading across N genuinely distinct equities, so this class's within-class score can never claim full credit for "diversification" the way an equally-spread equity sleeve can.
 - **FD — blended with a maturity-laddering score**, when 2+ distinct FDs exist and each has a resolvable maturity month (from `extraFields.maturityDate`, already computed at holding-creation time): `ladderScore = round(100 × distinctMaturityMonths / distinctFdCount)`, then `classScore = round((classScore + ladderScore) / 2)`. Two FDs at different banks maturing the same month is a real, different risk (reinvestment/rate risk concentrated at one point in time) from the same two FDs laddered across different months — even though issuer-name spread looks identical either way. Skipped (no adjustment) when maturity data isn't resolvable for any holding, rather than guessing.
@@ -181,6 +213,8 @@ Value-weighted across classes, so a concentrated *small* class (e.g. one bond un
   - If either signal is available, `classScore = round((classScore + average(availableSignals)) / 2)`.
 
 ### 6.4 Composite Concentration Score
+
+The four weights below (`ScoringConfig.concentrationSubWeights`, §1.1) are admin-configurable:
 
 ```
 concentrationScore = round(
@@ -197,7 +231,7 @@ Apparent (spread across asset classes) is still deliberately the dominant term �
 
 A flat HHI keeps improving toward 100 as more names are added, with no ceiling — but the classic diversification literature says otherwise for individual stock-picking: Evans & Archer (1968) found portfolio risk "exhausted" by roughly 10 stocks; Statman (1987) revised the minimum for a well-diversified, randomly-selected portfolio to ~30; later studies range 20–50+ depending on market/method. Practically: too few (<10–12) is genuine concentration risk; too many (>30–40) for a retail investor brings diminishing/negative marginal benefit — unmanageable overlap, index-hugging — not further diversification.
 
-`backend/src/services/diveScoreService.ts::scoreStockCountBand()` bands the count of **distinct EQUITY holdings** (only equity — the literature is about individual stock-picking, not e.g. how many mutual funds you hold) via piecewise-linear interpolation between illustrative anchor points:
+`backend/src/services/diveScoreService.ts::scoreStockCountBand()` bands the count of **distinct EQUITY holdings** (only equity — the literature is about individual stock-picking, not e.g. how many mutual funds you hold) via piecewise-linear interpolation between illustrative anchor points (`ScoringConfig.stockCountBreakpoints`, admin-configurable, §1.1):
 
 | Stock count | 1 | 3 | 8 | 12 | 15 | 30 | 40 | 50 | 75 | 100 |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -299,7 +333,7 @@ Left alone, this meant X-Ray's "You're actually X% in one company" claim could s
 
 ## 8. Resilience Sub-Scores
 
-Computed from the portfolio's weighted daily-return series (`portfolioReturns[t] = Σ weight_h × return_h[t]`, aligned to the shortest common history across holdings, capped at 252 trading days).
+Computed from the portfolio's weighted daily-return series (`portfolioReturns[t] = Σ weight_h × return_h[t]`, aligned to the shortest common history across holdings, capped at 252 trading days). Every `worstAt`/`bestAt` pair below, the liquidity tiers, and the drawdown-unrecovered penalty are admin-configurable (`ScoringConfig.subScoreBestAt`/`.liquidityTiers`/`.drawdownUnrecoveredPenalty`, §1.1) — Volatility/Drawdown's `worstAt` is the one exception, sourced from `ContextConfig.personaBrackets` instead (§8.1).
 
 | Sub-score | Metric | `scoreFromRange(value, worstAt, bestAt)` | Notes |
 |---|---|---|---|
@@ -313,6 +347,8 @@ Computed from the portfolio's weighted daily-return series (`portfolioReturns[t]
 
 ### 8.1 Persona-adjusted risk-capacity thresholds
 
+Admin-configurable per persona (`ContextConfig.personaBrackets[].volatilityWorstAt`/`.drawdownWorstAt`, §1.1) — the table below shows the built-in defaults:
+
 | Persona | Volatility worst-at | Drawdown worst-at |
 |---|---|---|
 | Early Career | 55% | −70% |
@@ -323,7 +359,7 @@ Computed from the portfolio's weighted daily-return series (`portfolioReturns[t]
 
 Sourced from `contextEngine.ts`'s `PersonaBracket.volatilityWorstAt`/`drawdownWorstAt` — reasoned, not empirically fitted (same caveat as every other illustrative constant in this document): the ordering (younger → higher tolerance) reflects standard life-cycle investing principle (time horizon determines recovery capacity), not a study of actual investor behavior.
 
-**Liquidity tiers** (0 illiquid/locked-up → 100 liquid, exit anytime near fair value):
+**Liquidity tiers** (0 illiquid/locked-up → 100 liquid, exit anytime near fair value; admin-configurable per class, `ScoringConfig.liquidityTiers`, §1.1):
 
 | Class | Score | Class | Score |
 |---|---|---|---|
@@ -337,6 +373,8 @@ Sourced from `contextEngine.ts`'s `PersonaBracket.volatilityWorstAt`/`drawdownWo
 PF sits below FD, not tied with it: FD is breakable any time (with an interest penalty) — full principal access is never in question. PF has no such unconditional exit — PPF's 15-year hard lock (partial withdrawal only from FY7, capped at 50% of the balance 4 years prior) and EPF's retirement/2-month-unemployment/purpose-specific-after-12-months gating are both strictly worse than a breakable FD. Not 0 — real, if narrow, partial-access routes exist (PPF's year 3-6 loan facility, EPF's purpose-based partial withdrawals).
 
 ## 9. Composite Score
+
+**Admin-configurable** (`ScoringConfig.compositeWeights`, §1.1) — the values below are the built-in default, extracted verbatim into `scoringDefaults.ts` when Phase 2 was built. `DIVE_SCORE_V2_WEIGHTS` (the export name below) is now just a backward-compatible alias for that default; the weights actually used to score any real user come from `getActiveScoringConfig()` at request time, which may have since diverged from this table if an admin has published a change (§1.1):
 
 ```ts
 DIVE_SCORE_V2_WEIGHTS = {
@@ -377,10 +415,12 @@ compositeScore = clamp( round( Σ weight_i × subScore_i.score ), 0, 100 )
 `diveScore(holdings, extra)` mirrors §6's concentration formula and weights exactly:
 
 ```
-apparentDiversification (segment-level HHI) × 0.65
-+ realDiversification (single flat 1.0-strength issuer-match only — no MF/keyword/industry/same-sector tiers, no sector data) × 0.15
-+ nameDiversification (name-level HHI) × 0.20
+apparentDiversification (segment-level HHI) × FAST_PATH_BLEND.apparent   (default 0.65)
++ realDiversification (single flat 1.0-strength issuer-match only — no MF/keyword/industry/same-sector tiers, no sector data) × FAST_PATH_BLEND.real   (default 0.15)
++ nameDiversification (name-level HHI) × FAST_PATH_BLEND.name   (default 0.20)
 ```
+
+`FAST_PATH_BLEND` (Phase 2.6) is an exported, mutable object in `diveEngine.js` — admin-configurable via `SuggestionConfig.fastPathBlend` (§1.1), picked up once at app startup by `DiveContext.js`'s `GET /score/config` fetch and applied in place, so every consumer of `diveScore()` automatically reflects a published change without a code deploy.
 
 **Important limitation, by design:** this client formula has no resilience math at all — no volatility, drawdown, VaR, beta, correlation, or liquidity, because those require real historical price series only the backend can fetch/compute. It is effectively *just* the concentration piece, standing in for the full composite when instant feedback matters more than full accuracy.
 
@@ -460,6 +500,8 @@ Cards use conditional coloring (green if `after > before`, red/amber if `after <
 
 ### 12.1 Corpus tiers
 
+Admin-configurable (`ContextConfig.corpusTiers`, §1.1) — the table below is the built-in default:
+
 | Tier | Range | Expected class count | Reasoning |
 |---|---|---|---|
 | Starter | < ₹25,000 | 1 | Splitting into even 2 classes means one gets well under ₹12,500 — below a single SGB unit or a typical ULIP's minimum annual premium, and thin enough elsewhere that brokerage/entry costs eat a large share of the ticket. One well-chosen, liquid, low-minimum class (equity, or an MF SIP) is the complete, sensible picture — not a shortfall. |
@@ -469,6 +511,8 @@ Cards use conditional coloring (green if `after > before`, red/amber if `after <
 | Large | ₹50,00,000+ | 12 | Every class is achievable at a meaningful ticket size — skipping one is a deliberate choice, not a constraint. |
 
 ### 12.2 Persona brackets
+
+Admin-configurable (`ContextConfig.personaBrackets`, §1.1) — the table below is the built-in default:
 
 | Persona | Age | Priority classes (in order) | Deprioritized | Reasoning |
 |---|---|---|---|---|
@@ -488,6 +532,8 @@ ordered = persona.priorityClasses
         + persona.deprioritizedClasses   // only reached if the corpus tier's count needs this many
 expectedAssetClasses = ordered.slice(0, corpusTier.expectedClassCount)
 ```
+
+`DEFAULT_CLASS_ORDER` is admin-configurable (`ContextConfig.defaultClassOrder`, §1.1) — the derivation formula itself (`ordered`/`.slice(...)` above) is not.
 
 A large corpus tier count (up to 12) will eventually pull in even a persona's deprioritized classes — deprioritization only affects *order*, never permanent exclusion, matching "large corpus + any age → expected set approaches all 12."
 
@@ -557,10 +603,13 @@ Run via `cd backend && npm test` (or `./node_modules/.bin/jest --runInBand` if d
 
 ## 15. Maintenance / Change Log
 
-**Whenever the model changes — a weight, a threshold, a new tier, a new data source — update the relevant section above in the same change**, and add a dated entry below (newest first). Keep entries short: what changed, why, which file(s).
+**Whenever the model's CODE changes — a new formula, a new sub-score, a new field/tier on `ScoringConfig`/`ContextConfig`/`SuggestionConfig`, a new asset class, a new data source, or a change to which values are (or aren't) admin-configurable — update the relevant section above in the same change**, and add a dated entry below (newest first). Keep entries short: what changed, why, which file(s).
+
+**As of Phase 2 (§1.1), an admin PUBLISHING a new weight/threshold/tier through the in-app panel is explicitly OUT OF SCOPE for this rule** — that's an operational tuning of a default value, not a change to the model itself, and it doesn't get a changelog entry here (the admin panel's own version History + audit log already record it). Only edit this document when the underlying *code* changes.
 
 | Date | Change | Why | File(s) |
 |---|---|---|---|
+| 2026-09-11 | **Phase 2 reconciliation**: annotated every table/formula input in this document that Phase 2 of `docs/ADMIN_PANEL_PLAN.md` made admin-configurable (composite/concentration weights, sub-score thresholds, liquidity tiers, stock-count band, corpus tiers, persona brackets, default class order, ideal ranges, return tier/bias, diversification cap, the frontend fast-path's `FAST_PATH_BLEND`) with a pointer to the owning `ScoringConfig`/`ContextConfig`/`SuggestionConfig` field; added new §1.1 (a compact section→field→model mapping table, what stays deliberately hardcoded — `SYNTHETIC_PARAMS` and every formula's *structure* — and where to see LIVE active values: the admin panel's own Active/History views, not a second copy here); updated §11 for Phase 2.6's `FAST_PATH_BLEND` extraction; updated §15's maintenance rule so an admin PUBLISHING a value through the panel no longer requires a doc edit — only a code/schema change does. Every number in the document was cross-checked against the live `*_CONFIG_DEFAULTS` first and confirmed to still match exactly — this pass is purely editorial/annotation, no numbers changed | Phase 2 (admin-configurable Dive Score/Context/Suggestion models) had made most of this document's hardcoded-looking tables actually just DEFAULTS, without the document itself ever saying so — a reader had no way to know a number here might not be the live one | `docs/DIVE_SCORE_MODEL.md` |
 | 2026-09-03 | Renamed the FD category's display label to "FD/RD" everywhere it's shown to a user — Suggestions' category chip/tax note, Preferences' preferred/excluded categories, the "How Your Composite Score Is Built"-adjacent Data Quality note, X-Ray/Score Breakdown's data-quality copy, the Divve Planner feature showcase on the landing page, the DiveBot extension-demo mock, and the browser extension's own copy of the engine (`extension/shared/diveEngine.js`) — plus every place a new FD holding's auto-generated name is built (`${bank} Fixed Deposit` → `${bank} Fixed Deposit / RD`, both create and edit) and the mock Account-Aggregator fetch's sample deposit. The underlying `assetClass` enum value stays exactly `"FD"` everywhere (DB schema, API contracts, `validators/holdings.ts`'s `fdSchema`, `case "FD":` branches) — only the CATEGORY NAME used for grouping/display changed, the same relationship REIT+InvIT already have to their shared "REIT/InvIT" label. Concretely: `ASSET_CLASS_LABELS.FD`'s VALUE (both frontend/backend/extension copies) went from `"FD"` to `"FD/RD"`; every category-keyed table that used the display name as its key (`IDEAL_RANGES`, `SEGMENT_COLORS`, `SIM_TEMPLATES`, `RETURN_TIER` in `diveEngine.js`; `TAX_NOTES`/`MARKET_STRESS_SENSITIVITY` in `Suggestions.jsx`) had its `FD` key renamed to `"FD/RD"` to match, so `segment`/`data-testid`s built from that label (e.g. `sugg-card-FD/RD`) stay correctly wired. Known, deliberately out-of-scope surfaces found during the audit but left alone: `staticInstruments.ts`'s ~20 per-bank seed instrument names (still say "Fixed Deposit", no confirmed direct display path); the AI vision-extraction prompt (`aiExtractionService.ts`) and the statement-keyword classifier (`categorizeInstrument.ts`) still only recognize "FD"/"Fixed Deposit" text, not "RD"/"Recurring Deposit" — teaching the AI/regex to actually RECOGNIZE a scanned or pasted RD is a separate, real feature (and a two-letter `\brd\b` keyword regex needs care to avoid matching ordinals like "23rd" in dates) rather than a display-label rename | User asked to replace the name "FD" with "FD/RD" across the entire visible app, landing page included | `diveEngine.js`, `diveEngine.test.js`, `Preferences.jsx`, `Suggestions.jsx`, `Suggestions.test.jsx`, `ScoreBreakdown.jsx`, `ManualEntry.jsx`, `DiveBot.jsx`, `FeatureShowcase.jsx`, `scoreReportPdfService.ts`, `contextEngine.ts`, `holdingQualityService.ts`, `priceHistoryService.ts`, `holdingsController.ts`, `finvuService.ts`, `instrumentDetailService.ts`, `extension/shared/diveEngine.js` |
 | 2026-09-03 | Fixed the "How Your Composite Score Is Built" section (from the same-day genericization change below) drawing the tier label text on top of its own weight bar — the bar/right-aligned-text layout was sized for the old short "17%" text, and the new, much longer "Contributing factor" ran into the bar's right end. Replaced the bar entirely with a fixed-width, color-coded chip (gold "Major factor" / amber "Contributing factor" / muted grey "Minor factor") pinned to the page's right margin — a fixed-size chip can't collide with the row label regardless of either string's length, and the color still reads as a rough heat scale the way the bar's length used to | User reported the tier text visually overlapping the bar in the rendered PDF | `scoreReportPdfService.ts` |
 | 2026-09-03 | The downloadable resilience-score PDF (`generateScoreReportPdf`) no longer prints `DIVE_SCORE_V2_WEIGHTS`' literal percentages anywhere — neither the "X% of composite" line under each sub-score card in the Resilience Breakdown section, nor the per-dimension bars in the closing "How Your Composite Score Is Built" section. Both now show a new `weightTierLabel()` bucket instead (`>=0.15` → "Major factor", `>=0.08` → "Contributing factor", else "Minor factor"), with the methodology chart's bar lengths keyed off the tier too (not `weight × 2`), so the tier can't be measured back into the exact number either. The in-app screen and the authenticated `/score/breakdown` JSON are untouched — still show the real numbers to the account's own owner; this is scoped to the PDF specifically, since it's a downloadable, shareable document built to be handed to someone else, unlike those two | User asked whether the PDF report could expose the scoring model's IP; on inspection the exact composite weights (the model's top-level recipe) were being printed verbatim in two places in the PDF — user asked to genericize both | `scoreReportPdfService.ts`, `scoreReportPdfService.test.ts` (new) |
@@ -588,7 +637,7 @@ Run via `cd backend && npm test` (or `./node_modules/.bin/jest --runInBand` if d
 
 ### 16.1 The ideal-range table
 
-`frontend/src/lib/diveEngine.js`'s `IDEAL_RANGES` — a static `[lo%, hi%]` band per category, one full table per risk profile (Conservative / Balanced / Aggressive):
+`frontend/src/lib/diveEngine.js`'s `IDEAL_RANGES` — a `[lo%, hi%]` band per category, one full table per risk profile (Conservative / Balanced / Aggressive). Admin-configurable (`SuggestionConfig.idealRanges`/`.coreCategories`, §1.1) — fetched once at app startup via `GET /score/config` (Phase 2.6, §11) and applied in place, falling back to the literal table below if that hasn't resolved yet or fails:
 
 ```js
 export const IDEAL_RANGES = {
@@ -616,7 +665,7 @@ Sorted: every `increase`/`reduce` category first, `hold` last; within each, bigg
 
 ### 16.3 Personalization layer — `personalizeSuggestions(suggestions, prefs)`
 
-Runs after §16.2, never changes the ₹ figures themselves — only which categories appear and their order:
+Runs after §16.2, never changes the ₹ figures themselves — only which categories appear and their order. `RETURN_TIER`, `RETURN_BIAS`, and `DIVERSIFICATION_CAP` are all admin-configurable (`SuggestionConfig.returnTier`/`.returnBias`/`.diversificationCap`, §1.1; the nullable "uncapped" High tier is stored as backend `null`, converted back to this file's own `Infinity` sentinel by `applyRemoteSuggestionConfig`):
 
 - `prefs.excluded` categories are dropped from the list entirely (filtered out by the caller, before this function even runs).
 - `prefs.preferred` categories are always sorted to the top, regardless of their own `action`/`hold` status.

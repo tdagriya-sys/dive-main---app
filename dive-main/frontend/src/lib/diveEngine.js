@@ -362,11 +362,16 @@ export function missingCategories(holdings, extra = null) {
 // bonus — holding 9 well-chosen stocks and nothing else should score only a
 // little higher than holding 1-2 bad ones, never anywhere near what genuine
 // multi-asset-class diversification scores.
+// The concentration blend weights — mutable (see applyRemoteSuggestionConfig
+// below) so an admin-published SuggestionConfig.fastPathBlend can override
+// these bundled defaults, exactly like every other export in this section.
+export const FAST_PATH_BLEND = { apparent: 0.65, real: 0.15, name: 0.2 };
+
 export function diveScore(holdings, extra = null) {
   const apparent = apparentDiversification(holdings, extra);
   const real = realDiversification(holdings, extra);
   const nameSpread = nameDiversification(holdings, extra);
-  const score = apparent * 0.65 + real * 0.15 + nameSpread * 0.2;
+  const score = apparent * FAST_PATH_BLEND.apparent + real * FAST_PATH_BLEND.real + nameSpread * FAST_PATH_BLEND.name;
   return Math.max(0, Math.min(100, Math.round(score)));
 }
 
@@ -540,4 +545,49 @@ export function personalizeSuggestions(suggestions, prefs) {
     liveCount += 1;
     return { ...s, diversificationCapped: liveCount > cap };
   });
+}
+
+// Overrides every suggestion-methodology constant above with an
+// admin-published SuggestionConfig (see backend GET /api/score/config,
+// fetched once at app startup by DiveContext.js) — mutating each export IN
+// PLACE (never reassigning the binding) so every existing consumer, which
+// reads these via direct property/index access at call time rather than
+// snapshotting them into a new module-level constant, picks up the change
+// automatically with no changes needed on their end. Falls back to the
+// bundled literal defaults above until this is called (or if it's never
+// called at all, e.g. the fetch fails) — exactly the "OFFLINE fallback"
+// framing in backend/src/config/suggestionDefaults.ts's own comment.
+//
+// `config` is a SuggestionConfigPayload (backend/src/models/SuggestionConfig.ts)
+// — `diversificationCap`'s nullable High tier is JSON `null` there (not valid
+// JSON as `Infinity`) and gets converted back to `Infinity` here, matching
+// this file's own DIVERSIFICATION_CAP convention.
+export function applyRemoteSuggestionConfig(config) {
+  if (!config) return;
+
+  if (Array.isArray(config.coreCategories)) {
+    CORE_CATEGORIES.length = 0;
+    CORE_CATEGORIES.push(...config.coreCategories);
+  }
+  if (config.idealRanges) {
+    Object.keys(IDEAL_RANGES).forEach((k) => delete IDEAL_RANGES[k]);
+    Object.assign(IDEAL_RANGES, config.idealRanges);
+  }
+  if (config.returnTier) {
+    Object.keys(RETURN_TIER).forEach((k) => delete RETURN_TIER[k]);
+    Object.assign(RETURN_TIER, config.returnTier);
+  }
+  if (config.returnBias) {
+    Object.keys(RETURN_BIAS).forEach((k) => delete RETURN_BIAS[k]);
+    Object.assign(RETURN_BIAS, config.returnBias);
+  }
+  if (config.diversificationCap) {
+    Object.keys(DIVERSIFICATION_CAP).forEach((k) => delete DIVERSIFICATION_CAP[k]);
+    Object.entries(config.diversificationCap).forEach(([tier, cap]) => {
+      DIVERSIFICATION_CAP[tier] = cap === null ? Infinity : cap;
+    });
+  }
+  if (config.fastPathBlend) {
+    Object.assign(FAST_PATH_BLEND, config.fastPathBlend);
+  }
 }

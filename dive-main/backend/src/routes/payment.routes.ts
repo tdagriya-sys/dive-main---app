@@ -5,6 +5,7 @@ import * as paymentController from "../controllers/paymentController";
 
 const router = Router();
 
+router.get("/report/price", requireAuth, asyncHandler(paymentController.getReportPrice));
 router.post("/report/order", requireAuth, asyncHandler(paymentController.createReportOrder));
 router.post("/report/verify", requireAuth, asyncHandler(paymentController.verifyReportPayment));
 // Public — see paymentController.ts's razorpayWebhook for why this deliberately

@@ -7,6 +7,7 @@ import { invalidateDiveScoreCache } from "../services/diveScoreService";
 import { invalidateReportPurchase } from "../services/paymentService";
 import * as finvuService from "../services/finvuService";
 import { FI_TYPE_TO_ASSET_CLASS } from "../services/finvuService";
+import { emitActivity } from "../services/activityLog";
 
 async function findOwnedConsent(handle: string, userId?: string) {
   const consent = await AaConsent.findOne({ consentHandle: handle, userId });
@@ -81,5 +82,6 @@ export async function fetchFiDataAndSave(req: AuthedRequest, res: Response) {
 
   invalidateDiveScoreCache(req.userId!);
   await invalidateReportPurchase(req.userId!);
+  emitActivity("aa_sync", { userId: req.userId, req, props: { holdingCount: holdings.length, isMock } });
   res.status(200).json({ holdings, isMock });
 }

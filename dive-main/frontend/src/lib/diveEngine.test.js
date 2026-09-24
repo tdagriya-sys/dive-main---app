@@ -14,6 +14,11 @@ import {
   CORE_CATEGORIES,
   SEGMENT_COLORS,
   ASSET_CLASS_LABELS,
+  RETURN_TIER,
+  RETURN_BIAS,
+  DIVERSIFICATION_CAP,
+  FAST_PATH_BLEND,
+  applyRemoteSuggestionConfig,
 } from "./diveEngine";
 
 describe("adaptHolding", () => {
@@ -334,5 +339,87 @@ describe("rescaleIdealRanges", () => {
     // Mutual Funds (₹20,000, 40%) read as "over" a ceiling of just ₹19,481.
     expect(equity.hiAmt + mf.hiAmt + gold.hiAmt).toBeGreaterThan(50000);
     expect(mf.action).not.toBe("reduce");
+  });
+});
+
+// Phase 2 of docs/ADMIN_PANEL_PLAN.md — an admin-published SuggestionConfig
+// (fetched once at app startup by DiveContext.js, see GET /api/score/config)
+// overrides these bundled literal defaults. Snapshotting and restoring the
+// defaults around every test here matters because applyRemoteSuggestionConfig
+// mutates the real shared module exports in place — a leak would silently
+// change every OTHER describe block's assumptions in this same file.
+describe("applyRemoteSuggestionConfig", () => {
+  const ORIGINAL = {
+    coreCategories: [...CORE_CATEGORIES],
+    idealRanges: JSON.parse(JSON.stringify(IDEAL_RANGES)),
+    returnTier: { ...RETURN_TIER },
+    returnBias: { ...RETURN_BIAS },
+    diversificationCap: { ...DIVERSIFICATION_CAP },
+    fastPathBlend: { ...FAST_PATH_BLEND },
+  };
+
+  afterEach(() => applyRemoteSuggestionConfig(ORIGINAL));
+
+  it("does nothing when given no config (e.g. the fetch failed or hasn't resolved yet)", () => {
+    applyRemoteSuggestionConfig(undefined);
+    expect(CORE_CATEGORIES).toEqual(ORIGINAL.coreCategories);
+    expect(IDEAL_RANGES).toEqual(ORIGINAL.idealRanges);
+  });
+
+  it("overrides coreCategories in place, keeping the same array identity", () => {
+    const arrayRef = CORE_CATEGORIES;
+    applyRemoteSuggestionConfig({ coreCategories: ["Equity", "Bonds"] });
+    expect(CORE_CATEGORIES).toBe(arrayRef); // same array object, just new contents
+    expect(CORE_CATEGORIES).toEqual(["Equity", "Bonds"]);
+  });
+
+  it("overrides idealRanges, and buildSuggestions immediately reflects the new bands", () => {
+    applyRemoteSuggestionConfig({
+      coreCategories: ["Equity", "Bonds"],
+      idealRanges: {
+        Conservative: { Equity: [1, 2], Bonds: [1, 2] },
+        Balanced: { Equity: [40, 60], Bonds: [10, 20] },
+        Aggressive: { Equity: [1, 2], Bonds: [1, 2] },
+      },
+    });
+    const suggestions = buildSuggestions([{ segment: "Equity", amount: 0 }], IDEAL_RANGES, "Balanced");
+    const equity = suggestions.find((s) => s.cat === "Equity");
+    expect(equity.loPct).toBe(40);
+    expect(equity.hiPct).toBe(60);
+  });
+
+  it("overrides returnTier and returnBias", () => {
+    applyRemoteSuggestionConfig({ returnTier: { Equity: "low" }, returnBias: { Modest: 5, Moderate: 0, High: -5 } });
+    expect(RETURN_TIER.Equity).toBe("low");
+    expect(RETURN_BIAS.Modest).toBe(5);
+  });
+
+  it("converts a null diversificationCap tier back to Infinity, matching this file's own sentinel", () => {
+    applyRemoteSuggestionConfig({ diversificationCap: { Low: 1, Medium: 2, High: null } });
+    expect(DIVERSIFICATION_CAP.Low).toBe(1);
+    expect(DIVERSIFICATION_CAP.High).toBe(Infinity);
+  });
+
+  it("overrides fastPathBlend, and diveScore immediately reflects the new blend", () => {
+    // A single holding is 100% concentrated by both segment AND name, so
+    // apparent/real/nameSpread are all individually 0 — routing the ENTIRE
+    // blend onto one term changes nothing here. Route it onto a term that's
+    // NOT zero for this portfolio instead: nameSpread from 3 distinct,
+    // equal-value equity names is a genuine nonzero HHI-based score.
+    const holdings = [
+      { segment: "Equity", amount: 10000, name: "A", lookthrough: [{ company: "A", pct: 100 }] },
+      { segment: "Equity", amount: 10000, name: "B", lookthrough: [{ company: "B", pct: 100 }] },
+      { segment: "Equity", amount: 10000, name: "C", lookthrough: [{ company: "C", pct: 100 }] },
+    ];
+    const defaultScore = diveScore(holdings); // apparent=0, real=0 (single segment) — only nameSpread*0.2 contributes today
+    applyRemoteSuggestionConfig({ fastPathBlend: { apparent: 0, real: 0, name: 1 } });
+    const nameWeightedScore = diveScore(holdings);
+    expect(nameWeightedScore).toBeGreaterThan(defaultScore);
+  });
+
+  it("leaves a field untouched when the config omits it entirely", () => {
+    const before = { ...RETURN_TIER };
+    applyRemoteSuggestionConfig({ coreCategories: ["Equity"] });
+    expect(RETURN_TIER).toEqual(before);
   });
 });

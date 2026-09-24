@@ -205,7 +205,8 @@ function Login({ setScreen }) {
       await login(identifier, password);
     } catch (err) {
       const data = err?.response?.data;
-      if (data?.error === "USER_NOT_FOUND") setNotFound(true);
+      if (err?.staffAuthRequired) setError(err.message);
+      else if (data?.error === "USER_NOT_FOUND") setNotFound(true);
       else setError(data?.message || "Couldn't log in. Please try again.");
     } finally {
       setLoading(false);

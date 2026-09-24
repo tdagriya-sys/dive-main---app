@@ -7,8 +7,25 @@ import Razorpay from "razorpay";
 import { validatePaymentVerification } from "razorpay/dist/utils/razorpay-utils";
 import { env, isPlaceholder } from "../config/env";
 import { User } from "../models/User";
-import { Payment, PaymentPurpose } from "../models/Payment";
+import { Payment, PaymentPurpose, IPayment } from "../models/Payment";
+import { UsageGrant } from "../models/UsageGrant";
 import { ApiError } from "../middleware/errorHandler";
+import { generateInvoiceForPayment } from "./invoiceService";
+import { getReportPricing } from "./adminSettingService";
+import { getPlan } from "./entitlementService";
+import { logger } from "../lib/logger";
+
+// Best-effort — a payment that already succeeded must never be undone by a
+// failure to generate its GST invoice; the invoice can always be regenerated
+// on demand later (invoiceService.ts::generateInvoiceForPayment is
+// idempotent per payment) if this ever needs a manual retry.
+async function generateInvoiceBestEffort(payment: IPayment): Promise<void> {
+  try {
+    await generateInvoiceForPayment(payment);
+  } catch (err) {
+    logger.error({ err, paymentId: String(payment._id) }, "[invoiceService] failed to generate invoice");
+  }
+}
 
 /**
  * Razorpay integration for paid features (today: the resilience-score PDF,
@@ -43,8 +60,15 @@ export interface CreateOrderResult {
   mock: boolean;
 }
 
+// Thin re-export so paymentController.ts (which only imports `* as
+// paymentService`, never adminSettingService directly) has one place to get
+// both the price it actually charges and the price it displays.
+export async function getReportPricingForDisplay() {
+  return getReportPricing();
+}
+
 export async function createReportOrder(userId: string): Promise<CreateOrderResult> {
-  const amount = env.reportPricePaise;
+  const { pricePaise: amount } = await getReportPricing();
   const currency = "INR";
   const purpose: PaymentPurpose = "SCORE_REPORT_PDF";
 
@@ -130,6 +154,7 @@ export async function verifyReportPayment(userId: string, input: VerifyPaymentIn
   payment.razorpayPaymentId = input.razorpay_payment_id;
   payment.portfolioVersionAtPayment = user?.portfolioVersion ?? 0;
   await payment.save();
+  await generateInvoiceBestEffort(payment);
 }
 
 // The gate scoreController.ts's downloadReportPdf checks before generating
@@ -147,6 +172,92 @@ export async function hasPaidForReport(userId: string): Promise<boolean> {
     portfolioVersionAtPayment: user.portfolioVersion,
   });
   return !!paid;
+}
+
+// Shared by ensureReportAccess and getReportComplimentaryStatus below — the
+// total number of complimentary report unlocks this user gets across their
+// current plan's `complimentaryReportDownloads` (SubscriptionPlan.
+// entitlements — an admin-set benefit) plus a standing per-user UsageGrant
+// (key "score_report", admin-grantable independent of plan — see
+// UsageGrant.ts's own comment), or `null` for unlimited.
+//
+// `undefined` (a SubscriptionPlan document persisted before this field
+// existed — Mongoose's schema `default: 0` only applies to documents
+// created/saved after the field was added, never retroactively to existing
+// ones read back via find/findOne) must be treated as 0, NOT passed through
+// as-is: `undefined + grant.bonusTotal` is `NaN`, and `count >= NaN` is
+// always false, which silently granted EVERY plan unlimited free downloads
+// until this was caught live. A genuinely stored `null` (an admin explicitly
+// chose "unlimited" through the admin UI, only possible on a document saved
+// after this field existed) is the only thing that should mean unlimited.
+async function totalComplimentaryReportAllowance(userId: string): Promise<number | null> {
+  const [plan, grant] = await Promise.all([getPlan(userId), UsageGrant.findOne({ userId, key: "score_report" }).lean()]);
+  const rawPlanLimit = plan.entitlements.complimentaryReportDownloads;
+  const planLimit = rawPlanLimit === null ? null : rawPlanLimit ?? 0;
+  if (planLimit === null) return null;
+  return planLimit + (grant?.bonusTotal ?? 0);
+}
+
+// The gate scoreController.ts::downloadReportPdf actually calls — a superset
+// of hasPaidForReport above that also unlocks a genuinely FREE download when
+// the user is entitled to one (see totalComplimentaryReportAllowance). The
+// limit counts distinct portfolio-version unlocks, never raw downloads:
+// re-fetching an already-unlocked report never consumes it (hasPaidForReport
+// already covers that for free, above), only a NEW portfolio change that
+// would otherwise demand a fresh ₹-payment does — exactly mirroring how a
+// real purchase behaves, just free. Each granted free unlock is recorded as
+// a genuine ₹0 `Payment` row (isComplimentary: true) rather than a separate
+// counter, so hasPaidForReport's existing query picks it up unchanged and
+// the admin Revenue ledger sees it too.
+export async function ensureReportAccess(userId: string): Promise<boolean> {
+  if (await hasPaidForReport(userId)) return true;
+
+  const [totalAllowance, complimentaryUsed, user] = await Promise.all([
+    totalComplimentaryReportAllowance(userId),
+    Payment.countDocuments({ userId, purpose: "SCORE_REPORT_PDF", status: "paid", isComplimentary: true }),
+    User.findById(userId).select("portfolioVersion").lean(),
+  ]);
+  if (!user) return false;
+  if (totalAllowance !== null && complimentaryUsed >= totalAllowance) return false; // exhausted — falls back to a real payment
+
+  await Payment.create({
+    userId,
+    purpose: "SCORE_REPORT_PDF",
+    amount: 0,
+    currency: "INR",
+    razorpayOrderId: `comp_${randomUUID()}`,
+    status: "paid",
+    isMock: false,
+    isComplimentary: true,
+    portfolioVersionAtPayment: user.portfolioVersion,
+  });
+  return true;
+}
+
+export interface ReportComplimentaryStatus {
+  // null = unlimited on this plan/grant combination.
+  total: number | null;
+  used: number;
+  // total - used, floored at 0; null when total is unlimited.
+  remaining: number | null;
+  // True when a download RIGHT NOW would succeed for free with no new
+  // complimentary unit consumed at all — either a real prior payment or an
+  // already-granted complimentary unlock for the CURRENT portfolio version.
+  unlockedForCurrentPortfolio: boolean;
+}
+
+// Surfaced via GET /me/entitlements (subscriptionsController.ts) so the
+// Subscription screen can show real complimentary-download status instead
+// of nothing, and useDownloadReport.js can decide whether the download
+// button should show a price at all — see both callers' own comments.
+export async function getReportComplimentaryStatus(userId: string): Promise<ReportComplimentaryStatus> {
+  const [total, used, unlockedForCurrentPortfolio] = await Promise.all([
+    totalComplimentaryReportAllowance(userId),
+    Payment.countDocuments({ userId, purpose: "SCORE_REPORT_PDF", status: "paid", isComplimentary: true }),
+    hasPaidForReport(userId),
+  ]);
+  const remaining = total === null ? null : Math.max(0, total - used);
+  return { total, used, remaining, unlockedForCurrentPortfolio };
 }
 
 // Called alongside diveScoreService.ts's invalidateDiveScoreCache, at every
@@ -183,4 +294,40 @@ export async function handleReportWebhookPaymentCaptured(orderId: string, paymen
   payment.razorpayPaymentId = paymentId;
   payment.portfolioVersionAtPayment = user?.portfolioVersion ?? 0;
   await payment.save();
+  await generateInvoiceBestEffort(payment);
+}
+
+// Refunds (Phase 6b of docs/ADMIN_PANEL_PLAN.md §5.3) — generic over every
+// `Payment` purpose (the one-off report PDF and both subscription charge
+// types alike), gated by `subscriptions.refund` + step-up at the route level
+// (adminSubscriptionsController — same bar as cancel/change-plan/grant since
+// this moves real money). A partial refund is allowed (amountPaise below the
+// payment's own `amount`); omitting it refunds the full remaining amount.
+// Mirrors every other mock/real split in this file: a mock payment has no
+// real Razorpay payment to refund against, so it's recorded locally only.
+export async function refundPayment(paymentId: string, amountPaise?: number): Promise<IPayment> {
+  const payment = await Payment.findById(paymentId);
+  if (!payment) throw new ApiError(404, "PAYMENT_NOT_FOUND", "Payment not found.");
+  if (payment.status !== "paid") throw new ApiError(400, "PAYMENT_NOT_REFUNDABLE", "Only a paid payment can be refunded.");
+
+  const alreadyRefunded = payment.refundedAmountPaise ?? 0;
+  const remaining = payment.amount - alreadyRefunded;
+  const amount = amountPaise ?? remaining;
+  if (amount <= 0 || amount > remaining) {
+    throw new ApiError(400, "INVALID_REFUND_AMOUNT", `Refund amount must be between 1 and ${remaining} paise (the remaining unrefunded balance).`);
+  }
+
+  let refundId: string;
+  if (payment.isMock || env.razorpay.isPlaceholder) {
+    refundId = `mock_refund_${randomUUID()}`;
+  } else {
+    if (!payment.razorpayPaymentId) throw new ApiError(400, "NO_RAZORPAY_PAYMENT", "This payment has no Razorpay payment id to refund.");
+    const refund = await getClient().payments.refund(payment.razorpayPaymentId, { amount });
+    refundId = refund.id;
+  }
+
+  payment.refundedAmountPaise = alreadyRefunded + amount;
+  payment.refundIds = [...(payment.refundIds ?? []), refundId];
+  await payment.save();
+  return payment;
 }

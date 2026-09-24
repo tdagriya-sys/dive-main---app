@@ -8,6 +8,7 @@ import FeatureShowcaseSections from "./dive/FeatureShowcase";
 import OurStoryPage from "./dive/OurStoryPage";
 import ContactPage from "./dive/ContactPage";
 import { TermsPage, PrivacyPage, RefundPolicyPage } from "./dive/LegalPages";
+import LandingPopupCard from "./LandingPopupCard";
 
 // Fully static marketing page — no live app instance, no auth-gated actions,
 // no dependency on any real user data. Every number/card below is
@@ -174,6 +175,9 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen bg-[var(--wrapper-bg)]" data-testid="landing-page">
+      {/* Staff-published pop-ups for logged-out visitors (Admin → Notifications
+          → Landing pop-ups) — renders nothing unless one is active. */}
+      <LandingPopupCard />
       {/* Two symmetric ambient glows (not one) — a single top-right blur left
           the left margin and the lower half of a long scroll page flat,
           empty black with nothing to look at; this pair gives both sides of

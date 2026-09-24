@@ -158,7 +158,8 @@ export async function fetchNseEtfs(): Promise<SeedInstrument[]> {
 // precise sub-industry — e.g. jewelry retailers land under the generic
 // "Consumer Durables" alongside appliance makers — so callers needing
 // precision for specific cases (jewelry vs. gold) use a curated keyword list
-// instead (see seed/sectorAffinity.ts) rather than this broad classification.
+// instead (LookthroughConfig.keywordSectorAffinity, config/lookthroughDefaults.ts)
+// rather than this broad classification.
 export interface NseIndustryRow {
   symbol: string;
   name: string;

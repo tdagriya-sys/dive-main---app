@@ -1,11 +1,6 @@
 import { AssetClass } from "../models/Instrument";
-import { MUTUAL_FUND_TOP_HOLDINGS } from "../seed/mutualFundTopHoldings";
-import {
-  KEYWORD_SECTOR_AFFINITY,
-  INDUSTRY_ASSET_CLASS_AFFINITY,
-  MF_SEGMENT_TO_NSE_INDUSTRY,
-  SECTORAL_MF_AFFINITY_STRENGTH,
-} from "../seed/sectorAffinity";
+import { LookthroughConfigPayload } from "../models/LookthroughConfig";
+import { LOOKTHROUGH_CONFIG_DEFAULTS } from "../config/lookthroughDefaults";
 
 /**
  * Best-effort normalization to a rough "issuer" key by stripping common
@@ -66,24 +61,22 @@ interface ConnectionResult {
   reason: string;
 }
 
-// Two different companies in the same broad industry aren't the same bet,
-// but a sector-wide shock (a rate move, a regulatory change, a demand shock)
-// would still hit both — so this sits well below an exact issuer match (1.0)
-// but above the smaller cross-class affinities below.
-const SAME_SECTOR_STRENGTH = 0.3;
-
 /**
  * Same-asset-class connection: two distinct holdings in the SAME class and
  * the same broad sector (currently only populated for EQUITY, via NSE
  * industry classification). Skips holdings that are actually the same
  * issuer under slightly different names — that's a data-quality duplicate,
- * not a sector-affinity case.
+ * not a sector-affinity case. `sameSectorStrength` sits well below an exact
+ * issuer match (1.0, full overlap) but above the smaller cross-class
+ * affinities below — two different companies in the same broad industry
+ * aren't the same bet, but a sector-wide shock (a rate move, a regulatory
+ * change, a demand shock) would still hit both.
  */
-function sameSectorConnection(h1: LookthroughHolding, h2: LookthroughHolding): ConnectionResult | null {
+function sameSectorConnection(h1: LookthroughHolding, h2: LookthroughHolding, cfg: LookthroughConfigPayload): ConnectionResult | null {
   if (!h1.sector || !h2.sector || h1.sector !== h2.sector) return null;
   if (normalizeIssuer(h1.name) === normalizeIssuer(h2.name)) return null;
   return {
-    strength: SAME_SECTOR_STRENGTH,
+    strength: cfg.sameSectorStrength,
     reason: `${h1.name} and ${h2.name} are both in the ${h1.sector} sector`,
   };
 }
@@ -115,19 +108,19 @@ function sameSectorConnection(h1: LookthroughHolding, h2: LookthroughHolding): C
  * Returns null when none apply — most pairs (e.g. an IT stock and an FD) are
  * genuinely unrelated and should contribute nothing.
  */
-function connectionBetween(h1: LookthroughHolding, h2: LookthroughHolding): ConnectionResult | null {
-  if (h1.assetClass === h2.assetClass) return sameSectorConnection(h1, h2);
+function connectionBetween(h1: LookthroughHolding, h2: LookthroughHolding, cfg: LookthroughConfigPayload): ConnectionResult | null {
+  if (h1.assetClass === h2.assetClass) return sameSectorConnection(h1, h2, cfg);
 
   const key1 = normalizeIssuer(h1.name);
   const key2 = normalizeIssuer(h2.name);
   if (key1 && key2 && key1 === key2) {
-    return { strength: 1, reason: `${h1.name} and ${h2.name} appear to be the same issuer` };
+    return { strength: cfg.exactIssuerStrength, reason: `${h1.name} and ${h2.name} appear to be the same issuer` };
   }
 
   const mfSide = h1.assetClass === "MUTUAL_FUND" ? h1 : h2.assetClass === "MUTUAL_FUND" ? h2 : null;
   const mfOtherSide = mfSide === h1 ? h2 : mfSide === h2 ? h1 : null;
   if (mfSide && mfOtherSide && (mfOtherSide.assetClass === "EQUITY" || mfOtherSide.assetClass === "BOND")) {
-    const fundHoldings = MUTUAL_FUND_TOP_HOLDINGS[normalizeFundKey(mfSide.name)];
+    const fundHoldings = cfg.mutualFundTopHoldings[normalizeFundKey(mfSide.name)];
     if (fundHoldings) {
       const match = fundHoldings.find((fh) => normalizeIssuer(fh.company) === normalizeIssuer(mfOtherSide.name));
       if (match) {
@@ -143,7 +136,7 @@ function connectionBetween(h1: LookthroughHolding, h2: LookthroughHolding): Conn
   const nonEquitySide = equitySide === h1 ? h2 : equitySide === h2 ? h1 : null;
   if (equitySide && nonEquitySide) {
     const lowerName = equitySide.name.toLowerCase();
-    for (const entry of KEYWORD_SECTOR_AFFINITY) {
+    for (const entry of cfg.keywordSectorAffinity) {
       if (entry.keywords.some((k) => lowerName.includes(k))) {
         const affinity = entry.affinity[nonEquitySide.assetClass];
         if (affinity) {
@@ -156,7 +149,7 @@ function connectionBetween(h1: LookthroughHolding, h2: LookthroughHolding): Conn
     }
 
     if (equitySide.sector) {
-      const affinity = INDUSTRY_ASSET_CLASS_AFFINITY[equitySide.sector]?.[nonEquitySide.assetClass];
+      const affinity = cfg.industryAssetClassAffinity[equitySide.sector]?.[nonEquitySide.assetClass];
       if (affinity) {
         return {
           strength: affinity,
@@ -166,10 +159,10 @@ function connectionBetween(h1: LookthroughHolding, h2: LookthroughHolding): Conn
     }
 
     if (nonEquitySide.assetClass === "MUTUAL_FUND" && equitySide.sector && nonEquitySide.sector) {
-      const nseIndustries = MF_SEGMENT_TO_NSE_INDUSTRY[nonEquitySide.sector];
+      const nseIndustries = cfg.mfSegmentToNseIndustry[nonEquitySide.sector];
       if (nseIndustries?.includes(equitySide.sector)) {
         return {
-          strength: SECTORAL_MF_AFFINITY_STRENGTH,
+          strength: cfg.sectoralMfAffinityStrength,
           reason: `${equitySide.name} (${equitySide.sector}) and ${nonEquitySide.name} are both concentrated in the same sector`,
         };
       }
@@ -208,7 +201,11 @@ export interface LookthroughResult {
  * Every pair's contribution is capped at the SMALLER of the two holdings'
  * values (shared exposure can't exceed what the smaller position represents).
  */
-export function computeLookthroughOverlap(holdings: LookthroughHolding[], totalValue: number): LookthroughResult {
+export function computeLookthroughOverlap(
+  holdings: LookthroughHolding[],
+  totalValue: number,
+  cfg: LookthroughConfigPayload = LOOKTHROUGH_CONFIG_DEFAULTS
+): LookthroughResult {
   if (totalValue <= 0 || holdings.length < 2) return { overlapShare: 0, sameClassOverlapShare: 0, connections: [] };
 
   const connections: Connection[] = [];
@@ -219,7 +216,7 @@ export function computeLookthroughOverlap(holdings: LookthroughHolding[], totalV
 
   for (let i = 0; i < holdings.length; i++) {
     for (let j = i + 1; j < holdings.length; j++) {
-      const c = connectionBetween(holdings[i], holdings[j]);
+      const c = connectionBetween(holdings[i], holdings[j], cfg);
       if (c && c.strength > 0) {
         const pairValue = Math.min(holdings[i].value, holdings[j].value) * c.strength;
         const sameClass = holdings[i].assetClass === holdings[j].assetClass;

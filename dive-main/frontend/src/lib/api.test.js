@@ -1,4 +1,4 @@
-import { api, setAccessToken, getAccessToken, setSessionExpiredHandler } from "./api";
+import { api, setAccessToken, getAccessToken, setSessionExpiredHandler, setPlanLimitHandler } from "./api";
 
 describe("access token storage", () => {
   it("get/set round-trips, staying in memory only (never persisted)", () => {
@@ -97,6 +97,23 @@ describe("response interceptor — 401 handling", () => {
     expect(sessionExpiredHandler).toHaveBeenCalledTimes(1);
   });
 
+  it("does not attempt a refresh for a 401 STEP_UP_REQUIRED — surfaces it straight to the caller", async () => {
+    let refreshCallCount = 0;
+    api.defaults.adapter = (config) => {
+      if (config.url === "/admin/scoring-config/publish") {
+        return Promise.reject({ response: { status: 401, data: { error: "STEP_UP_REQUIRED" } }, config });
+      }
+      if (config.url === "/auth/refresh") {
+        refreshCallCount += 1;
+        return Promise.resolve({ data: { accessToken: "fresh-token" }, status: 200, config, headers: {} });
+      }
+      throw new Error("unexpected url in test: " + config.url);
+    };
+
+    await expect(api.post("/admin/scoring-config/publish")).rejects.toMatchObject({ response: { data: { error: "STEP_UP_REQUIRED" } } });
+    expect(refreshCallCount).toBe(0);
+  });
+
   it("does not attempt a refresh loop for a 401 from an /auth/ route itself", async () => {
     let refreshCallCount = 0;
     api.defaults.adapter = (config) => {
@@ -110,5 +127,34 @@ describe("response interceptor — 401 handling", () => {
     await expect(api.post("/auth/refresh")).rejects.toBeTruthy();
     // Only the one direct call — no nested "try to refresh the refresh" loop.
     expect(refreshCallCount).toBe(1);
+  });
+});
+
+// Phase 6a of docs/ADMIN_PANEL_PLAN.md §5.4/§7 — the central
+// PLAN_LIMIT_REACHED -> upgrade-prompt hook.
+describe("response interceptor — PLAN_LIMIT_REACHED handling", () => {
+  const originalAdapter = api.defaults.adapter;
+  afterEach(() => {
+    api.defaults.adapter = originalAdapter;
+    setPlanLimitHandler(null);
+  });
+
+  it("calls the registered plan-limit handler with the response payload, and still rejects the original call", async () => {
+    const handler = jest.fn();
+    setPlanLimitHandler(handler);
+    const payload = { error: "PLAN_LIMIT_REACHED", key: "bot_scan", window: "weekly", limit: 1, upgradeUrl: "/subscription" };
+    api.defaults.adapter = (config) => Promise.reject({ response: { status: 403, data: payload }, config });
+
+    await expect(api.post("/botscan/analyze")).rejects.toBeTruthy();
+    expect(handler).toHaveBeenCalledWith(payload);
+  });
+
+  it("does nothing special for an unrelated 403", async () => {
+    const handler = jest.fn();
+    setPlanLimitHandler(handler);
+    api.defaults.adapter = (config) => Promise.reject({ response: { status: 403, data: { error: "FORBIDDEN" } }, config });
+
+    await expect(api.get("/admin/users")).rejects.toBeTruthy();
+    expect(handler).not.toHaveBeenCalled();
   });
 });

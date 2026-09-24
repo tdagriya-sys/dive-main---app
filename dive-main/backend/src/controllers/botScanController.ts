@@ -2,6 +2,7 @@ import { Response } from "express";
 import { AuthedRequest } from "../middleware/auth";
 import { ApiError } from "../middleware/errorHandler";
 import { extractHoldingsWithAI, isAiExtractionConfigured, AiExtractionNotConfiguredError, AiExtractionTimeoutError } from "../services/aiExtractionService";
+import { emitActivity } from "../services/activityLog";
 
 /**
  * Analyzes every frame captured during one scan session in a single AI call —
@@ -28,6 +29,7 @@ export async function analyzeFrames(req: AuthedRequest, res: Response) {
       files.map((f) => ({ kind: "image" as const, data: f.buffer, mimeType: f.mimetype })),
       "bot_scan"
     );
+    emitActivity("bot_scan", { userId: req.userId, req, props: { framesAnalyzed: files.length, candidateCount: result.holdings.length } });
     res.status(200).json({ candidates: result.holdings, excludedNotes: result.excludedNotes, framesAnalyzed: files.length });
   } catch (err) {
     if (err instanceof AiExtractionNotConfiguredError) {

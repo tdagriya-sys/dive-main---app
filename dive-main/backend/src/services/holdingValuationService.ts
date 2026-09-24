@@ -1,8 +1,10 @@
+import { Types } from "mongoose";
 import { Holding } from "../models/Holding";
 import { AssetClass } from "../models/Instrument";
 import { computeFdValues, computePfValues, FdHoldingInput, PfHoldingInput } from "../validators/holdings";
 import { resolveHoldingLatestPrice, MARKET_PRICEABLE_CLASSES, LatestPriceInput } from "./priceHistoryService";
 import { invalidateDiveScoreCache } from "./diveScoreService";
+import { getPremiumUserIds } from "./entitlementService";
 
 /**
  * Keeps every holding's `currentValue` fresh on a daily cadence instead of
@@ -31,7 +33,7 @@ import { invalidateDiveScoreCache } from "./diveScoreService";
  * Deliberately does NOT call invalidateReportPurchase/bump portfolioVersion
  * — a product decision (confirmed with the user, not assumed): routine
  * daily price/interest drift alone must not force a previously-paid
- * resilience-score report to go stale and need a fresh Rs. 99 purchase.
+ * resilience-score report to go stale and need a fresh purchase.
  * Only a genuine portfolio composition change (holdings added/edited/
  * deleted, an AA sync, an age change) does that, via the existing call
  * sites in holdingsController.ts/aaController.ts/userController.ts — this
@@ -55,8 +57,8 @@ interface FdPfHoldingLean {
   extraFields: Record<string, unknown>;
 }
 
-async function refreshFdPfValuations(touchedUserIds: Set<string>): Promise<number> {
-  const holdings = (await Holding.find({ assetClass: { $in: ["FD", "PF"] } }).lean()) as unknown as FdPfHoldingLean[];
+async function refreshFdPfValuations(touchedUserIds: Set<string>, premiumUserIds: Types.ObjectId[]): Promise<number> {
+  const holdings = (await Holding.find({ assetClass: { $in: ["FD", "PF"] }, userId: { $in: premiumUserIds } }).lean()) as unknown as FdPfHoldingLean[];
   const ops: Array<{ updateOne: { filter: { _id: unknown }; update: { $set: Record<string, unknown> } } }> = [];
 
   for (const h of holdings) {
@@ -136,12 +138,14 @@ interface InstrumentGroup {
 
 async function refreshMarketPricedValuations(
   touchedUserIds: Set<string>,
-  priceResolver: (input: LatestPriceInput) => Promise<number | null>
+  priceResolver: (input: LatestPriceInput) => Promise<number | null>,
+  premiumUserIds: Types.ObjectId[]
 ): Promise<{ updated: number; distinctInstruments: number }> {
   const holdings = (await Holding.find({
     assetClass: { $in: MARKET_PRICEABLE_CLASSES },
     instrumentId: { $ne: null },
     quantity: { $gt: 0 },
+    userId: { $in: premiumUserIds },
   })
     .populate("instrumentId", "symbol metadata")
     .lean()) as unknown as MarketPricedHoldingLean[];
@@ -195,9 +199,16 @@ async function refreshMarketPricedValuations(
 async function runDailyValuationRefreshInternal(
   priceResolver: (input: LatestPriceInput) => Promise<number | null>
 ): Promise<ValuationRefreshSummary> {
+  // Phase 6a of docs/ADMIN_PANEL_PLAN.md §3.1/§3.2 — daily revaluation is a
+  // Premium-only entitlement; a Freemium holding's currentValue stays
+  // exactly as entered (or last edited) until this job has a reason to
+  // touch it, i.e. never. "Auto-updated Dive Score: Off" for Freemium is a
+  // natural consequence of this filter, not separate logic — see
+  // entitlementService.ts's own comment on getPremiumUserIds.
+  const premiumUserIds = await getPremiumUserIds();
   const touchedUserIds = new Set<string>();
-  const fdPfUpdated = await refreshFdPfValuations(touchedUserIds);
-  const { updated: marketPricedUpdated, distinctInstruments } = await refreshMarketPricedValuations(touchedUserIds, priceResolver);
+  const fdPfUpdated = await refreshFdPfValuations(touchedUserIds, premiumUserIds);
+  const { updated: marketPricedUpdated, distinctInstruments } = await refreshMarketPricedValuations(touchedUserIds, priceResolver, premiumUserIds);
 
   for (const userId of touchedUserIds) invalidateDiveScoreCache(userId);
 

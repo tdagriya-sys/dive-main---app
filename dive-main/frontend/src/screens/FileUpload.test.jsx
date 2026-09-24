@@ -164,3 +164,16 @@ describe("FileUpload — market data coverage notice", () => {
     expect(screen.getByTestId("market-data-notice")).toHaveTextContent(/limited access to market data/i);
   });
 });
+
+// docs/ADMIN_PANEL_PLAN.md §7 — proactive Freemium quota surfacing.
+describe("FileUpload — usage quota note", () => {
+  it("shows the doc_upload quota for a Freemium user", () => {
+    useDive.mockReturnValue({
+      setScreen: jest.fn(), goBack: jest.fn(), loadHoldings: jest.fn().mockResolvedValue([]),
+      holdings: [], user: { id: "u1", name: "Test", age: 30 },
+      entitlements: { isPremium: false, entitlements: { docUploadWeekly: 1, docUploadMonthly: 3 }, usage: { doc_upload: { weekly: 0, monthly: 0 } } },
+    });
+    render(<FileUpload />);
+    expect(screen.getByTestId("usage-quota-note-doc_upload")).toHaveTextContent(/left on your free plan/i);
+  });
+});

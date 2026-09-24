@@ -120,6 +120,25 @@ let webpackConfig = {
       return webpackConfig;
     },
   },
+  jest: {
+    configure: (jestConfig) => {
+      // react-router-dom@7 / react-router@7 (added for the admin panel's
+      // routing — docs/ADMIN_PANEL_PLAN.md Phase 0.4) publish a package.json
+      // "main" of "./dist/main.js", which doesn't actually exist in either
+      // package's published dist/ (confirmed against the registry — a real
+      // quirk of this exact version, not a broken local install). Real
+      // consumers resolve via the "exports" map instead, which points at
+      // dist/index.mjs (ESM) — CRA's bundled Jest doesn't reliably resolve
+      // that here, so both are mapped straight to their real CJS entry files.
+      jestConfig.moduleNameMapper = {
+        ...(jestConfig.moduleNameMapper || {}),
+        "^react-router-dom$": path.resolve(__dirname, "node_modules/react-router-dom/dist/index.js"),
+        "^react-router$": path.resolve(__dirname, "node_modules/react-router/dist/development/index.js"),
+        "^react-router/dom$": path.resolve(__dirname, "node_modules/react-router/dist/development/dom-export.js"),
+      };
+      return jestConfig;
+    },
+  },
 };
 
 webpackConfig.devServer = (devServerConfig) => {

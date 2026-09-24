@@ -1,6 +1,7 @@
 import request from "supertest";
 import { createApp } from "../src/app";
-import { ContactSubmission } from "../src/models/ContactSubmission";
+import { Ticket } from "../src/models/Ticket";
+import { TicketMessage } from "../src/models/TicketMessage";
 
 const app = createApp();
 
@@ -13,17 +14,27 @@ const validPayload = {
   timeSlot: "Morning · 9 AM – 12 PM",
 };
 
+// Phase 4 of docs/ADMIN_PANEL_PLAN.md: the contact form now creates a real
+// Ticket (source:"contact_form") instead of a standalone ContactSubmission
+// row — see contactController.ts's own comment for why.
 describe("contact", () => {
-  it("saves a valid contact submission to the database", async () => {
+  it("creates a ticket from a valid contact submission", async () => {
     const res = await request(app).post("/api/contact").send(validPayload);
     expect(res.status).toBe(201);
 
-    const saved = await ContactSubmission.findOne({ email: "test@example.com" });
-    expect(saved).toBeTruthy();
-    expect(saved?.name).toBe("Test User");
-    expect(saved?.mobile).toBe("9876543210");
-    expect(saved?.subject).toBe("Question about pricing");
-    expect(saved?.timeSlot).toBe("Morning · 9 AM – 12 PM");
+    const ticket = await Ticket.findOne({ requesterEmail: "test@example.com" });
+    expect(ticket).toBeTruthy();
+    expect(ticket?.requesterName).toBe("Test User");
+    expect(ticket?.requesterMobile).toBe("9876543210");
+    expect(ticket?.subject).toBe("Question about pricing");
+    expect(ticket?.source).toBe("contact_form");
+    expect(ticket?.categoryKey).toBe("general");
+    expect(ticket?.callbackRequested?.preferredWindow).toBe("Morning · 9 AM – 12 PM");
+    expect(ticket?.callbackRequested?.mobile).toBe("9876543210");
+
+    const message = await TicketMessage.findOne({ ticketId: ticket?._id });
+    expect(message?.body).toBe(validPayload.description);
+    expect(message?.authorType).toBe("requester");
   });
 
   it("rejects a submission with an invalid email", async () => {
@@ -43,12 +54,12 @@ describe("contact", () => {
     expect(res.status).toBe(400);
   });
 
-  it("accepts a submission with no subject, defaulting it to an empty string", async () => {
+  it("accepts a submission with no subject, defaulting the ticket's subject to a generic title", async () => {
     const { subject, ...rest } = validPayload;
     const res = await request(app).post("/api/contact").send(rest);
     expect(res.status).toBe(201);
 
-    const saved = await ContactSubmission.findOne({ email: "test@example.com" });
-    expect(saved?.subject).toBe("");
+    const ticket = await Ticket.findOne({ requesterEmail: "test@example.com" });
+    expect(ticket?.subject).toBe("Contact form message");
   });
 });

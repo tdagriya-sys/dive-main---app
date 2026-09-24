@@ -1,0 +1,46 @@
+# Local DEV dependencies only — MongoDB + Redis for working on the app locally.
+# NOT a production artifact (production runs Mongo Atlas + a managed/host Redis;
+# see docs/SERVER_DEPLOYMENT_GUIDE.md and docs/ADMIN_PANEL_SETUP_GUIDE.md).
+#
+#   docker compose -f docker-compose.dev.yml up -d      # start
+#   docker compose -f docker-compose.dev.yml down       # stop (keeps data)
+#   docker compose -f docker-compose.dev.yml down -v     # stop + wipe data
+#
+# Then in backend/.env:
+#   MONGO_URL=mongodb://127.0.0.1:27018
+#   DB_NAME=dive_staging
+#   REDIS_URL=redis://127.0.0.1:6379
+#
+# Both ports are bound to 127.0.0.1 only — never exposed on the network.
+#
+# Mongo is mapped to host port 27018, NOT the default 27017 — this machine
+# already runs a separate native `mongod.exe` Windows service on 27017 shared
+# with other projects; this container must never collide with or be mistaken
+# for that instance. The container's own internal port stays the standard
+# 27017 (only the host-side mapping is shifted).
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: dive-dev-mongo
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:27018:27017"
+    volumes:
+      - dive-dev-mongo-data:/data/db
+    # No auth for a localhost-only dev container — matches "in-memory Mongo had
+    # none either". Add --auth + credentials here if you want parity with prod.
+
+  redis:
+    image: redis:7
+    container_name: dive-dev-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - dive-dev-redis-data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+
+volumes:
+  dive-dev-mongo-data:
+  dive-dev-redis-data:

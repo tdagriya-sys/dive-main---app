@@ -8,6 +8,7 @@ jest.mock("../lib/api", () => ({
   api: { get: jest.fn(), post: jest.fn(), patch: jest.fn(), delete: jest.fn() },
   setAccessToken: jest.fn(),
   setSessionExpiredHandler: jest.fn(),
+  setPlanLimitHandler: jest.fn(),
 }));
 
 function Harness() {

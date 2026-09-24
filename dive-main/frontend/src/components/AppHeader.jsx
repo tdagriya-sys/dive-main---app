@@ -1,42 +1,92 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Trophy, Search, Bell, User, LogOut, X, Download, LifeBuoy, Menu, LayoutGrid } from "lucide-react";
+import { Trophy, Search, Bell, User, LogOut, X, Download, LifeBuoy, Menu, LayoutGrid, Crown } from "lucide-react";
 import { useDive } from "../context/DiveContext";
+import { api } from "../lib/api";
 
-// Client-side only — this is a brand-new feature with nothing to persist yet
-// (no backend model exists for it). Opening the panel marks everything read;
-// state resets on reload, same lightweight non-persisted pattern this app
-// already uses for sim/sheet UI state.
-const DEFAULT_NOTIFICATIONS = [
-  {
-    id: "welcome",
-    title: "Welcome to DIVVE 👋",
-    body: "Add your first holding, or tell Divve Planner how much you have — either way, you'll have a real Divve Score in under a minute.",
-    unread: true,
-  },
-];
+// Re-checks for new notifications on this interval while the app is open —
+// short polling rather than a websocket/SSE push (deliberately, per this
+// feature's own decision — see this phase's changelog entry), so a
+// notification sent while the user is already in the app shows up without
+// them needing to refresh the page.
+const NOTIFICATIONS_POLL_MS = 20000;
+
+// A same-origin link (an app page like /?go=login) opens in the same tab;
+// anything else opens in a new one so the user keeps their place.
+function isSameOrigin(href) {
+  try {
+    return new URL(href, window.location.origin).origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+function formatRelativeTime(dateStr) {
+  if (!dateStr) return "";
+  const diffMs = Date.now() - new Date(dateStr).getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 5) return "Just now";
+  if (diffSec < 60) return `${diffSec}s ago`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 7) return `${diffDay}d ago`;
+  return new Date(dateStr).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
 
 // Persistent header shown on every authenticated screen (DiveShell.jsx) —
 // logo (home), Your Journey (Insights.jsx — already titled "Your DIVVE
-// Journey"), search (Ask Divve), notifications, and profile. Promotes what
-// used to be three Home-only icons (home-search-btn/home-notif-btn/
-// home-settings-btn) to somewhere reachable from any page, plus two
-// genuinely new features (notifications, the richer profile dropdown).
+// Journey"), search (Ask Divve), notifications, and profile.
 export default function AppHeader({ onOpenExtension, onOpenSupport, onOpenMobileNav }) {
   const { user, setScreen, logout } = useDive();
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [quickOpen, setQuickOpen] = useState(false); // the mobile quick-actions popover
-  const [notifications, setNotifications] = useState(DEFAULT_NOTIFICATIONS);
-  const hasUnread = notifications.some((n) => n.unread);
+  // Real notifications (Phase 5 of docs/ADMIN_PANEL_PLAN.md), backed by
+  // UserNotification — replaces the earlier client-only stub (a single
+  // hardcoded "Welcome to DIVVE" entry that never persisted). Polled every
+  // NOTIFICATIONS_POLL_MS while the app is open, not just on mount, so a
+  // campaign/notification sent while the user is already in the app shows
+  // up on its own instead of needing a page refresh.
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const hasUnread = unreadCount > 0;
+
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchNotifications() {
+      try {
+        const { data } = await api.get("/notifications");
+        if (cancelled) return;
+        setNotifications(data.notifications);
+        setUnreadCount(data.unreadCount);
+      } catch {
+        // best-effort — a failed fetch just leaves the bell as it was
+      }
+    }
+    fetchNotifications();
+    const intervalId = setInterval(fetchNotifications, NOTIFICATIONS_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+  }, []);
 
   // The three header popovers (notifications, profile, quick actions) are
-  // mutually exclusive — opening any one closes the other two.
+  // mutually exclusive — opening any one closes the other two. Opening
+  // notifications marks everything read, same behavior the old stub had,
+  // now persisted server-side instead of only in local state.
   const openNotifications = () => {
     setProfileOpen(false);
     setQuickOpen(false);
     setNotifOpen(true);
-    setNotifications((list) => list.map((n) => ({ ...n, unread: false })));
+    if (unreadCount > 0) {
+      Promise.resolve(api.post("/notifications/read-all")).catch(() => {});
+      setUnreadCount(0);
+      setNotifications((list) => list.map((n) => ({ ...n, readAt: n.readAt || new Date().toISOString() })));
+    }
   };
 
   const openProfile = () => {
@@ -94,6 +144,7 @@ export default function AppHeader({ onOpenExtension, onOpenSupport, onOpenMobile
               <QuickActionsMenu
                 hasUnread={hasUnread}
                 onClose={() => setQuickOpen(false)}
+                onSubscription={() => { setQuickOpen(false); setScreen("subscription"); }}
                 onExtension={() => { setQuickOpen(false); onOpenExtension?.(); }}
                 onJourney={() => { setQuickOpen(false); setScreen("insights"); }}
                 onSearch={() => { setQuickOpen(false); setScreen("ask"); }}
@@ -103,8 +154,12 @@ export default function AppHeader({ onOpenExtension, onOpenSupport, onOpenMobile
             )}
           </div>
 
-          {/* The five utility icons — inline from md:+, collapsed into the
+          {/* The six utility icons — inline from md:+, collapsed into the
               quick-actions popover above below md. */}
+          <button data-testid="header-subscription-btn" onClick={() => setScreen("subscription")}
+            className="hidden md:flex items-center gap-1.5 text-sm font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] px-3 py-2 rounded-full hover:bg-[var(--surface-card-hover)] transition-colors">
+            <Crown size={16} className="text-[var(--dive-blue)] shrink-0" /> Subscription
+          </button>
           <button data-testid="header-extension-btn" onClick={onOpenExtension}
             className="hidden md:flex items-center gap-1.5 text-sm font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] px-3 py-2 rounded-full hover:bg-[var(--surface-card-hover)] transition-colors">
             <Download size={16} className="text-[var(--dive-blue)] shrink-0" /> Get Extension
@@ -163,8 +218,9 @@ export default function AppHeader({ onOpenExtension, onOpenSupport, onOpenMobile
 // still "running" long past its duration. A header dropdown that gets stuck
 // half-faded is worse than one that just appears; instant is fine for a
 // small menu.
-function QuickActionsMenu({ hasUnread, onClose, onExtension, onJourney, onSearch, onNotifications, onSupport }) {
+function QuickActionsMenu({ hasUnread, onClose, onSubscription, onExtension, onJourney, onSearch, onNotifications, onSupport }) {
   const items = [
+    { Icon: Crown, label: "Subscription", onClick: onSubscription, testId: "quick-action-subscription" },
     { Icon: Download, label: "Get Extension", onClick: onExtension, testId: "quick-action-extension" },
     { Icon: Trophy, label: "Your Journey", onClick: onJourney, testId: "quick-action-journey" },
     { Icon: Search, label: "Search", onClick: onSearch, testId: "quick-action-search" },
@@ -252,12 +308,41 @@ function NotificationPanel({ notifications, onClose }) {
           <button data-testid="notification-panel-close-btn" onClick={onClose}><X size={22} className="text-[var(--text-secondary)]" /></button>
         </div>
         <div className="p-6 space-y-3">
-          {notifications.map((n) => (
-            <div key={n.id} className="bg-[var(--surface-card-hover)] rounded-2xl p-4" data-testid={`notification-item-${n.id}`}>
-              <p className="font-bold text-sm">{n.title}</p>
-              <p className="text-sm text-[var(--text-secondary)] mt-1">{n.body}</p>
-            </div>
-          ))}
+          {notifications.length === 0 ? (
+            <p className="text-sm text-[var(--text-tertiary)] text-center py-8" data-testid="notification-panel-empty">
+              No notifications yet.
+            </p>
+          ) : (
+            notifications.map((n) => (
+              <div key={n.id} className="bg-[var(--surface-card-hover)] rounded-2xl p-4" data-testid={`notification-item-${n.id}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <p className="font-bold text-sm">{n.title}</p>
+                  <span className="text-[10px] text-[var(--text-tertiary)] shrink-0 whitespace-nowrap mt-0.5" data-testid={`notification-item-time-${n.id}`}>
+                    {formatRelativeTime(n.deliveredAt)}
+                  </span>
+                </div>
+                {/* bodyHtml is backend-generated only, from bold/highlight/
+                    image markdown the admin authored, escaped and
+                    re-assembled into a fixed set of tags server-side — see
+                    notificationEmailService.ts::renderMarkdownToHtml — same
+                    trust boundary as the popup card and email already
+                    render this exact string with. */}
+                <p className="text-sm text-[var(--text-secondary)] mt-1" data-testid={`notification-item-body-${n.id}`} dangerouslySetInnerHTML={{ __html: n.bodyHtml || n.body }} />
+                {/* The campaign's button, as a simple text link — the bell stays
+                    plain (no styled button, no inline links), by design. */}
+                {n.link && n.linkLabel && (
+                  <a
+                    href={n.link}
+                    {...(isSameOrigin(n.link) ? {} : { target: "_blank", rel: "noopener noreferrer" })}
+                    data-testid={`notification-item-link-${n.id}`}
+                    className="inline-block mt-2 text-xs font-bold text-[var(--gold-c)] hover:underline"
+                  >
+                    {n.linkLabel} →
+                  </a>
+                )}
+              </div>
+            ))
+          )}
         </div>
       </motion.div>
     </>

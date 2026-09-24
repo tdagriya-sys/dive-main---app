@@ -234,3 +234,16 @@ describe("ManualEntry — market data coverage notice", () => {
     expect(screen.getByTestId("market-data-notice")).toHaveTextContent(/limited access to market data/i);
   });
 });
+
+// docs/ADMIN_PANEL_PLAN.md §7 — proactive Freemium quota surfacing.
+describe("ManualEntry — usage quota note", () => {
+  it("shows the portfolio_edit quota for a Freemium user", () => {
+    useDive.mockReturnValue({
+      setScreen: jest.fn(), goBack: jest.fn(), loadHoldings: jest.fn().mockResolvedValue([]),
+      updateHolding: jest.fn(), holdings: [], editingHolding: null, setEditingHolding: jest.fn(),
+      entitlements: { isPremium: false, entitlements: { portfolioEditWeekly: 2, portfolioEditMonthly: 5 }, usage: { portfolio_edit: { weekly: 2, monthly: 2 } } },
+    });
+    render(<ManualEntry />);
+    expect(screen.getByTestId("usage-quota-note-portfolio_edit")).toHaveTextContent(/used all your free portfolio edits/i);
+  });
+});

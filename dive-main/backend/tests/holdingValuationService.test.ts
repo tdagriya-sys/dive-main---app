@@ -2,18 +2,44 @@ import request from "supertest";
 import { createApp } from "../src/app";
 import { Instrument } from "../src/models/Instrument";
 import { Holding } from "../src/models/Holding";
+import { SubscriptionPlan } from "../src/models/SubscriptionPlan";
+import { Subscription } from "../src/models/Subscription";
 import { runDailyValuationRefresh } from "../src/services/holdingValuationService";
 import { computeFdValues, computePfValues } from "../src/validators/holdings";
+import { seedDefaultSubscriptionPlansIfEmpty } from "../src/services/entitlementService";
 
 const app = createApp();
 
 let mobileCounter = 9500000000;
+
+// Daily revaluation is Premium-only as of Phase 6a of
+// docs/ADMIN_PANEL_PLAN.md §3.1/§3.2 — every test in this file is about the
+// REVALUATION MATH itself (already covered before that phase existed), so
+// every user created here is granted Premium immediately, keeping those
+// tests exercising exactly what they always did. The Freemium-is-excluded
+// behavior this phase actually introduces gets its own dedicated describe
+// block below instead.
+async function grantPremium(userId: string) {
+  await seedDefaultSubscriptionPlansIfEmpty();
+  const plan = await SubscriptionPlan.findOne({ key: "premium_monthly" }).lean();
+  await Subscription.create({
+    userId,
+    planId: plan!._id,
+    status: "active",
+    currentPeriodStart: new Date(),
+    currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    startedAt: new Date(),
+  });
+}
+
 async function signupAndLogin() {
   const mobile = String(mobileCounter++);
   const signup = { name: "Valuation Tester", mobile, email: `val_${mobile}@example.com`, age: 30, password: "Passw0rd!", confirmPassword: "Passw0rd!" };
   const start = await request(app).post("/api/auth/signup/start").send(signup);
   const verify = await request(app).post("/api/auth/signup/verify").send({ mobile, otp: start.body.devOtp });
-  return { token: verify.body.accessToken as string, userId: verify.body.user.id as string };
+  const userId = verify.body.user.id as string;
+  await grantPremium(userId);
+  return { token: verify.body.accessToken as string, userId };
 }
 
 function auth(token: string) {
@@ -272,5 +298,56 @@ describe("holdingValuationService — reconstructed inputs match the validators'
     const expected = computePfValues({ assetClass: "PF", ...fields });
     expect(create.body.holding.currentValue).toBe(expected.currentValue);
     expect(create.body.holding.investedValue).toBe(expected.investedToDate);
+  });
+});
+
+// Phase 6a of docs/ADMIN_PANEL_PLAN.md §3.1/§3.2 — "Daily portfolio
+// revaluation: Off" for Freemium. Every other describe block above grants
+// Premium via signupAndLogin/grantPremium specifically so the math tests
+// stay unaffected by this gating — this block is the one place that
+// actually exercises it.
+describe("holdingValuationService — Premium-only gating", () => {
+  async function signupFreemium() {
+    const mobile = String(mobileCounter++);
+    const signup = { name: "Freemium Tester", mobile, email: `freemium_val_${mobile}@example.com`, age: 30, password: "Passw0rd!", confirmPassword: "Passw0rd!" };
+    const start = await request(app).post("/api/auth/signup/start").send(signup);
+    const verify = await request(app).post("/api/auth/signup/verify").send({ mobile, otp: start.body.devOtp });
+    return { token: verify.body.accessToken as string, userId: verify.body.user.id as string };
+  }
+
+  it("never touches a Freemium user's FD currentValue, even when it's genuinely stale", async () => {
+    const { token } = await signupFreemium();
+    const create = await request(app)
+      .post("/api/holdings/manual")
+      .set(auth(token))
+      .send({ assetClass: "FD", bank: "Freemium Bank", principal: 100000, tenureMonths: 24, startMonth: 1, startYear: new Date().getFullYear() - 1, interestRate: 7 });
+    const holdingId = create.body.holding._id as string;
+    await Holding.updateOne({ _id: holdingId }, { $set: { currentValue: 1 } });
+
+    const summary = await runDailyValuationRefresh();
+
+    const after = await Holding.findById(holdingId).lean();
+    expect(after?.currentValue).toBe(1); // untouched
+    expect(summary.usersTouched).toBe(0);
+  });
+
+  it("touches a Premium user's holdings but not a Freemium user's, in the same run", async () => {
+    const premium = await signupAndLogin(); // grants Premium via the helper above
+    const freemium = await signupFreemium();
+
+    const premiumHolding = await request(app)
+      .post("/api/holdings/manual")
+      .set(auth(premium.token))
+      .send({ assetClass: "FD", bank: "Premium Bank", principal: 50000, tenureMonths: 12, startMonth: 1, startYear: new Date().getFullYear() - 1, interestRate: 6 });
+    const freemiumHolding = await request(app)
+      .post("/api/holdings/manual")
+      .set(auth(freemium.token))
+      .send({ assetClass: "FD", bank: "Freemium Bank", principal: 50000, tenureMonths: 12, startMonth: 1, startYear: new Date().getFullYear() - 1, interestRate: 6 });
+
+    await Holding.updateMany({ _id: { $in: [premiumHolding.body.holding._id, freemiumHolding.body.holding._id] } }, { $set: { currentValue: 1 } });
+    await runDailyValuationRefresh();
+
+    expect((await Holding.findById(premiumHolding.body.holding._id).lean())?.currentValue).not.toBe(1);
+    expect((await Holding.findById(freemiumHolding.body.holding._id).lean())?.currentValue).toBe(1);
   });
 });

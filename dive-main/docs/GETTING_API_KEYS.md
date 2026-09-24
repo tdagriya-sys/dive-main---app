@@ -70,6 +70,8 @@ You already own a domain (from GoDaddy), so you can do this right now — it doe
 
 From that point on, real OTP emails will deliver to **any** signup email address, not just your own.
 
+> **Marketing emails use a different address.** `EMAIL_FROM` (the no-reply address above) sends sign-in codes and other account emails, and stays exactly as you set it. Promotional emails — onboarding campaigns to people who haven't registered yet, and campaigns in the `marketing` notification category — use a *separate* `MARKETING_EMAIL_FROM` — ideally on its own subdomain such as `mail.yourdomain.com`, which also sidesteps the one-SPF-record rule above. Step-by-step: `ADMIN_PANEL_SETUP_GUIDE.md` §6.3.
+
 ---
 
 ## 2. Finvu Account Aggregator sandbox — for real "connect my accounts"

@@ -44,12 +44,33 @@ export const setSessionExpiredHandler = (fn) => {
   onSessionExpired = fn;
 };
 
+// Phase 6a of docs/ADMIN_PANEL_PLAN.md §5.4/§7 — "PLAN_LIMIT_REACHED
+// handling in lib/api.js -> upgrade prompt". A single central hook (same
+// pattern as setSessionExpiredHandler above) rather than every call site
+// that might hit a plan limit (bot scan, doc upload, holdings mutations)
+// separately wiring its own paywall UI — DiveContext registers one handler
+// that shows a shared upgrade modal, wherever the limit was actually hit.
+let onPlanLimitReached = null;
+export const setPlanLimitHandler = (fn) => {
+  onPlanLimitReached = fn;
+};
+
 api.interceptors.response.use(
   (res) => res,
   async (error) => {
     const { response, config } = error;
     const isAuthRoute = config?.url?.startsWith("/auth/");
-    if (response?.status === 401 && !config._retried && !isAuthRoute) {
+    // A 401 STEP_UP_REQUIRED (requireStepUp — see backend/src/middleware/auth.ts)
+    // means the session itself is fine, just missing a fresh password
+    // re-confirmation for a sensitive action (publish/rollback a config, etc.)
+    // — refreshing the access token would only repeat the same 401, wasting a
+    // round trip and needlessly rotating the refresh token. Let it fall
+    // straight through so the caller's own step-up flow handles it.
+    const isStepUpRequired = response?.status === 401 && response?.data?.error === "STEP_UP_REQUIRED";
+    if (response?.status === 403 && response?.data?.error === "PLAN_LIMIT_REACHED" && onPlanLimitReached) {
+      onPlanLimitReached(response.data);
+    }
+    if (response?.status === 401 && !config._retried && !isAuthRoute && !isStepUpRequired) {
       config._retried = true;
       try {
         if (!refreshPromise) {

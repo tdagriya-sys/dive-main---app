@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { env } from "../config/env";
+import { logger } from "../lib/logger";
 
 // mongodb-memory-server is a devDependency — a production install (e.g. `npm
 // ci --omit=dev`) won't have it in node_modules. It's imported dynamically,
@@ -15,16 +16,14 @@ export async function connectDb(): Promise<void> {
     const { MongoMemoryServer } = await import("mongodb-memory-server");
     memoryServer = await MongoMemoryServer.create({ instance: { dbName: env.dbName } });
     uri = memoryServer.getUri();
-    // eslint-disable-next-line no-console
-    console.log(
+    logger.warn(
       "[db] MONGO_URL not set to a real database — using an in-memory MongoDB for this session. " +
         "Data will NOT persist across restarts. Set MONGO_URL in backend/.env to a real MongoDB instance to change this."
     );
   }
 
   await mongoose.connect(uri, { dbName: env.dbName });
-  // eslint-disable-next-line no-console
-  console.log(`[db] connected to MongoDB (${env.useInMemoryMongo ? "in-memory" : "persistent"})`);
+  logger.info(`[db] connected to MongoDB "${env.dbName}" (${env.useInMemoryMongo ? "in-memory" : "persistent"})`);
 }
 
 export async function disconnectDb(): Promise<void> {

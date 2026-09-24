@@ -19,6 +19,7 @@ import { fetchInstrumentDetail } from "../services/instrumentDetailService";
 import { resolveHoldingLatestPrice, MARKET_PRICEABLE_CLASSES } from "../services/priceHistoryService";
 import { invalidateDiveScoreCache } from "../services/diveScoreService";
 import { invalidateReportPurchase } from "../services/paymentService";
+import { emitActivity } from "../services/activityLog";
 
 export async function listHoldings(req: AuthedRequest, res: Response) {
   const holdings = await Holding.find({ userId: req.userId })
@@ -102,6 +103,7 @@ export async function createManualHolding(req: AuthedRequest, res: Response) {
     });
     invalidateDiveScoreCache(req.userId!);
     await invalidateReportPurchase(req.userId!);
+    emitActivity("holding_added", { userId: req.userId, req, props: { assetClass: "FD" } });
     return res.status(201).json({ holding });
   }
 
@@ -126,6 +128,7 @@ export async function createManualHolding(req: AuthedRequest, res: Response) {
     });
     invalidateDiveScoreCache(req.userId!);
     await invalidateReportPurchase(req.userId!);
+    emitActivity("holding_added", { userId: req.userId, req, props: { assetClass: "PF" } });
     return res.status(201).json({ holding });
   }
 
@@ -178,6 +181,7 @@ export async function createManualHolding(req: AuthedRequest, res: Response) {
   });
   invalidateDiveScoreCache(req.userId!);
   await invalidateReportPurchase(req.userId!);
+  emitActivity("holding_added", { userId: req.userId, req, props: { assetClass: input.assetClass } });
   return res.status(201).json({ holding });
 }
 
@@ -268,6 +272,7 @@ export async function updateHolding(req: AuthedRequest, res: Response) {
   await holding.save();
   invalidateDiveScoreCache(req.userId!);
   await invalidateReportPurchase(req.userId!);
+  emitActivity("holding_edited", { userId: req.userId, req, props: { assetClass: holding.assetClass } });
   res.json({ holding });
 }
 
@@ -276,5 +281,6 @@ export async function deleteHolding(req: AuthedRequest, res: Response) {
   if (!holding) throw new ApiError(404, "HOLDING_NOT_FOUND", "Holding not found.");
   invalidateDiveScoreCache(req.userId!);
   await invalidateReportPurchase(req.userId!);
+  emitActivity("holding_deleted", { userId: req.userId, req, props: { assetClass: holding.assetClass } });
   res.json({ message: "Holding deleted." });
 }

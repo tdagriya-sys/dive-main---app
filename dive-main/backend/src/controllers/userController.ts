@@ -12,6 +12,9 @@ import { profileUpdateSchema, passwordChangeSchema, plannerStateSchema } from ".
 import { publicUser } from "../utils/publicUser";
 import { invalidateDiveScoreCache } from "../services/diveScoreService";
 import { invalidateReportPurchase } from "../services/paymentService";
+import * as dataRequestService from "../services/dataRequestService";
+import { resolveAllFlagsFor } from "../services/featureFlagService";
+import { getPlan } from "../services/entitlementService";
 
 const preferencesSchema = z.object({
   risk: z.enum(["Conservative", "Balanced", "Aggressive"]).optional(),
@@ -125,6 +128,13 @@ export async function deleteMe(req: AuthedRequest, res: Response) {
   const user = await User.findById(req.userId);
   if (!user) throw new ApiError(404, "USER_NOT_FOUND", "Account no longer exists.");
 
+  // DPDP compliance trail (Phase 7 of docs/ADMIN_PANEL_PLAN.md §4.6/§11) —
+  // deliberately BEFORE the actual deletion below, since it needs the
+  // account to still exist to read its email; never blocks or delays the
+  // deletion itself if this somehow failed (it won't — same DB, same
+  // transaction-free style every other multi-write here already uses).
+  await dataRequestService.logSelfServeDeletion(req.userId!, user.email);
+
   await Promise.all([
     Holding.deleteMany({ userId: req.userId }),
     AaConsent.deleteMany({ userId: req.userId }),
@@ -134,4 +144,21 @@ export async function deleteMe(req: AuthedRequest, res: Response) {
 
   res.clearCookie(REFRESH_COOKIE, { path: "/api/auth" });
   res.json({ message: "Account and all associated data deleted." });
+}
+
+// DPDP data-export request (Phase 7 of docs/ADMIN_PANEL_PLAN.md §4.6/§11) —
+// unlike deleteMe above, this is NOT instant self-serve: it queues a
+// DataRequest for staff to review and fulfil (admin/dataRequestsController.ts
+// ::fulfilExport), matching the "request queue" framing in the plan itself
+// rather than an immediate download — a bulk personal-data export is worth a
+// human glance before it goes out, even to the data's own subject.
+export async function requestDataExport(req: AuthedRequest, res: Response) {
+  const request = await dataRequestService.createExportRequest(req.userId!);
+  res.status(201).json({ id: String(request._id), status: request.status, requestedAt: request.requestedAt });
+}
+
+export async function getMyFeatureFlags(req: AuthedRequest, res: Response) {
+  const plan = await getPlan(req.userId!);
+  const flags = await resolveAllFlagsFor({ userId: req.userId, planKey: plan.planKey });
+  res.status(200).json({ flags });
 }

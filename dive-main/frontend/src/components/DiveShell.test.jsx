@@ -28,6 +28,10 @@ const baseContext = {
   walkthroughOpen: false,
   setWalkthroughOpen: jest.fn(),
   markWalkthroughSeen: jest.fn(),
+  planLimitInfo: null,
+  setPlanLimitInfo: jest.fn(),
+  isImpersonating: false,
+  exitImpersonation: jest.fn(),
 };
 
 // Phase 3: nav'd, dashboard-like screens now get a desktop sidebar (shown
@@ -45,7 +49,7 @@ describe("DiveShell — responsive nav (Phase 3)", () => {
 
     expect(screen.getByTestId("sidebar-nav")).toBeInTheDocument();
     expect(screen.getByTestId("header-menu-btn")).toBeInTheDocument();
-    ["home", "xray", "suggestions", "planner", "profile"].forEach((id) => {
+    ["home", "xray", "suggestions", "planner", "subscription", "profile"].forEach((id) => {
       expect(screen.getByTestId(`sidebar-nav-${id}`)).toBeInTheDocument();
     });
   });
@@ -143,7 +147,7 @@ describe("DiveShell — mobile nav drawer", () => {
     render(<DiveShell />);
     await user.click(screen.getByTestId("header-menu-btn"));
 
-    ["home", "xray", "suggestions", "planner", "profile"].forEach((id) => {
+    ["home", "xray", "suggestions", "planner", "subscription", "profile"].forEach((id) => {
       expect(screen.getByTestId(`mobile-nav-${id}`)).toBeInTheDocument();
     });
     ["walkthrough", "extension", "support", "logout"].forEach((action) => {
@@ -288,6 +292,66 @@ describe("DiveShell — support card", () => {
   });
 });
 
+// Phase 6a of docs/ADMIN_PANEL_PLAN.md §5.4/§7 — the shared upgrade prompt,
+// triggered by DiveContext's planLimitInfo (itself set by lib/api.js's
+// response interceptor on any PLAN_LIMIT_REACHED — see api.test.js for that
+// half). DiveShell just needs to render it when present and route "Upgrade"
+// to the Subscription screen.
+describe("DiveShell — plan-limit modal", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("is absent when there's no plan-limit info", () => {
+    useDive.mockReturnValue({ ...baseContext, screen: "home" });
+    render(<DiveShell />);
+    expect(screen.queryByTestId("plan-limit-modal")).not.toBeInTheDocument();
+  });
+
+  it("shows the modal when planLimitInfo is set, and closing clears it", async () => {
+    const setPlanLimitInfo = jest.fn();
+    useDive.mockReturnValue({ ...baseContext, screen: "home", planLimitInfo: { key: "bot_scan", window: "weekly", limit: 1 }, setPlanLimitInfo });
+    const user = userEvent.setup();
+    render(<DiveShell />);
+
+    expect(screen.getByTestId("plan-limit-modal")).toBeInTheDocument();
+    await user.click(screen.getByTestId("plan-limit-close-btn"));
+    expect(setPlanLimitInfo).toHaveBeenCalledWith(null);
+  });
+
+  it("clicking Upgrade dismisses the modal and navigates to the Subscription screen", async () => {
+    const setPlanLimitInfo = jest.fn();
+    const setScreen = jest.fn();
+    useDive.mockReturnValue({ ...baseContext, screen: "home", setScreen, planLimitInfo: { key: "portfolio_edit", window: "monthly", limit: 5 }, setPlanLimitInfo });
+    const user = userEvent.setup();
+    render(<DiveShell />);
+
+    await user.click(screen.getByTestId("plan-limit-upgrade-btn"));
+    expect(setPlanLimitInfo).toHaveBeenCalledWith(null);
+    expect(setScreen).toHaveBeenCalledWith("subscription");
+  });
+});
+
+// Phase 7 of docs/ADMIN_PANEL_PLAN.md §5.1/§8 — read-only impersonation banner.
+describe("DiveShell — impersonation banner", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("is absent for a normal session", () => {
+    useDive.mockReturnValue({ ...baseContext, screen: "home" });
+    render(<DiveShell />);
+    expect(screen.queryByTestId("impersonation-banner")).not.toBeInTheDocument();
+  });
+
+  it("shows the banner with the viewed user's name, and Exit calls exitImpersonation", async () => {
+    const exitImpersonation = jest.fn();
+    useDive.mockReturnValue({ ...baseContext, screen: "home", isImpersonating: true, exitImpersonation, user: { id: "u2", name: "Asha Rao", hasSeenWalkthrough: true } });
+    const user = userEvent.setup();
+    render(<DiveShell />);
+
+    expect(screen.getByTestId("impersonation-banner")).toHaveTextContent("Asha Rao");
+    await user.click(screen.getByTestId("impersonation-exit-btn"));
+    expect(exitImpersonation).toHaveBeenCalledTimes(1);
+  });
+});
+
 // Walkthrough (components/Walkthrough.jsx) — auto-starts exactly once ever
 // per account (backend-persisted hasSeenWalkthrough, not session/localStorage
 // — see User.ts), and is always replayable from the sidebar.
@@ -326,12 +390,28 @@ describe("DiveShell — guided walkthrough", () => {
 
   it("renders <Walkthrough> when walkthroughOpen is true, and finishing/skipping it marks the account seen", async () => {
     const setWalkthroughOpen = jest.fn();
-    const markWalkthroughSeen = jest.fn();
+    const markWalkthroughSeen = jest.fn().mockResolvedValue(undefined);
     useDive.mockReturnValue({ ...baseContext, screen: "home", holdings: [], walkthroughOpen: true, setWalkthroughOpen, markWalkthroughSeen });
     const user = userEvent.setup();
     render(<DiveShell />);
 
     expect(screen.getByTestId("walkthrough")).toBeInTheDocument();
+    await user.click(screen.getByTestId("walkthrough-skip-btn"));
+    expect(markWalkthroughSeen).toHaveBeenCalledTimes(1);
+    expect(setWalkthroughOpen).toHaveBeenCalledWith(false);
+  });
+
+  // Regression: a read-only impersonation session (or any transient failure)
+  // makes this PATCH reject — DiveShell must swallow it rather than leave an
+  // unhandled promise rejection, since dismissing the tour isn't worth
+  // surfacing an error for.
+  it("still closes the tour when markWalkthroughSeen's request fails", async () => {
+    const setWalkthroughOpen = jest.fn();
+    const markWalkthroughSeen = jest.fn().mockRejectedValue(new Error("network error"));
+    useDive.mockReturnValue({ ...baseContext, screen: "home", holdings: [], walkthroughOpen: true, setWalkthroughOpen, markWalkthroughSeen });
+    const user = userEvent.setup();
+    render(<DiveShell />);
+
     await user.click(screen.getByTestId("walkthrough-skip-btn"));
     expect(markWalkthroughSeen).toHaveBeenCalledTimes(1);
     expect(setWalkthroughOpen).toHaveBeenCalledWith(false);

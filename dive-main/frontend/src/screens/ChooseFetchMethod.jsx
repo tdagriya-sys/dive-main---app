@@ -2,6 +2,7 @@ import React from "react";
 import { motion } from "framer-motion";
 import { Link2, PenLine, Bot, Upload, Compass, ChevronRight } from "lucide-react";
 import { useDive } from "../context/DiveContext";
+import UsageQuotaNote from "../components/UsageQuotaNote";
 
 const METHODS = [
   { id: "aaConsent", icon: Link2, title: "Connect via Account Aggregator", body: "Securely pull equity, mutual funds, bonds and more from a RBI-licensed Account Aggregator (Finvu sandbox)." },
@@ -18,6 +19,7 @@ export default function ChooseFetchMethod() {
     <div className="flex flex-col min-h-full px-7 py-10 dive-app-surface" data-testid="choose-method-screen">
       <h1 className="font-heading font-black text-3xl mb-2">Add your investments</h1>
       <p className="text-[var(--text-secondary)] mb-6">Pick how you'd like DIVVE to see your portfolio. You can add more later.</p>
+      <UsageQuotaNote usageKey="portfolio_edit" />
       <div className="space-y-3">
         {METHODS.map((m, i) => (
           <motion.button key={m.id} data-testid={`method-${m.id}`} onClick={() => setScreen(m.id)}

@@ -1,28 +1,11 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Loader2 } from "lucide-react";
 import { api } from "./api";
 import { useDive } from "../context/DiveContext";
+import { loadRazorpayCheckout } from "./loadRazorpayCheckout";
 
-// Loads Razorpay's Checkout.js exactly once no matter how many times/places
-// download() is called from (Home.jsx and Preferences.jsx both render
-// DownloadReportButton) — a second call while the first is still loading
-// reuses the same in-flight promise instead of injecting a second <script>.
-let razorpayScriptPromise = null;
-function loadRazorpayCheckout() {
-  if (window.Razorpay) return Promise.resolve();
-  if (!razorpayScriptPromise) {
-    razorpayScriptPromise = new Promise((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src = "https://checkout.razorpay.com/v1/checkout.js";
-      script.onload = resolve;
-      script.onerror = () => {
-        razorpayScriptPromise = null; // let a retry actually retry, not resolve to a permanently-broken cached failure
-        reject(new Error("Failed to load Razorpay checkout"));
-      };
-      document.body.appendChild(script);
-    });
-  }
-  return razorpayScriptPromise;
+function fmtRs(paise) {
+  return `Rs.${Math.round((paise || 0) / 100)}/-`;
 }
 
 async function triggerBlobDownload(res) {
@@ -37,10 +20,10 @@ async function triggerBlobDownload(res) {
 }
 
 // Shared by Home.jsx and Preferences.jsx — both offer the exact same paid
-// (Rs. 99, via Razorpay) resilience-score PDF download, so the whole
-// pay -> verify -> fetch-blob -> trigger-download pipeline and its loading/
-// error state live in one place instead of two copies that could quietly
-// drift (endpoint, error copy, Razorpay options) out of sync.
+// (admin-editable price, via Razorpay) resilience-score PDF download, so the
+// whole pay -> verify -> fetch-blob -> trigger-download pipeline and its
+// loading/error state live in one place instead of two copies that could
+// quietly drift (endpoint, error copy, Razorpay options) out of sync.
 //
 // Flow, each call to download():
 //   1. Try the download directly first (GET /score/breakdown/pdf). If this
@@ -60,14 +43,51 @@ async function triggerBlobDownload(res) {
 //      is what actually flips the purchase to "paid" server-side. Only then
 //      is the PDF fetched again (which now succeeds).
 export function useDownloadReport() {
+  const { entitlements, refreshEntitlements } = useDive();
   const [phase, setPhase] = useState("idle"); // idle | checking | awaiting-payment | verifying | downloading
   const [error, setError] = useState("");
   const [mockOrder, setMockOrder] = useState(null); // { orderId } while a dev-mode "simulate payment" confirmation is pending
+  // { pricePaise, originalPricePaise } | null while loading — admin-editable
+  // (see backend/src/services/adminSettingService.ts::getReportPricing), so
+  // the button's price text is fetched rather than hardcoded.
+  const [price, setPrice] = useState(null);
+
+  // { total, used, remaining, unlockedForCurrentPortfolio } | undefined —
+  // rides on the app-wide entitlements fetch (DiveContext.js), not a
+  // separate call. Drives whether the button shows a price at all: a user
+  // who's already unlocked the current portfolio, or still has a
+  // complimentary unit left (remaining null = unlimited, or > 0), sees no
+  // charge whatsoever — only someone with nothing left to fall back on sees
+  // the real price. `undefined` while entitlements haven't loaded yet is
+  // treated as "unknown", same as `willBeFree: false`, so the button falls
+  // back to the plain no-price label rather than guessing either way.
+  const reportAccess = entitlements?.reportAccess;
+  const willBeFree = reportAccess ? reportAccess.unlockedForCurrentPortfolio || reportAccess.remaining === null || reportAccess.remaining > 0 : false;
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get("/payments/report/price")
+      .then(({ data }) => {
+        if (!cancelled) setPrice(data);
+      })
+      // Best-effort — a failed price fetch just means the button shows no
+      // price text until a retry/remount; download() itself is unaffected
+      // and will surface its own error if the actual payment flow fails.
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const fetchAndSavePdf = async () => {
     setPhase("downloading");
     const res = await api.get("/score/breakdown/pdf", { responseType: "blob" });
     await triggerBlobDownload(res);
+    // Refreshes reportAccess (a just-consumed complimentary unit, or a
+    // newly-true unlockedForCurrentPortfolio) so the button/usage screen
+    // reflect it without needing a full remount.
+    refreshEntitlements();
   };
 
   const verifyAndDownload = async (payload) => {
@@ -170,6 +190,8 @@ export function useDownloadReport() {
     phase,
     error,
     mockOrder,
+    price,
+    willBeFree,
     download, // takes the current user object (name/email/mobile) for Razorpay's checkout prefill
     confirmMockPayment,
     cancelMockPayment,
@@ -186,12 +208,21 @@ const PHASE_LABEL = {
 // Shared button, not just shared logic/copy — Home.jsx and Preferences.jsx
 // both offer the exact same download, and this markup (struck-through price,
 // badge) is involved enough now that duplicating it in two places risked the
-// same drift the hook above was already written to avoid. `299` is a real,
-// current promotional price the user set — not a placeholder or an invented
-// figure.
+// same drift the hook above was already written to avoid. The price itself
+// is fetched (useDownloadReport's own `price` state), not hardcoded — see
+// backend/src/services/adminSettingService.ts::getReportPricing — so an
+// admin-set price change shows up here with no frontend redeploy needed.
 export function DownloadReportButton({ testId }) {
   const { user } = useDive();
-  const { downloading, phase, error, mockOrder, download, confirmMockPayment, cancelMockPayment } = useDownloadReport();
+  const { downloading, phase, error, mockOrder, price, willBeFree, download, confirmMockPayment, cancelMockPayment } = useDownloadReport();
+  // Only show a price at all once we know it won't be free — a user with a
+  // complimentary download available (plan benefit or admin grant, already
+  // merged — see useDownloadReport's own comment) sees no charge whatsoever.
+  const showPrice = Boolean(price) && !willBeFree;
+  // Only frame this as a discount (strikethrough + badge) when the admin
+  // actually set a higher "was" price — otherwise it's just a plain price,
+  // never an invented "was ₹X" that doesn't reflect anything real.
+  const hasDiscount = showPrice && price?.originalPricePaise != null && price.originalPricePaise > price.pricePaise;
   return (
     <div className="w-full md:max-w-sm md:mx-auto">
       {error && <p className="text-xs text-[var(--red)] font-semibold mb-3 text-center">{error}</p>}
@@ -204,7 +235,7 @@ export function DownloadReportButton({ testId }) {
         // mistaken for the real flow.
         <div className="rounded-2xl border border-dashed border-[var(--dive-blue)]/40 bg-[var(--dive-blue)]/10 p-4 text-center" data-testid="mock-payment-banner">
           <p className="text-xs font-bold uppercase tracking-wide text-[var(--dive-blue-dark)] mb-1">🧪 Dev Mode — Razorpay isn't configured</p>
-          <p className="text-xs text-[var(--text-secondary)] mb-3">No real payment will happen. Simulate a successful Rs.99 payment to test the download?</p>
+          <p className="text-xs text-[var(--text-secondary)] mb-3">No real payment will happen. Simulate a successful {price ? fmtRs(price.pricePaise) : ""} payment to test the download?</p>
           <div className="flex gap-2">
             <button data-testid="mock-payment-confirm-btn" onClick={confirmMockPayment} disabled={downloading}
               className="flex-1 gold-btn rounded-full py-2.5 text-sm font-bold disabled:opacity-60">
@@ -221,19 +252,25 @@ export function DownloadReportButton({ testId }) {
           {/* Top-right badge — half-overlapping the button's own top-right
               corner is the standard "sale sticker" placement, not floating
               free above it. */}
-          <span className="absolute -top-2.5 -right-2 z-10 bg-[var(--red)] text-white text-[10px] font-black uppercase tracking-wide px-2.5 py-1 rounded-full shadow-md whitespace-nowrap">
-            Limited time offer
-          </span>
+          {hasDiscount && (
+            <span className="absolute -top-2.5 -right-2 z-10 bg-[var(--red)] text-white text-[10px] font-black uppercase tracking-wide px-2.5 py-1 rounded-full shadow-md whitespace-nowrap">
+              Limited time offer
+            </span>
+          )}
           <button data-testid={testId} onClick={() => download(user)} disabled={downloading}
             className="w-full gold-btn rounded-full py-3.5 font-bold flex items-center justify-center text-center disabled:opacity-60 transition-colors">
             {downloading ? (
               <span className="flex items-center gap-2"><Loader2 size={18} className="animate-spin" /> {PHASE_LABEL[phase] || "Preparing…"}</span>
-            ) : (
+            ) : !showPrice ? (
+              <span>Download Resilience Score Report</span>
+            ) : hasDiscount ? (
               <span>
                 Download Resilience Score Report at Just{" "}
-                <span className="line-through decoration-[var(--red)] decoration-2 opacity-70">Rs.299/-</span>{" "}
-                Rs.99/-
+                <span className="line-through decoration-[var(--red)] decoration-2 opacity-70">{fmtRs(price.originalPricePaise)}</span>{" "}
+                {fmtRs(price.pricePaise)}
               </span>
+            ) : (
+              <span>Download Resilience Score Report for {fmtRs(price.pricePaise)}</span>
             )}
           </button>
         </div>

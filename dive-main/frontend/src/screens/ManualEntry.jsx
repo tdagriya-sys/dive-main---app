@@ -4,6 +4,7 @@ import { ChevronLeft, Loader2, Plus, Save } from "lucide-react";
 import { useDive } from "../context/DiveContext";
 import { api } from "../lib/api";
 import InstrumentAutocomplete from "../components/dive/InstrumentAutocomplete";
+import UsageQuotaNote from "../components/UsageQuotaNote";
 import { PF_DECLARED_RATES } from "../lib/diveEngine";
 
 const ASSET_CLASSES = [
@@ -204,6 +205,8 @@ export default function ManualEntry() {
       <div data-testid="market-data-notice" className="bg-[var(--amber)]/10 border border-[var(--amber)]/20 rounded-xl px-4 py-3 mb-4 text-xs font-semibold text-[var(--amber)]">
         We currently have limited access to market data, which may cause some instruments to not match our directory yet. We're working hard to bring in full market coverage as soon as possible, to give you the best experience.
       </div>
+
+      <UsageQuotaNote usageKey="portfolio_edit" />
 
       <label className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)] mb-2 block">Investment type</label>
       {isEditing ? (

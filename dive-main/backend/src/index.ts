@@ -1,10 +1,21 @@
 import { createApp } from "./app";
 import { connectDb, disconnectDb } from "./db/connect";
 import { env } from "./config/env";
+import { logger } from "./lib/logger";
+import { initSentry, captureException } from "./lib/sentry";
 import { startInstrumentRefreshCron } from "./jobs/instrumentRefresh.cron";
 import { startValuationRefreshCron } from "./jobs/valuationRefresh.cron";
+import { startNotificationDispatchCron } from "./jobs/notificationDispatch.cron";
+import { startDunningCron } from "./jobs/dunning.cron";
+import { startActivityRollupCron } from "./jobs/activityRollup.cron";
+import { startTrialExpiryCron } from "./jobs/trialExpiry.cron";
+import { startSubscriptionCancelNoticeCron } from "./jobs/subscriptionCancelNotice.cron";
+import { startRenewalReminderCron } from "./jobs/renewalReminder.cron";
 import { Instrument } from "./models/Instrument";
 import { runInstrumentRefresh } from "./services/instrumentService";
+import { seedDefaultTicketCategoriesIfEmpty } from "./services/ticketService";
+import { seedDefaultNotificationCategoriesIfEmpty } from "./services/notificationService";
+import { seedDefaultSubscriptionPlansIfEmpty, backfillMissingComplimentaryReportDownloads } from "./services/entitlementService";
 
 function checkProductionSafety() {
   if (env.nodeEnv !== "production") return;
@@ -19,6 +30,7 @@ function checkProductionSafety() {
 }
 
 async function main() {
+  initSentry();
   checkProductionSafety();
   await connectDb();
 
@@ -28,17 +40,30 @@ async function main() {
   // every restart) empty until 6am IST. Seed it once immediately if empty.
   const instrumentCount = await Instrument.countDocuments();
   if (instrumentCount === 0) {
-    // eslint-disable-next-line no-console
-    console.log("[dive-backend] Instrument collection is empty — running an initial seed/refresh before accepting traffic...");
+    logger.info("[dive-backend] Instrument collection is empty — running an initial seed/refresh before accepting traffic...");
     await runInstrumentRefresh();
   }
+
+  // Same reasoning as the Instrument seed above — a fresh database (the
+  // default in-memory dev DB especially) needs somewhere for a ticket to
+  // route to before an admin has had a chance to configure categories
+  // themselves. Fully editable afterward (Phase 4's category CRUD).
+  await seedDefaultTicketCategoriesIfEmpty();
+  await seedDefaultNotificationCategoriesIfEmpty();
+  await seedDefaultSubscriptionPlansIfEmpty();
+  await backfillMissingComplimentaryReportDownloads();
 
   const app = createApp();
   startInstrumentRefreshCron();
   startValuationRefreshCron();
+  startNotificationDispatchCron();
+  startDunningCron();
+  startActivityRollupCron();
+  startTrialExpiryCron();
+  startSubscriptionCancelNoticeCron();
+  startRenewalReminderCron();
   const server = app.listen(env.port, () => {
-    // eslint-disable-next-line no-console
-    console.log(`[dive-backend] listening on http://localhost:${env.port}`);
+    logger.info(`[dive-backend] listening on http://localhost:${env.port}`);
   });
 
   // Graceful shutdown — without this, a rolling deploy or orchestrator
@@ -48,34 +73,29 @@ async function main() {
   async function shutdown(signal: string) {
     if (shuttingDown) return; // ignore a second SIGTERM/SIGINT while already stopping
     shuttingDown = true;
-    // eslint-disable-next-line no-console
-    console.log(`[dive-backend] received ${signal}, shutting down gracefully...`);
+    logger.info(`[dive-backend] received ${signal}, shutting down gracefully...`);
 
     // server.close()'s callback only fires once every open connection closes
     // on its own — with HTTP keep-alive that can hang indefinitely if a
     // client never disconnects, so force-exit as a last resort rather than
     // let a stuck shutdown block a deploy/restart forever.
     const forceExitTimer = setTimeout(() => {
-      // eslint-disable-next-line no-console
-      console.error("[dive-backend] graceful shutdown timed out after 15s — forcing exit");
+      logger.error("[dive-backend] graceful shutdown timed out after 15s — forcing exit");
       process.exit(1);
     }, 15000);
     forceExitTimer.unref();
 
     server.close(async (closeErr) => {
       if (closeErr) {
-        // eslint-disable-next-line no-console
-        console.error("[dive-backend] error while closing HTTP server", closeErr);
+        logger.error({ err: closeErr }, "[dive-backend] error while closing HTTP server");
       }
       try {
         await disconnectDb();
-        // eslint-disable-next-line no-console
-        console.log("[dive-backend] shutdown complete");
+        logger.info("[dive-backend] shutdown complete");
         clearTimeout(forceExitTimer);
         process.exit(0);
       } catch (dbErr) {
-        // eslint-disable-next-line no-console
-        console.error("[dive-backend] error while disconnecting from MongoDB", dbErr);
+        logger.error({ err: dbErr }, "[dive-backend] error while disconnecting from MongoDB");
         process.exit(1);
       }
     });
@@ -86,7 +106,7 @@ async function main() {
 }
 
 main().catch((err) => {
-  // eslint-disable-next-line no-console
-  console.error("[dive-backend] fatal startup error", err);
+  logger.error({ err }, "[dive-backend] fatal startup error");
+  captureException(err, { phase: "startup" });
   process.exit(1);
 });

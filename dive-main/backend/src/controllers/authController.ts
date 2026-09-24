@@ -1,4 +1,3 @@
-import crypto from "crypto";
 import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import { User } from "../models/User";
@@ -13,36 +12,13 @@ import {
   resetPasswordSchema,
 } from "../validators/auth";
 import { requestOtp, verifyOtp } from "../services/otpService";
-import { signAccessToken, signRefreshToken, verifyRefreshToken, signPasswordResetToken, verifyPasswordResetToken } from "../utils/jwt";
+import { signAccessToken, signStaffAccessToken, verifyRefreshToken, signPasswordResetToken, verifyPasswordResetToken, signStaffPendingToken } from "../utils/jwt";
 import { env } from "../config/env";
 import { AuthedRequest } from "../middleware/auth";
 import { REFRESH_COOKIE_NAME as REFRESH_COOKIE } from "../config/constants";
 import { publicUser } from "../utils/publicUser";
-
-function setRefreshCookie(res: Response, token: string, expiresAt: Date) {
-  res.cookie(REFRESH_COOKIE, token, {
-    httpOnly: true,
-    secure: env.nodeEnv === "production",
-    sameSite: "lax",
-    expires: expiresAt,
-    path: "/api/auth",
-  });
-}
-
-// Issues a brand-new refresh token, persists the RefreshToken record that
-// makes it revocable, and sets the cookie — the one path every login/signup/
-// refresh call goes through, so "every live refresh token has a matching DB
-// record" can't drift out of sync. Returns the raw token too (in addition to
-// setting the cookie) so a caller without a shared browser cookie jar — see
-// EXTENSION_CLIENT_TYPE below — can hand it back to that kind of client
-// directly instead.
-async function issueRefreshToken(res: Response, userId: string): Promise<string> {
-  const jti = crypto.randomUUID();
-  const { token, expiresAt } = signRefreshToken(userId, jti);
-  await RefreshToken.create({ jti, userId, expiresAt });
-  setRefreshCookie(res, token, expiresAt);
-  return token;
-}
+import { issueRefreshToken } from "../services/refreshTokenService";
+import { emitActivity } from "../services/activityLog";
 
 // The web SPA always uses the httpOnly cookie set above and never sees a
 // refresh token in JS. The Divve Bot browser extension (extension/) has no
@@ -134,6 +110,7 @@ export async function signupVerify(req: Request, res: Response) {
 
   const accessToken = signAccessToken(user._id.toString());
   await issueRefreshToken(res, user._id.toString());
+  emitActivity("signup", { userId: user._id.toString(), req });
 
   return res.status(201).json({ accessToken, user: publicUser(user) });
 }
@@ -152,8 +129,28 @@ export async function login(req: Request, res: Response) {
     return res.status(401).json({ error: "INVALID_CREDENTIALS", message: "Incorrect email/mobile or password." });
   }
 
+  if (user.status !== "active") {
+    return res.status(403).json({ error: "ACCOUNT_SUSPENDED", message: "This account isn't active. Contact support if you believe this is a mistake." });
+  }
+
+  // Staff accounts (Phase 0.3 of docs/ADMIN_PANEL_PLAN.md) never get a real
+  // session from a password check alone — mandatory TOTP is a separate
+  // second step (POST /api/auth/staff/totp/setup or /verify), gated by this
+  // short-lived pending token rather than the real access/refresh pair.
+  // `totpEnrolled: false` tells the frontend to route into the SETUP flow
+  // (first login after being promoted/invited) instead of a plain code entry.
+  if (user.staffRole) {
+    const pendingToken = signStaffPendingToken(user._id.toString());
+    return res.status(200).json({
+      staffAuthRequired: true,
+      pendingToken,
+      totpEnrolled: user.staffMeta.totpEnabled,
+    });
+  }
+
   const accessToken = signAccessToken(user._id.toString());
   const refreshToken = await issueRefreshToken(res, user._id.toString());
+  emitActivity("login", { userId: user._id.toString(), req });
 
   return res.status(200).json({
     accessToken,
@@ -291,8 +288,20 @@ export async function refresh(req: Request, res: Response) {
   if (!user) {
     return res.status(401).json({ error: "USER_NOT_FOUND", message: "Account no longer exists." });
   }
+  // Mirrors login()'s own check — the primary enforcement for a suspended
+  // account is admin/usersController.ts::suspendUser revoking every refresh
+  // token outright (so this rarely even gets reached), but a fresh refresh
+  // token issued in the moments before a suspension took effect shouldn't
+  // outlive it either.
+  if (user.status !== "active") {
+    return res.status(401).json({ error: "ACCOUNT_SUSPENDED", message: "This account isn't active. Contact support if you believe this is a mistake." });
+  }
 
-  const accessToken = signAccessToken(user._id.toString());
+  // A staff account's refreshed access token keeps the same shortened
+  // staffAccessTtl its login originally issued — otherwise the hardening
+  // would only ever apply for the first token and quietly widen back out to
+  // a regular user's TTL on every refresh after that.
+  const accessToken = user.staffRole ? signStaffAccessToken(user._id.toString()) : signAccessToken(user._id.toString());
   const newRefreshToken = await issueRefreshToken(res, user._id.toString());
 
   return res.status(200).json({
@@ -308,6 +317,7 @@ export async function logout(req: Request, res: Response) {
     try {
       const payload = verifyRefreshToken(token);
       await RefreshToken.updateOne({ jti: payload.jti, revokedAt: null }, { revokedAt: new Date() });
+      emitActivity("logout", { userId: payload.sub, req });
     } catch {
       // Malformed/expired cookie — nothing valid to revoke server-side.
     }

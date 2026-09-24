@@ -14,5 +14,10 @@ export function publicUser(user: InstanceType<typeof User>) {
     portfolio: user.portfolio,
     plannerState: user.plannerState,
     hasSeenWalkthrough: user.hasSeenWalkthrough,
+    // null for every ordinary user — the frontend router (Phase 0.4) uses
+    // this alone to decide "send this session to /admin". The admin panel's
+    // OWN screens read their granted permissions from a dedicated endpoint,
+    // not from this shape.
+    staffRole: user.staffRole,
   };
 }

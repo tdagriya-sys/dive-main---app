@@ -20,6 +20,20 @@ async function addEquityHolding(auth: { Authorization: string }) {
 // scoreReportPdfService.test.ts's payForReport() for the identical flow
 // used from the PDF-download side; this file tests the payment endpoints
 // themselves in depth.
+describe("GET /api/payments/report/price", () => {
+  it("requires auth", async () => {
+    const res = await request(app).get("/api/payments/report/price");
+    expect(res.status).toBe(401);
+  });
+
+  it("defaults to the REPORT_PRICE_PAISE env value with no strikethrough price", async () => {
+    const token = await signupAndLogin("9600000029", "price1@example.com");
+    const res = await request(app).get("/api/payments/report/price").set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ pricePaise: 9900, originalPricePaise: null });
+  });
+});
+
 describe("POST /api/payments/report/order", () => {
   it("requires auth", async () => {
     const res = await request(app).post("/api/payments/report/order");
@@ -279,6 +293,158 @@ describe("POST /api/payments/webhook", () => {
 // a signature has verified — see paymentController.ts's razorpayWebhook.
 // Signature verification itself is Razorpay's own SDK function
 // (Razorpay.validateWebhookSignature), not re-tested here.
+// Requirement: a plan can grant complimentary report downloads (admin-set,
+// "in the plan creation itself"), and a specific user can be granted extra
+// ones independent of plan (admin UsageGrant). The limit counts distinct
+// portfolio-version unlocks, never raw downloads — see paymentService.ts::
+// ensureReportAccess's own comment.
+describe("Complimentary report downloads", () => {
+  const subscriptionService = require("../src/services/subscriptionService");
+  const paymentService = require("../src/services/paymentService");
+  const { SubscriptionPlan } = require("../src/models/SubscriptionPlan");
+  const { UsageGrant } = require("../src/models/UsageGrant");
+  const { seedDefaultSubscriptionPlansIfEmpty } = require("../src/services/entitlementService");
+
+  beforeEach(async () => {
+    await seedDefaultSubscriptionPlansIfEmpty();
+  });
+
+  async function signupWithId(mobile: string, email: string) {
+    const signup = { name: "Comp Report Tester", mobile, email, age: 30, password: "Passw0rd!", confirmPassword: "Passw0rd!" };
+    const start = await request(app).post("/api/auth/signup/start").send(signup);
+    const verify = await request(app).post("/api/auth/signup/verify").send({ mobile, otp: start.body.devOtp });
+    return { userId: verify.body.user.id as string, accessToken: verify.body.accessToken as string };
+  }
+
+  it("unlocks free downloads up to the plan's limit, then requires real payment", async () => {
+    await SubscriptionPlan.findOneAndUpdate({ key: "premium_monthly" }, { "entitlements.complimentaryReportDownloads": 2 });
+    const { userId, accessToken } = await signupWithId("9600000030", "comp1@example.com");
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    await subscriptionService.grantComplimentarySubscription(userId, "premium_monthly", 30);
+    await addEquityHolding(auth);
+
+    // First portfolio version: free, no payment call needed at all.
+    const first = await request(app).get("/api/score/breakdown/pdf").set(auth);
+    expect(first.status).toBe(200);
+
+    // Re-downloading the SAME version doesn't consume a second unit.
+    const again = await request(app).get("/api/score/breakdown/pdf").set(auth);
+    expect(again.status).toBe(200);
+
+    // A portfolio change burns the plan's second (and last) complimentary unit.
+    await addEquityHolding(auth);
+    const second = await request(app).get("/api/score/breakdown/pdf").set(auth);
+    expect(second.status).toBe(200);
+
+    // A further change exhausts the limit (2) — now requires real payment.
+    await addEquityHolding(auth);
+    const third = await request(app).get("/api/score/breakdown/pdf").set(auth);
+    expect(third.status).toBe(402);
+  });
+
+  it("null complimentaryReportDownloads means unlimited free downloads on that plan", async () => {
+    await SubscriptionPlan.findOneAndUpdate({ key: "premium_monthly" }, { "entitlements.complimentaryReportDownloads": null });
+    const { userId, accessToken } = await signupWithId("9600000031", "comp2@example.com");
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    await subscriptionService.grantComplimentarySubscription(userId, "premium_monthly", 30);
+
+    for (let i = 0; i < 3; i++) {
+      await addEquityHolding(auth);
+      expect((await request(app).get("/api/score/breakdown/pdf").set(auth)).status).toBe(200);
+    }
+  });
+
+  // Regression: a SubscriptionPlan document persisted before this field
+  // existed has `entitlements.complimentaryReportDownloads` genuinely
+  // `undefined` — Mongoose's schema `default: 0` only applies to documents
+  // created/saved after the field was added, never retroactively. Caught
+  // live: treating `undefined` as-is made `undefined + bonusTotal` evaluate
+  // to `NaN`, and `count >= NaN` is always false, so the exhaustion check
+  // never fired — every plan silently granted UNLIMITED free downloads.
+  // `$unset` below simulates that legacy shape directly on the raw
+  // collection, since `.create()`/`.findOneAndUpdate()` would apply the
+  // schema default and mask the bug.
+  it("treats a legacy plan document with no complimentaryReportDownloads field at all as 0 (not unlimited)", async () => {
+    await SubscriptionPlan.collection.updateOne({ key: "premium_monthly" }, { $unset: { "entitlements.complimentaryReportDownloads": "" } });
+    const stored = await SubscriptionPlan.findOne({ key: "premium_monthly" }).lean();
+    expect(stored!.entitlements.complimentaryReportDownloads).toBeUndefined();
+
+    const { userId, accessToken } = await signupWithId("9600000034", "comp5@example.com");
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    await subscriptionService.grantComplimentarySubscription(userId, "premium_monthly", 30);
+    await addEquityHolding(auth);
+
+    expect((await request(app).get("/api/score/breakdown/pdf").set(auth)).status).toBe(402);
+  });
+
+  it("backfillMissingComplimentaryReportDownloads sets the missing field to 0 on legacy plan documents", async () => {
+    await SubscriptionPlan.collection.updateOne({ key: "premium_monthly" }, { $unset: { "entitlements.complimentaryReportDownloads": "" } });
+    const { backfillMissingComplimentaryReportDownloads } = require("../src/services/entitlementService");
+    await backfillMissingComplimentaryReportDownloads();
+    const stored = await SubscriptionPlan.findOne({ key: "premium_monthly" }).lean();
+    expect(stored!.entitlements.complimentaryReportDownloads).toBe(0);
+  });
+
+  it("a Freemium user with no plan benefit still gets free downloads via a per-user admin grant (score_report/bonusTotal)", async () => {
+    await SubscriptionPlan.findOneAndUpdate({ key: "freemium" }, { "entitlements.complimentaryReportDownloads": 0 });
+    const { userId, accessToken } = await signupWithId("9600000032", "comp3@example.com");
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    await addEquityHolding(auth);
+
+    // No grant yet — still gated behind payment, Freemium's own limit is 0.
+    expect((await request(app).get("/api/score/breakdown/pdf").set(auth)).status).toBe(402);
+
+    await UsageGrant.create({ userId, key: "score_report", bonusTotal: 1 });
+    expect((await request(app).get("/api/score/breakdown/pdf").set(auth)).status).toBe(200);
+
+    // The one granted unit is now used — a further change is gated again.
+    await addEquityHolding(auth);
+    expect((await request(app).get("/api/score/breakdown/pdf").set(auth)).status).toBe(402);
+  });
+
+  it("records a complimentary unlock as a genuine ₹0 paid Payment row, visible to the admin ledger", async () => {
+    await SubscriptionPlan.findOneAndUpdate({ key: "premium_monthly" }, { "entitlements.complimentaryReportDownloads": 1 });
+    const { userId, accessToken } = await signupWithId("9600000033", "comp4@example.com");
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    await subscriptionService.grantComplimentarySubscription(userId, "premium_monthly", 30);
+    await addEquityHolding(auth);
+    expect((await request(app).get("/api/score/breakdown/pdf").set(auth)).status).toBe(200);
+
+    const { Payment } = require("../src/models/Payment");
+    const row = await Payment.findOne({ userId, purpose: "SCORE_REPORT_PDF", isComplimentary: true }).lean();
+    expect(row).toBeTruthy();
+    expect(row.amount).toBe(0);
+    expect(row.status).toBe("paid");
+  });
+
+  // Requirement: the user-facing plan/usage screen should show real
+  // complimentary-report status (plan benefit + any grant, already merged
+  // into one number, never broken down) instead of nothing at all.
+  it("getReportComplimentaryStatus reports total/used/remaining and whether the current portfolio is unlocked", async () => {
+    await SubscriptionPlan.findOneAndUpdate({ key: "premium_monthly" }, { "entitlements.complimentaryReportDownloads": 2 });
+    const { userId, accessToken } = await signupWithId("9600000035", "comp6@example.com");
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    await subscriptionService.grantComplimentarySubscription(userId, "premium_monthly", 30);
+    await UsageGrant.create({ userId, key: "score_report", bonusTotal: 1 });
+    await addEquityHolding(auth);
+
+    const before = await paymentService.getReportComplimentaryStatus(userId);
+    expect(before).toEqual({ total: 3, used: 0, remaining: 3, unlockedForCurrentPortfolio: false });
+
+    await request(app).get("/api/score/breakdown/pdf").set(auth);
+    const after = await paymentService.getReportComplimentaryStatus(userId);
+    expect(after).toEqual({ total: 3, used: 1, remaining: 2, unlockedForCurrentPortfolio: true });
+  });
+
+  it("GET /api/me/entitlements exposes reportAccess", async () => {
+    await SubscriptionPlan.findOneAndUpdate({ key: "freemium" }, { "entitlements.complimentaryReportDownloads": 0 });
+    const { accessToken } = await signupWithId("9600000036", "comp7@example.com");
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    const res = await request(app).get("/api/me/entitlements").set(auth);
+    expect(res.body.reportAccess).toEqual({ total: 0, used: 0, remaining: 0, unlockedForCurrentPortfolio: false });
+  });
+});
+
 describe("handleReportWebhookPaymentCaptured", () => {
   it("marks a still-pending order paid, and is a no-op for an order that's already settled", async () => {
     const paymentService = require("../src/services/paymentService");

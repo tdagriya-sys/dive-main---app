@@ -4,7 +4,25 @@ import { AssetClass } from "../models/Instrument";
 import { fetchMarketFactor, resolveHoldingReturns, HoldingReturnSeries } from "./priceHistoryService";
 import { mean, stdev, correlation, betaAgainst, scoreFromRange } from "./stats";
 import { computeLookthroughOverlap, Connection } from "./lookthroughService";
-import { resolveContext, CorpusTier, PersonaBracket, PERSONA_BRACKETS } from "./contextEngine";
+import { resolveContext, CorpusTier, PersonaBracket } from "./contextEngine";
+import { ScoringConfigPayload } from "../models/ScoringConfig";
+import { ContextConfigPayload } from "../models/ContextConfig";
+import { LookthroughConfigPayload } from "../models/LookthroughConfig";
+import { SCORING_CONFIG_DEFAULTS } from "../config/scoringDefaults";
+import { CONTEXT_CONFIG_DEFAULTS } from "../config/contextDefaults";
+import { LOOKTHROUGH_CONFIG_DEFAULTS } from "../config/lookthroughDefaults";
+import { getActiveScoringConfig } from "./config/scoringConfigService";
+import { getActiveContextConfig } from "./config/contextConfigService";
+import { getActiveLookthroughConfig } from "./config/lookthroughConfigService";
+import { getCachedBreakdown, setCachedBreakdown, invalidateDiveScoreCache } from "./diveScoreCache";
+
+// Re-exported so every existing caller (holdingsController.ts, aaController.ts,
+// userController.ts, paymentService.ts, holdingValuationService.ts,
+// models/User.ts) keeps importing this from the same place — the actual Map
+// lives in diveScoreCache.ts now (Phase 2 of docs/ADMIN_PANEL_PLAN.md), split
+// out so the scoring/context config services can invalidate it too without a
+// circular import back into this file.
+export { invalidateDiveScoreCache };
 
 /**
  * Dive Score v2 — the reference doc's "real resilience math on top of the
@@ -20,51 +38,25 @@ import { resolveContext, CorpusTier, PersonaBracket, PERSONA_BRACKETS } from "./
  * correlation) on top, which the fast client path can't compute.
  *
  * Every sub-score is normalized to 0-100 (documented mapping below) and
- * combined via DIVE_SCORE_V2_WEIGHTS, which sum to 1.0.
+ * combined via a weighted sum that sums to 1.0.
+ *
+ * As of Phase 2 of docs/ADMIN_PANEL_PLAN.md, every weight/threshold/tier
+ * mentioned above is admin-configurable (models/ScoringConfig.ts +
+ * services/config/scoringConfigService.ts) rather than hardcoded —
+ * `computeDiveScoreBreakdown` loads the currently ACTIVE config (falling back
+ * to `SCORING_CONFIG_DEFAULTS`/`CONTEXT_CONFIG_DEFAULTS` — the exact values
+ * this file used to hardcode — whenever nothing has ever been published) and
+ * threads it through every function below as a parameter, so this module has
+ * no scoring-relevant module-level constants left at all. Deliberately NOT
+ * yet configurable: `SYNTHETIC_PARAMS` (priceHistoryService.ts's per-class
+ * drift/vol/beta assumptions) — see ScoringConfig.ts's own comment for why.
  */
 
-// contextFit (Layer D) and stockCountFit each took a proportional slice from
-// every existing weight rather than replacing one specific dimension —
-// they're genuinely new, orthogonal signals, not a replacement for any of the
-// resilience math.
-export const DIVE_SCORE_V2_WEIGHTS = {
-  concentration: 0.17,
-  volatility: 0.12,
-  drawdown: 0.12,
-  var: 0.08,
-  liquidity: 0.12,
-  beta: 0.08,
-  correlation: 0.08,
-  diversificationRatio: 0.04,
-  contextFit: 0.11,
-  stockCountFit: 0.08,
-} as const;
-
-// 0 (illiquid, locked-up) - 100 (liquid, exit anytime at close to fair value).
-// Approximate, class-level tiers — not a per-instrument liquidity model.
-const LIQUIDITY_TIER: Record<AssetClass, number> = {
-  CRYPTO: 95,
-  EQUITY: 95,
-  ETF: 90,
-  MUTUAL_FUND: 70,
-  GOLD: 75,
-  SILVER: 65,
-  REIT: 60,
-  INVIT: 55,
-  BOND: 50,
-  ULIP_INSURANCE: 20,
-  FD: 15,
-  // Below FD, not tied with it: FD is breakable any time (with an interest
-  // penalty) — full principal access is never in question. PF has no such
-  // unconditional exit — PPF's 15-year hard lock (partial withdrawal only
-  // from FY7, capped at 50% of the balance 4 years prior) and EPF's
-  // retirement/2-month-unemployment/purpose-specific-after-12-months gating
-  // are both strictly worse than a breakable FD. Not 0 — real, if narrow,
-  // partial-access routes exist (PPF's year 3-6 loan facility, EPF's
-  // purpose-based partial withdrawals), so an instrument with truly no
-  // access route at all still reads as meaningfully worse.
-  PF: 8,
-};
+// Re-exported for backward compatibility with anything that imports the
+// default composite weights directly (e.g. tests) — this is now just an
+// alias for the config default, not the value actually used to score a real
+// user (see SCORING_CONFIG_DEFAULTS.compositeWeights / getActiveScoringConfig()).
+export const DIVE_SCORE_V2_WEIGHTS = SCORING_CONFIG_DEFAULTS.compositeWeights;
 
 const TRADING_DAYS_PER_YEAR = 252;
 
@@ -79,32 +71,21 @@ const TRADING_DAYS_PER_YEAR = 252;
  * diminishing/negative marginal benefit (unmanageable overlap, index-hugging)
  * rather than further diversification benefit — so this tapers on BOTH sides
  * of a ~15-30 ideal band, unlike a flat HHI which keeps improving toward 100
- * as you add names indefinitely. Anchor points below are illustrative
- * (piecewise-linear interpolation between them), not fitted to a dataset.
+ * as you add names indefinitely. `breakpoints` is illustrative (piecewise-
+ * linear interpolation between them), not fitted to a dataset — see
+ * ScoringConfig.stockCountBreakpoints for the admin-editable version.
  */
-const STOCK_COUNT_BREAKPOINTS: Array<[count: number, score: number]> = [
-  [1, 10],
-  [3, 25],
-  [8, 60],
-  [12, 90],
-  [15, 100],
-  [30, 100],
-  [40, 75],
-  [50, 60],
-  [75, 45],
-  [100, 40],
-];
-function scoreStockCountBand(n: number): number {
-  if (n <= STOCK_COUNT_BREAKPOINTS[0][0]) return STOCK_COUNT_BREAKPOINTS[0][1];
-  for (let i = 1; i < STOCK_COUNT_BREAKPOINTS.length; i++) {
-    const [x1, y1] = STOCK_COUNT_BREAKPOINTS[i - 1];
-    const [x2, y2] = STOCK_COUNT_BREAKPOINTS[i];
+function scoreStockCountBand(n: number, breakpoints: ScoringConfigPayload["stockCountBreakpoints"]): number {
+  if (n <= breakpoints[0][0]) return breakpoints[0][1];
+  for (let i = 1; i < breakpoints.length; i++) {
+    const [x1, y1] = breakpoints[i - 1];
+    const [x2, y2] = breakpoints[i];
     if (n <= x2) {
       const t = (n - x1) / (x2 - x1);
       return Math.round(y1 + t * (y2 - y1));
     }
   }
-  return STOCK_COUNT_BREAKPOINTS[STOCK_COUNT_BREAKPOINTS.length - 1][1];
+  return breakpoints[breakpoints.length - 1][1];
 }
 
 interface HoldingForScoring {
@@ -123,7 +104,7 @@ interface HoldingForScoring {
 export interface DiveScoreBreakdown {
   hasHoldings: boolean;
   compositeScore: number;
-  weights: typeof DIVE_SCORE_V2_WEIGHTS;
+  weights: ScoringConfigPayload["compositeWeights"];
   apparentDiversificationPct: number;
   realDiversificationPct: number;
   // ALL detected connections, both scopes (see Connection.scope) — cross-class
@@ -173,12 +154,12 @@ interface SubScore {
   label: string;
 }
 
-function emptyBreakdown(context: DiveScoreBreakdown["context"]): DiveScoreBreakdown {
+function emptyBreakdown(context: DiveScoreBreakdown["context"], weights: ScoringConfigPayload["compositeWeights"]): DiveScoreBreakdown {
   const zero: SubScore = { score: 0, value: 0, label: "No holdings yet" };
   return {
     hasHoldings: false,
     compositeScore: 0,
-    weights: DIVE_SCORE_V2_WEIGHTS,
+    weights,
     apparentDiversificationPct: 0,
     realDiversificationPct: 0,
     connections: [],
@@ -202,8 +183,13 @@ function emptyBreakdown(context: DiveScoreBreakdown["context"]): DiveScoreBreakd
   };
 }
 
-function buildContextField(totalInvestedAmount: number, age: number, heldClasses: Set<AssetClass>): DiveScoreBreakdown["context"] {
-  const { corpusTier, persona, expectedAssetClasses } = resolveContext(totalInvestedAmount, age);
+function buildContextField(
+  totalInvestedAmount: number,
+  age: number,
+  heldClasses: Set<AssetClass>,
+  contextCfg: ContextConfigPayload
+): DiveScoreBreakdown["context"] {
+  const { corpusTier, persona, expectedAssetClasses } = resolveContext(totalInvestedAmount, age, contextCfg);
   return {
     corpusTier: { id: corpusTier.id, label: corpusTier.label, reasoning: corpusTier.reasoning },
     persona: { id: persona.id, label: persona.label, reasoning: persona.reasoning },
@@ -216,46 +202,42 @@ function buildContextField(totalInvestedAmount: number, age: number, heldClasses
 // cached — what wasn't is the pure-CPU work on top: the correlation matrix,
 // drawdown/VaR simulation, and O(n²) look-through overlap, all recomputed
 // from scratch on every single /score/breakdown call even though nothing
-// relevant had changed since the last one. Same in-memory Map + TTL shape as
-// priceHistoryService.ts's own cache, keyed per user rather than per
-// symbol/scheme. Freshness is driven primarily by explicit invalidation
-// (invalidateDiveScoreCache, called from every holdings/profile mutation
-// path below) — the TTL here is just a safety net in case some path is ever
-// added that changes a scoring input without remembering to invalidate.
-const CACHE_TTL_MS = 5 * 60 * 1000;
-interface CacheEntry {
-  breakdown: DiveScoreBreakdown;
-  expiresAt: number;
-}
-const cache = new Map<string, CacheEntry>();
-
-// Called from every place a user's holdings or age (the two scoring inputs
-// that live outside the already-cached price-history layer) can change:
-// holdingsController's create/update/delete, aaController's AA sync, and
-// userController's profile update. Also called on account deletion, purely
-// for hygiene — a leftover entry for a deleted user is harmless (never read
-// again) but there's no reason to let it sit until its TTL expires.
-export function invalidateDiveScoreCache(userId: string): void {
-  cache.delete(userId);
-}
-
+// relevant had changed since the last one. See diveScoreCache.ts for the
+// actual cache (a 5-minute-TTL Map, keyed per user) — extracted to its own
+// module so the scoring/context config services can invalidate it on every
+// publish/rollback (a stale cached breakdown must never keep showing the OLD
+// model's numbers after an admin changes something) without a circular
+// import back into this file.
 export async function computeDiveScoreBreakdown(userId: string): Promise<DiveScoreBreakdown> {
-  const cached = cache.get(userId);
-  if (cached && cached.expiresAt > Date.now()) return cached.breakdown;
-  const breakdown = await computeDiveScoreBreakdownUncached(userId);
-  cache.set(userId, { breakdown, expiresAt: Date.now() + CACHE_TTL_MS });
+  const cached = getCachedBreakdown(userId);
+  if (cached) return cached;
+  const [scoringCfg, contextCfg, lookthroughCfg] = await Promise.all([getActiveScoringConfig(), getActiveContextConfig(), getActiveLookthroughConfig()]);
+  const breakdown = await computeDiveScoreBreakdownUncached(userId, scoringCfg, contextCfg, lookthroughCfg);
+  setCachedBreakdown(userId, breakdown);
   return breakdown;
 }
 
-async function computeDiveScoreBreakdownUncached(userId: string): Promise<DiveScoreBreakdown> {
+// Exported (Phase 2 of docs/ADMIN_PANEL_PLAN.md) so the admin config
+// simulation sandbox (services/config/simulationService.ts) can score a real
+// user against a CANDIDATE (not-yet-published) config, side by side with the
+// active one — the whole reason this function already took cfg/contextCfg as
+// parameters rather than reading module constants. Every other caller keeps
+// going through the cached computeDiveScoreBreakdown() above; this uncached
+// form is for exactly two things: that simulation, and tests.
+export async function computeDiveScoreBreakdownUncached(
+  userId: string,
+  cfg: ScoringConfigPayload = SCORING_CONFIG_DEFAULTS,
+  contextCfg: ContextConfigPayload = CONTEXT_CONFIG_DEFAULTS,
+  lookthroughCfg: LookthroughConfigPayload = LOOKTHROUGH_CONFIG_DEFAULTS
+): Promise<DiveScoreBreakdown> {
   const user = await User.findById(userId).select("age").lean();
   const age = user?.age ?? 30; // fallback for the (test-only) case a caller passes a userId with no User doc
 
   const holdingDocs = await Holding.find({ userId }).populate("instrumentId").lean();
-  if (holdingDocs.length === 0) return emptyBreakdown(buildContextField(0, age, new Set()));
+  if (holdingDocs.length === 0) return emptyBreakdown(buildContextField(0, age, new Set(), contextCfg), cfg.compositeWeights);
 
   const totalValue = holdingDocs.reduce((s, h) => s + (h.currentValue || h.investedValue || 0), 0);
-  if (totalValue <= 0) return emptyBreakdown(buildContextField(0, age, new Set()));
+  if (totalValue <= 0) return emptyBreakdown(buildContextField(0, age, new Set(), contextCfg), cfg.compositeWeights);
 
   const { returns: marketFactor, isSynthetic: marketFactorIsSynthetic } = await fetchMarketFactor();
 
@@ -299,13 +281,12 @@ async function computeDiveScoreBreakdownUncached(userId: string): Promise<DiveSc
       maturityYearMonth,
     });
   }
-  if (resolved.length === 0) return emptyBreakdown(buildContextField(0, age, new Set()));
+  if (resolved.length === 0) return emptyBreakdown(buildContextField(0, age, new Set(), contextCfg), cfg.compositeWeights);
 
   // Align every series to the shortest common length (most recent days),
   // so weighted portfolio returns and correlations compare like-for-like days.
   const alignLength = Math.min(TRADING_DAYS_PER_YEAR, ...resolved.map((r) => r.series.returns.length), marketFactor.length);
   const aligned = resolved.map((r) => ({ ...r, alignedReturns: r.series.returns.slice(-alignLength) }));
-  const alignedMarket = marketFactor.slice(-alignLength);
 
   // Layer D — Context Engine: resolved early, before volatility/drawdown, so
   // this user's persona can inform the risk-capacity thresholds below (§8/§12
@@ -313,8 +294,9 @@ async function computeDiveScoreBreakdownUncached(userId: string): Promise<DiveSc
   // from THIS user right now also feeds the contextFit sub-score and softens
   // the single-class correlation floor further down — see contextEngine.ts.
   const heldClasses = new Set(aligned.map((h) => h.assetClass));
-  const context = buildContextField(totalValue, age, heldClasses);
-  const personaBounds = PERSONA_BRACKETS.find((p) => p.id === context.persona.id) ?? PERSONA_BRACKETS[PERSONA_BRACKETS.length - 1];
+  const context = buildContextField(totalValue, age, heldClasses, contextCfg);
+  const personaBounds =
+    contextCfg.personaBrackets.find((p) => p.id === context.persona.id) ?? contextCfg.personaBrackets[contextCfg.personaBrackets.length - 1];
 
   // ---- Portfolio daily returns ----
   const portfolioReturns: number[] = [];
@@ -332,7 +314,7 @@ async function computeDiveScoreBreakdownUncached(userId: string): Promise<DiveSc
   // PersonaBracket.volatilityWorstAt/drawdownWorstAt for the reasoning per
   // bracket. ----
   const annualizedVol = stdev(portfolioReturns) * Math.sqrt(TRADING_DAYS_PER_YEAR);
-  const volatilityScore = scoreFromRange(annualizedVol, personaBounds.volatilityWorstAt, 0.03);
+  const volatilityScore = scoreFromRange(annualizedVol, personaBounds.volatilityWorstAt, cfg.subScoreBestAt.volatilityBestAt);
 
   // ---- Concentration: apparent diversification (spread across asset
   // classes) as the dominant signal, real diversification bounded by it
@@ -371,19 +353,19 @@ async function computeDiveScoreBreakdownUncached(userId: string): Promise<DiveSc
   // all 11 classes" — the rest are documented as deferred in
   // docs/DIVE_SCORE_MODEL.md, gated on data this app doesn't have a free
   // source for yet):
-  //   - CRYPTO: capped at 70, however well name-spread — most crypto assets
-  //     are documented to move together (especially in stress), so spreading
-  //     across N coins doesn't reduce risk anywhere near as much as spreading
-  //     across N genuinely distinct equities.
+  //   - CRYPTO: capped at cfg.cryptoWithinClassCap, however well name-spread —
+  //     most crypto assets are documented to move together (especially in
+  //     stress), so spreading across N coins doesn't reduce risk anywhere
+  //     near as much as spreading across N genuinely distinct equities.
   //   - FD: blended with a maturity-laddering score — distinct FDs maturing
   //     in the same month is a real, different risk (reinvestment/rate risk
   //     concentrated at one point in time) from distinct FDs laddered across
   //     different months, even if issuer/name spread looks identical.
   //   - EQUITY: blended with sector spread (distinct NSE industries among the
-  //     equity names held) and market-cap tier blend (Large/Mid/Small,
-  //     avoiding 100% concentration in one tier) — both skipped gracefully
-  //     when the underlying classification data isn't available for a
-  //     holding, never guessed. ----
+  //     equity names held, against cfg.equitySectorSpreadTarget) and
+  //     market-cap tier blend (Large/Mid/Small, avoiding 100% concentration
+  //     in one tier) — both skipped gracefully when the underlying
+  //     classification data isn't available for a holding, never guessed. ----
   const byClassHoldings = new Map<AssetClass, HoldingForScoring[]>();
   for (const h of aligned) {
     const list = byClassHoldings.get(h.assetClass) || [];
@@ -399,7 +381,7 @@ async function computeDiveScoreBreakdownUncached(userId: string): Promise<DiveSc
     let classScore = Math.max(0, Math.min(100, Math.round((1 - classHhiWithin) * 100)));
 
     if (cls === "CRYPTO") {
-      classScore = Math.min(classScore, 70);
+      classScore = Math.min(classScore, cfg.cryptoWithinClassCap);
     } else if (cls === "FD") {
       const distinctFds = byNameInClass.size;
       if (distinctFds > 1) {
@@ -413,7 +395,7 @@ async function computeDiveScoreBreakdownUncached(userId: string): Promise<DiveSc
       }
     } else if (cls === "EQUITY") {
       const distinctSectors = new Set(holdings.map((h) => h.sector).filter((s): s is string => !!s));
-      const sectorSpreadScore = distinctSectors.size > 0 ? Math.round(100 * Math.min(1, distinctSectors.size / 5)) : null;
+      const sectorSpreadScore = distinctSectors.size > 0 ? Math.round(100 * Math.min(1, distinctSectors.size / cfg.equitySectorSpreadTarget)) : null;
 
       const byTier = new Map<string, number>();
       for (const h of holdings) if (h.marketCapTier) byTier.set(h.marketCapTier, (byTier.get(h.marketCapTier) || 0) + h.value);
@@ -438,7 +420,7 @@ async function computeDiveScoreBreakdownUncached(userId: string): Promise<DiveSc
   // when the user holds no equity at all, since this dimension is
   // specifically about equity stock-picking breadth. ----
   const equityNames = new Set(aligned.filter((h) => h.assetClass === "EQUITY").map((h) => h.name.trim().toLowerCase()));
-  const stockCountFitScore = equityNames.size === 0 ? 100 : scoreStockCountBand(equityNames.size);
+  const stockCountFitScore = equityNames.size === 0 ? 100 : scoreStockCountBand(equityNames.size, cfg.stockCountBreakpoints);
 
   // Layered look-through model: exact issuer match (full overlap) -> mutual
   // fund top-holdings (weighted by the fund's disclosed %) -> curated
@@ -447,7 +429,8 @@ async function computeDiveScoreBreakdownUncached(userId: string): Promise<DiveSc
   // different bank stocks). See lookthroughService.ts for the tiers.
   const { overlapShare, sameClassOverlapShare, connections } = computeLookthroughOverlap(
     aligned.map((h) => ({ name: h.name, assetClass: h.assetClass, value: h.value, sector: h.sector })),
-    totalValue
+    totalValue,
+    lookthroughCfg
   );
   const realDiversificationPct =
     apparentDiversificationPct <= 0 ? 0 : Math.max(0, Math.min(apparentDiversificationPct, Math.round(apparentDiversificationPct * (1 - overlapShare))));
@@ -466,10 +449,10 @@ async function computeDiveScoreBreakdownUncached(userId: string): Promise<DiveSc
   // spread are secondary corrections; within-class HHI is a genuinely
   // distinct concentration signal (see above), not a duplicate of per-name.
   const concentrationScore = Math.round(
-    apparentDiversificationPct * 0.5 +
-      realDiversificationPct * 0.15 +
-      sectorAdjustedNameDiversificationScore * 0.2 +
-      withinClassConcentrationScore * 0.15
+    apparentDiversificationPct * cfg.concentrationSubWeights.apparent +
+      realDiversificationPct * cfg.concentrationSubWeights.real +
+      sectorAdjustedNameDiversificationScore * cfg.concentrationSubWeights.name +
+      withinClassConcentrationScore * cfg.concentrationSubWeights.withinClass
   );
 
   // ---- Correlation matrix (grouped by asset class present) ----
@@ -509,19 +492,18 @@ async function computeDiveScoreBreakdownUncached(userId: string): Promise<DiveSc
   }
   // A single-asset-class portfolio has achieved zero cross-asset-class
   // diversification — that's a real resilience gap, not a neutral outcome,
-  // so it scores low (20) rather than a neutral 50 by default. (Previously
-  // defaulted to a neutral 50, which combined with a high per-name
-  // concentration score and equity's high liquidity score let an all-equity,
-  // multi-stock portfolio score deceptively high overall.)
-  //
-  // EXCEPTION — Layer D: if the Context Engine says 1 class is exactly what's
-  // expected for this user right now (e.g. a Starter-corpus portfolio), that
-  // single class isn't a resilience mistake to punish — score it neutral (50)
-  // instead of low (20). If more than 1 class is expected and the user still
-  // only holds 1, the low (20) score still applies — that IS a genuine gap
-  // relative to what's achievable for their own situation.
-  const singleClassCorrelationScore = context.expectedAssetClasses.length <= 1 ? 50 : 20;
-  const correlationScore = classLabels.length > 1 ? scoreFromRange(avgCorrelation, 1, -0.2) : singleClassCorrelationScore;
+  // so it scores low (cfg.singleClassCorrelationScores.otherwise) rather
+  // than a neutral default. EXCEPTION — Layer D: if the Context Engine says 1
+  // class is exactly what's expected for this user right now (e.g. a
+  // Starter-corpus portfolio), that single class isn't a resilience mistake
+  // to punish — score it neutral (cfg.singleClassCorrelationScores.
+  // whenExpectedClassesLE1) instead.
+  const singleClassCorrelationScore =
+    context.expectedAssetClasses.length <= 1 ? cfg.singleClassCorrelationScores.whenExpectedClassesLE1 : cfg.singleClassCorrelationScores.otherwise;
+  const correlationScore =
+    classLabels.length > 1
+      ? scoreFromRange(avgCorrelation, cfg.subScoreBestAt.correlationWorstAt, cfg.subScoreBestAt.correlationBestAt)
+      : singleClassCorrelationScore;
 
   // ---- Drawdown resilience ----
   let peak = 100;
@@ -553,8 +535,8 @@ async function computeDiveScoreBreakdownUncached(userId: string): Promise<DiveSc
   } else {
     recovered = true;
   }
-  const drawdownScoreBase = scoreFromRange(maxDrawdownPct, personaBounds.drawdownWorstAt, -0.02);
-  const drawdownScore = recovered ? drawdownScoreBase : Math.max(0, drawdownScoreBase - 15);
+  const drawdownScoreBase = scoreFromRange(maxDrawdownPct, personaBounds.drawdownWorstAt, cfg.subScoreBestAt.drawdownBestAt);
+  const drawdownScore = recovered ? drawdownScoreBase : Math.max(0, drawdownScoreBase - cfg.drawdownUnrecoveredPenalty);
 
   // ---- VaR (historical simulation) ----
   const sorted = [...portfolioReturns].sort((a, b) => a - b);
@@ -571,23 +553,27 @@ async function computeDiveScoreBreakdownUncached(userId: string): Promise<DiveSc
     oneMonthPct,
     oneMonthINR: Math.abs(oneMonthPct * totalValue),
   };
-  const varScore = scoreFromRange(oneDayPct, -0.08, -0.005);
+  const varScore = scoreFromRange(oneDayPct, cfg.subScoreBestAt.varWorstAt, cfg.subScoreBestAt.varBestAt);
 
   // ---- Liquidity ----
   let liquidityWeighted = 0;
-  for (const h of aligned) liquidityWeighted += h.weight * (LIQUIDITY_TIER[h.assetClass] ?? 50);
+  for (const h of aligned) liquidityWeighted += h.weight * (cfg.liquidityTiers[h.assetClass] ?? 50);
   const liquidityScore = Math.round(liquidityWeighted);
 
   // ---- Beta vs Nifty 50 ----
   let portfolioBeta = 0;
   for (const h of aligned) portfolioBeta += h.weight * h.beta;
-  const betaScore = scoreFromRange(portfolioBeta, 1.8, 0.2);
+  const betaScore = scoreFromRange(portfolioBeta, cfg.subScoreBestAt.betaWorstAt, cfg.subScoreBestAt.betaBestAt);
 
   // ---- Diversification ratio: weighted avg individual vol / portfolio vol ----
   let weightedIndividualVol = 0;
   for (const h of aligned) weightedIndividualVol += h.weight * stdev(h.alignedReturns) * Math.sqrt(TRADING_DAYS_PER_YEAR);
   const diversificationRatio = annualizedVol > 0 ? weightedIndividualVol / annualizedVol : 1;
-  const diversificationRatioScore = scoreFromRange(diversificationRatio, 1.0, 2.2);
+  const diversificationRatioScore = scoreFromRange(
+    diversificationRatio,
+    cfg.subScoreBestAt.diversificationRatioWorstAt,
+    cfg.subScoreBestAt.diversificationRatioBestAt
+  );
 
   const subScores = {
     concentration: { score: concentrationScore, value: classHhi, label: "Concentration (apparent + real diversification)" },
@@ -614,9 +600,7 @@ async function computeDiveScoreBreakdownUncached(userId: string): Promise<DiveSc
     0,
     Math.min(
       100,
-      Math.round(
-        Object.entries(DIVE_SCORE_V2_WEIGHTS).reduce((sum, [key, weight]) => sum + weight * subScores[key as keyof typeof subScores].score, 0)
-      )
+      Math.round(Object.entries(cfg.compositeWeights).reduce((sum, [key, weight]) => sum + weight * subScores[key as keyof typeof subScores].score, 0))
     )
   );
 
@@ -625,7 +609,7 @@ async function computeDiveScoreBreakdownUncached(userId: string): Promise<DiveSc
   return {
     hasHoldings: true,
     compositeScore,
-    weights: DIVE_SCORE_V2_WEIGHTS,
+    weights: cfg.compositeWeights,
     apparentDiversificationPct,
     realDiversificationPct,
     connections,

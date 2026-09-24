@@ -8,6 +8,17 @@ import { api } from "../lib/api";
 jest.mock("../context/DiveContext", () => ({ useDive: jest.fn() }));
 jest.mock("../lib/api", () => ({ api: { get: jest.fn() } }));
 
+// DownloadReportButton (rendered whenever holdings are non-empty) fetches
+// its price on mount via api.get, so every render needs a safe default even
+// in tests that don't care about it; tests that do override it per-call as
+// needed. A plain default set in the factory itself doesn't survive here
+// (this project's mocks are always wired up per-test/per-describe, never
+// inline in the factory), so this runs before every test in the file
+// regardless of which describe block it's in.
+beforeEach(() => {
+  api.get.mockResolvedValue({ data: {} });
+});
+
 // GetStartedPopup — a first-run nudge shown on Home whenever the portfolio is
 // genuinely empty (fresh signup, or a login/session-restore that found no
 // saved holdings — see DiveContext.js's session-restore effect and login()).
@@ -26,6 +37,8 @@ describe("Home — GetStartedPopup", () => {
     scoreBreakdown: null,
     loadScoreBreakdown: jest.fn(),
     walkthroughOpen: false,
+    entitlements: null,
+    refreshEntitlements: jest.fn(),
   };
 
   beforeEach(() => {
@@ -122,6 +135,65 @@ describe("Home — GetStartedPopup", () => {
 // display-only, not a link into ScoreBreakdown.jsx, until that comes back
 // post-subscription-plans. Regression guard against either the click
 // re-appearing or the "See the full breakdown" text coming back accidentally.
+// NotificationPopupCard — the "popup" delivery channel's own display
+// surface (see backend/src/models/NotificationCategory.ts::
+// NotificationChannel), mounted from both of Home's own return branches.
+describe("Home — NotificationPopupCard", () => {
+  let setScreen;
+  const POPUP = { id: "p1", title: "Your plan renews soon", bodyHtml: "You'll be charged <b>₹119</b>.", deliveredAt: "2026-01-01" };
+
+  const emptyContext = {
+    holdingsLoading: false,
+    holdingsError: false,
+    loadHoldings: jest.fn(),
+    holdings: [],
+    user: { id: "u1", name: "Test" },
+    sims: [],
+    resetSims: jest.fn(),
+    scoreBreakdown: null,
+    loadScoreBreakdown: jest.fn(),
+    walkthroughOpen: false,
+    entitlements: null,
+    refreshEntitlements: jest.fn(),
+  };
+  const populatedContext = {
+    ...emptyContext,
+    holdings: [{ id: "h1", name: "Test Equity Holding", segment: "Equity", amount: 100000, lookthrough: [{ company: "Test Co", pct: 100 }] }],
+  };
+
+  beforeEach(() => {
+    setScreen = jest.fn();
+    sessionStorage.clear();
+    api.get.mockImplementation((url) => (url === "/notifications/popups" ? Promise.resolve({ data: { popups: [POPUP] } }) : Promise.resolve({ data: {} })));
+  });
+
+  it("shows a pending popup notification on the populated-portfolio screen", async () => {
+    useDive.mockReturnValue({ ...populatedContext, setScreen });
+    render(<Home />);
+    await screen.findByTestId("notification-popup-card");
+    expect(screen.getByTestId("notification-popup-title")).toHaveTextContent("Your plan renews soon");
+  });
+
+  it("shows a pending popup notification on the empty-state screen too, once GetStartedPopup is dismissed", async () => {
+    const user = userEvent.setup();
+    useDive.mockReturnValue({ ...emptyContext, setScreen });
+    render(<Home />);
+
+    // Suppressed while GetStartedPopup is up — never two overlays stacked.
+    expect(screen.queryByTestId("notification-popup-card")).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId("get-started-close-btn"));
+    await waitForElementToBeRemoved(() => screen.queryByTestId("get-started-popup"));
+    await screen.findByTestId("notification-popup-card");
+  });
+
+  it("stays suppressed while the guided walkthrough is open, even with real holdings", () => {
+    useDive.mockReturnValue({ ...populatedContext, walkthroughOpen: true, setScreen });
+    render(<Home />);
+    expect(screen.queryByTestId("notification-popup-card")).not.toBeInTheDocument();
+  });
+});
+
 describe("Home — Score card (no link to Score Breakdown) & report download", () => {
   const holdings = [{ id: "h1", name: "Test Equity Holding", segment: "Equity", amount: 100000, lookthrough: [{ company: "Test Co", pct: 100 }] }];
   let setScreen;
@@ -137,6 +209,8 @@ describe("Home — Score card (no link to Score Breakdown) & report download", (
     scoreBreakdown: null,
     loadScoreBreakdown: jest.fn(),
     walkthroughOpen: false,
+    entitlements: null,
+    refreshEntitlements: jest.fn(),
   };
 
   beforeEach(() => {

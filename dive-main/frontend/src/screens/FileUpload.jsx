@@ -5,6 +5,7 @@ import { useDive } from "../context/DiveContext";
 import { api } from "../lib/api";
 import InstrumentAutocomplete from "../components/dive/InstrumentAutocomplete";
 import ScanningLoader from "../components/dive/ScanningLoader";
+import UsageQuotaNote from "../components/UsageQuotaNote";
 import { PF_DECLARED_RATES } from "../lib/diveEngine";
 
 const ASSET_CLASSES = [
@@ -214,6 +215,8 @@ export default function FileUpload() {
       <div data-testid="market-data-notice" className="bg-[var(--amber)]/10 border border-[var(--amber)]/20 rounded-xl px-4 py-3 mb-5 text-xs font-semibold text-[var(--amber)]">
         We currently have limited access to market data, which may cause some instruments to not match our directory yet. We're working hard to bring in full market coverage as soon as possible, to give you the best experience.
       </div>
+
+      <UsageQuotaNote usageKey="doc_upload" />
 
       <input ref={fileInputRef} type="file" data-testid="file-upload-input" className="hidden"
         accept=".csv,.xlsx,.xls,.json,.pdf,image/png,image/jpeg,image/webp" onChange={onFileSelected} />

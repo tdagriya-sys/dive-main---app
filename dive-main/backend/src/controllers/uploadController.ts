@@ -5,6 +5,8 @@ import { parseCsv } from "../services/fileParsers/csvParser";
 import { parseXlsx } from "../services/fileParsers/xlsxParser";
 import { parseJson } from "../services/fileParsers/jsonParser";
 import { extractHoldingsWithAI, isAiExtractionConfigured, AiExtractionNotConfiguredError, AiExtractionTimeoutError } from "../services/aiExtractionService";
+import { assertUsageAllowed, recordUsageEvent } from "../services/usageService";
+import { emitActivity } from "../services/activityLog";
 
 /**
  * Parses an uploaded file into candidate holdings — nothing is saved here.
@@ -26,13 +28,19 @@ export async function uploadFile(req: AuthedRequest, res: Response) {
   const buffer = file.buffer;
 
   if (name.endsWith(".csv") || file.mimetype === "text/csv") {
-    return respondWithCandidates(res, await parseCsv(buffer));
+    const candidates = await parseCsv(buffer);
+    emitActivity("doc_upload", { userId: req.userId, req, props: { method: "csv", candidateCount: candidates.length } });
+    return respondWithCandidates(res, candidates);
   }
   if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
-    return respondWithCandidates(res, await parseXlsx(buffer));
+    const candidates = await parseXlsx(buffer);
+    emitActivity("doc_upload", { userId: req.userId, req, props: { method: "xlsx", candidateCount: candidates.length } });
+    return respondWithCandidates(res, candidates);
   }
   if (name.endsWith(".json") || file.mimetype === "application/json") {
-    return respondWithCandidates(res, await parseJson(buffer));
+    const candidates = await parseJson(buffer);
+    emitActivity("doc_upload", { userId: req.userId, req, props: { method: "json", candidateCount: candidates.length } });
+    return respondWithCandidates(res, candidates);
   }
 
   const isPdf = name.endsWith(".pdf") || file.mimetype === "application/pdf";
@@ -49,11 +57,20 @@ export async function uploadFile(req: AuthedRequest, res: Response) {
     );
   }
 
+  // Phase 6a of docs/ADMIN_PANEL_PLAN.md §3.1/§3.2 — the doc_upload plan
+  // limit applies ONLY to this AI-extraction branch (a real paid model
+  // call), never to the deterministic CSV/XLSX/JSON parsing above — see
+  // usageService.ts's assertUsageAllowed for why this can't just be a
+  // route-level middleware the way bot_scan's is.
+  await assertUsageAllowed(req.userId!, "doc_upload");
+
   try {
     const result = await extractHoldingsWithAI(
       [isPdf ? { kind: "pdf" as const, data: buffer } : { kind: "image" as const, data: buffer, mimeType: file.mimetype }],
       "file_upload"
     );
+    await recordUsageEvent(req.userId!, "doc_upload");
+    emitActivity("doc_upload", { userId: req.userId, req, props: { method: isPdf ? "pdf_ai" : "image_ai", candidateCount: result.holdings.length } });
     return respondWithCandidates(res, result.holdings, result.excludedNotes);
   } catch (err) {
     if (err instanceof AiExtractionNotConfiguredError) {

@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Home as HomeIcon, ScanLine, Lightbulb, Compass, User, LogOut, Download, HelpCircle, LifeBuoy, X } from "lucide-react";
+import { Home as HomeIcon, ScanLine, Lightbulb, Compass, User, LogOut, Download, HelpCircle, LifeBuoy, X, Crown } from "lucide-react";
 import { useDive } from "../context/DiveContext";
 import { usePortalEnter } from "../lib/usePortalEnter";
 import AppHeader from "./AppHeader";
 import ExtensionDownloadCard from "./ExtensionDownloadCard";
 import SupportCard from "./SupportCard";
+import PlanLimitModal from "./PlanLimitModal";
 import Walkthrough from "./Walkthrough";
 import Onboarding from "../screens/Onboarding";
 import Home from "../screens/Home";
@@ -23,6 +24,7 @@ import FileUpload from "../screens/FileUpload";
 import BotScan from "../screens/BotScan";
 import AAConsent from "../screens/AAConsent";
 import MyHoldings from "../screens/MyHoldings";
+import Subscription from "../screens/Subscription";
 
 // Screens rendered via the <Onboarding/> switch (no bottom nav).
 const ONBOARDING = ["splash", "signup", "login", "forgotPassword", "reveal"];
@@ -33,13 +35,14 @@ const NAV = [
   { id: "xray", label: "X-Ray", Icon: ScanLine },
   { id: "suggestions", label: "Suggest", Icon: Lightbulb },
   { id: "planner", label: "Divve Planner", Icon: Compass },
+  { id: "subscription", label: "Subscription", Icon: Crown },
   { id: "profile", label: "Profile", Icon: User },
 ];
 
 const SCREENS = {
   home: Home, xray: XRay, suggestions: Suggestions, divebot: DiveBot, planner: Planner,
   profile: Preferences, ask: AskDive, insights: Insights, myHoldings: MyHoldings,
-  scoreBreakdown: ScoreBreakdown,
+  scoreBreakdown: ScoreBreakdown, subscription: Subscription,
   chooseMethod: ChooseFetchMethod, manualEntry: ManualEntry, fileUpload: FileUpload, botScan: BotScan, aaConsent: AAConsent,
 };
 
@@ -161,7 +164,7 @@ function MobileNavDrawer({ onClose, activeNav, onNavigate, onWalkthrough, onExte
 }
 
 export default function DiveShell() {
-  const { screen, setScreen, authLoading, logout, user, walkthroughOpen, setWalkthroughOpen, markWalkthroughSeen } = useDive();
+  const { screen, setScreen, authLoading, logout, user, walkthroughOpen, setWalkthroughOpen, markWalkthroughSeen, planLimitInfo, setPlanLimitInfo, isImpersonating, exitImpersonation } = useDive();
   // Triggered from two separate components (AppHeader's header button and
   // this file's own sidebar button below) — lifted here, their shared
   // parent, rather than into DiveContext, since it's a plain UI toggle, not
@@ -198,8 +201,8 @@ export default function DiveShell() {
   const activeNav = ["ask", "insights", "myHoldings", "scoreBreakdown"].includes(screen)
     ? "home"
     : screen === "divebot"
-    ? "profile" // only ever reached from the "Simulate app pop-up" button in Profile now
-    : screen;
+    ? "profile" // only ever reached from a button inside Profile (Simulate app pop-up)
+    : screen; // "subscription" now has its own NAV entry, so it highlights itself
 
   // Avoid ever mounting the "splash" screen just to immediately redirect away
   // from it once the session-restore check resolves (also sidesteps a
@@ -257,6 +260,14 @@ export default function DiveShell() {
   // just the nav'd dashboard screens.
   return (
     <div className="relative h-full w-full flex flex-col dive-app-surface overflow-hidden">
+      {isImpersonating && (
+        <div className="shrink-0 flex items-center justify-center gap-3 bg-[var(--gold-b)] text-black text-xs font-bold py-1.5 px-4" data-testid="impersonation-banner">
+          <span>Viewing as {user?.name} — read-only</span>
+          <button type="button" data-testid="impersonation-exit-btn" onClick={exitImpersonation} className="underline">
+            Exit
+          </button>
+        </div>
+      )}
       <AppHeader onOpenExtension={() => setExtensionCardOpen(true)} onOpenSupport={() => setSupportCardOpen(true)} onOpenMobileNav={() => setMobileNavOpen(true)} />
       <AnimatePresence>
         {extensionCardOpen && <ExtensionDownloadCard onClose={() => setExtensionCardOpen(false)} />}
@@ -264,8 +275,17 @@ export default function DiveShell() {
       <AnimatePresence>
         {supportCardOpen && <SupportCard onClose={() => setSupportCardOpen(false)} />}
       </AnimatePresence>
+      <AnimatePresence>
+        {planLimitInfo && (
+          <PlanLimitModal
+            info={planLimitInfo}
+            onClose={() => setPlanLimitInfo(null)}
+            onUpgrade={() => { setPlanLimitInfo(null); setScreen("subscription"); }}
+          />
+        )}
+      </AnimatePresence>
       {walkthroughOpen && (
-        <Walkthrough onDone={() => { markWalkthroughSeen(); setWalkthroughOpen(false); }} />
+        <Walkthrough onDone={() => { markWalkthroughSeen().catch(() => {}); setWalkthroughOpen(false); }} />
       )}
       <div className="flex-1 min-h-0">
         {isFullScreenFlow ? narrowColumn : (

@@ -48,6 +48,41 @@ export const env = {
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean),
 
+  // --- Admin panel / observability (Phase 0 of docs/ADMIN_PANEL_PLAN.md) ---
+  // All optional with safe defaults so nothing here breaks an existing dev/prod
+  // setup that hasn't added them yet.
+  //
+  // REDIS_URL powers the BullMQ job queue (notification sends, config
+  // simulations, exports) and the shared rate-limit store. Empty string =
+  // "not configured" — queue-backed features degrade gracefully / run inline.
+  redisUrl: process.env.REDIS_URL || "",
+  // Shorter access-token lifetime applied to staff sessions specifically (a
+  // stolen admin token is worth far more than a normal user's).
+  staffAccessTtl: process.env.STAFF_ACCESS_TTL || "10m",
+  // Label shown in the authenticator app when a staff member enrols TOTP.
+  totpIssuer: process.env.TOTP_ISSUER || "Divve Admin",
+  // Optional comma-separated IP allowlist for /api/admin/*. Empty = any IP.
+  adminIpAllowlist: (process.env.ADMIN_IP_ALLOWLIST || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+  // Sentry DSN — empty = error tracking disabled (logger still logs).
+  sentryDsn: process.env.SENTRY_DSN || "",
+  // Raw ActivityEvent rows are TTL-expired after this many days (daily rollups
+  // kept indefinitely). NOTE: Mongo fixes a TTL index's expiry at creation
+  // time — changing this value later needs the index dropped + recreated.
+  activityEventRetentionDays: parseInt(process.env.ACTIVITY_EVENT_RETENTION_DAYS || "180", 10),
+  // A burst of holding edits within this many minutes counts as ONE metered
+  // "edit session" for the Freemium portfolio-edit limit (see §3.4 of the plan).
+  editSessionWindowMin: parseInt(process.env.EDIT_SESSION_WINDOW_MIN || "20", 10),
+  // Raw UsageEvent rows are TTL-expired after this many days — comfortably
+  // past the longest rolling window enforceUsage ever checks (30 days), same
+  // "storage hygiene only, never affects enforcement" reasoning as
+  // activityEventRetentionDays above.
+  usageEventRetentionDays: parseInt(process.env.USAGE_EVENT_RETENTION_DAYS || "35", 10),
+  // pino log level. Quieter default in production, verbose in dev, silent in test.
+  logLevel: process.env.LOG_LEVEL || (process.env.NODE_ENV === "production" ? "info" : "debug"),
+
   // OTP delivery via email (Resend) instead of SMS — no per-message regulatory
   // approval needed (unlike SMS in India, which requires a DLT-registered
   // template before anything can send), so this works the moment a real key
@@ -55,6 +90,29 @@ export const env = {
   emailApiKey: process.env.EMAIL_API_KEY,
   emailApiKeyIsPlaceholder: isPlaceholder(process.env.EMAIL_API_KEY),
   emailFrom: process.env.EMAIL_FROM || "Divve <onboarding@resend.dev>",
+  // Where a customer's email reply to a SUPPORT-TICKET email goes (Resend
+  // `reply_to`) — a real, monitored mailbox, e.g. support@yourdomain.com.
+  // Optional: unset, ticket emails carry no reply-to and a reply goes to
+  // `emailFrom`'s own address. Only ticket emails use it (see
+  // ticketEmailService.ts); it never affects sign-in codes or marketing.
+  supportReplyTo: (process.env.SUPPORT_REPLY_TO || "").trim(),
+  // A SEPARATE sender for marketing/onboarding campaigns to people who aren't
+  // Divve users (see externalContactService.ts). Deliberately has NO fallback
+  // to `emailFrom`: that address sends sign-in codes, staff invites, and
+  // support replies, and spam complaints about marketing mail would damage
+  // its reputation and could push those messages to spam. Unset, such
+  // campaigns refuse to send (except in dev mode with no real email key).
+  marketingEmailFrom: (process.env.MARKETING_EMAIL_FROM || "").trim(),
+  // Where replies to a marketing email go (Resend `reply_to`). Optional — a
+  // marketing address that's really no-reply can leave this unset.
+  marketingEmailReplyTo: (process.env.MARKETING_EMAIL_REPLY_TO || "").trim(),
+  // The PUBLIC base URL of this API (no trailing slash, including the /api
+  // prefix) — used to build the unsubscribe link in marketing emails to
+  // imported (non-user) contacts, which has to be a link a stranger's mail
+  // client can open. Unset: in production it's `<first CORS origin>/api` (the
+  // Nginx setup in docs/SERVER_DEPLOYMENT_GUIDE.md serves both on one
+  // domain); in development it's http://localhost:<PORT>/api.
+  publicApiUrl: (process.env.PUBLIC_API_URL || "").replace(/\/+$/, ""),
 
   // Powers AI-based holdings extraction (bot scan screenshots + uploaded
   // documents/screenshots) — see services/aiExtractionService.ts. OpenAI
@@ -107,6 +165,53 @@ export const env = {
   // hardcoded 9900 in code) so the price can change without a redeploy of
   // frontend copy and backend charge amount drifting out of sync.
   reportPricePaise: parseInt(process.env.REPORT_PRICE_PAISE || "9900", 10),
+
+  // GST invoicing (Phase 6b of docs/ADMIN_PANEL_PLAN.md §4.3/§7.3) — every
+  // in-app price is GST-inclusive (§3 "GST? → Inclusive"), so
+  // invoiceService.ts backs the 18% out of whatever was actually charged
+  // rather than adding it on top. `isPlaceholder` true means no real GSTIN
+  // has been entered yet — invoices still generate (so the pipeline is
+  // fully testable without one), just visibly marked as provisional; see
+  // invoiceService.ts's own comment on where that shows up.
+  gst: {
+    sellerGstin: process.env.GST_SELLER_GSTIN || "",
+    sellerName: process.env.GST_SELLER_NAME || "Divve",
+    // Place of supply for GST purposes — this app has no buyer billing
+    // address on file, so this simplifies to the seller's own registered
+    // state (a common, defensible simplification for a digital/OIDAR
+    // service with no collected address; confirm with your CA before
+    // relying on this for real filings).
+    sellerState: process.env.GST_SELLER_STATE || "",
+    isPlaceholder: isPlaceholder(process.env.GST_SELLER_GSTIN),
+  },
+
+  // Dunning grace period (Phase 6b) — how many days a `past_due` subscription
+  // (a failed renewal charge — see subscriptionService.ts's webhook handler)
+  // keeps its Premium access before jobs/dunning.cron.ts auto-cancels it.
+  // `past_due` is deliberately still Premium-equivalent in
+  // entitlementService.ts throughout this window, matching typical SaaS
+  // dunning UX (a failed card isn't an instant downgrade).
+  dunningGraceDays: parseInt(process.env.DUNNING_GRACE_DAYS || "7", 10),
+
+  // How close to a cancelled-but-still-active subscription's currentPeriodEnd
+  // jobs/subscriptionCancelNotice.cron.ts waits before actually telling
+  // Razorpay to stop auto-renewing it (see subscriptionService.ts::
+  // cancelSubscriptionDoc's own comment on why this is deferred at all).
+  // 48h gives that daily cron two chances to catch it even if one run is
+  // missed, comfortably ahead of Razorpay's own next auto-charge attempt.
+  cancelNoticeBufferHours: parseInt(process.env.CANCEL_NOTICE_BUFFER_HOURS || "48", 10),
+
+  // Default set of "days before currentPeriodEnd" thresholds
+  // jobs/renewalReminder.cron.ts warns the user at (renewal charge coming
+  // up, free trial ending, or access ending because auto-renew is off) —
+  // comma-separated, e.g. "7,3,0" fires an independent reminder at each of
+  // 7 days out, 3 days out, and the day it happens. Admin-editable at
+  // runtime via AdminSetting key "renewalReminder" (adminSettingService.ts)
+  // — this is only the fallback for a fresh, unconfigured deploy.
+  renewalReminderDaysBefore: (process.env.RENEWAL_REMINDER_DAYS_BEFORE || "7,3,0")
+    .split(",")
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => Number.isFinite(n)),
 };
 
 export { isPlaceholder };

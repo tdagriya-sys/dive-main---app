@@ -5,6 +5,7 @@ import * as scoreController from "../controllers/scoreController";
 
 const router = Router();
 
+router.get("/config", asyncHandler(scoreController.getConfig));
 router.get("/breakdown", requireAuth, asyncHandler(scoreController.getBreakdown));
 router.get("/breakdown/pdf", requireAuth, asyncHandler(scoreController.downloadReportPdf));
 

@@ -7,6 +7,7 @@ import DiveShell from "@/components/DiveShell";
 import LandingIntro from "@/components/LandingIntro";
 import LandingPage from "@/components/LandingPage";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import AppSettingsGate from "@/components/AppSettingsGate";
 
 // Full-page container for everything that isn't the static marketing page —
 // onboarding/auth (splash/signup/login/reveal) and the real logged-in app
@@ -85,7 +86,9 @@ function App() {
           </motion.div>
         ) : (
           <motion.div key="router" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.6 }}>
-            <AppRouter />
+            <AppSettingsGate>
+              <AppRouter />
+            </AppSettingsGate>
           </motion.div>
         )}
       </AnimatePresence>

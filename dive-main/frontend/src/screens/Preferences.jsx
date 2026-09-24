@@ -1,8 +1,9 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { LogOut, ListChecks, Loader2, AlertTriangle, Bot, Check } from "lucide-react";
+import { LogOut, ListChecks, Loader2, AlertTriangle, Bot, Check, Lock, Crown } from "lucide-react";
 import { useDive } from "../context/DiveContext";
 import { DownloadReportButton } from "../lib/useDownloadReport";
+import { api } from "../lib/api";
 
 const CATEGORIES = ["Equity", "Mutual Funds", "Bonds", "Gold/Silver", "REIT/InvIT", "ETF", "FD/RD", "PF", "Insurance", "Crypto"];
 const RISK = ["Conservative", "Balanced", "Aggressive"];
@@ -20,6 +21,22 @@ export default function Preferences() {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
   const [prefsSaveError, setPrefsSaveError] = useState("");
+  const [dataExportLoading, setDataExportLoading] = useState(false);
+  const [dataExportRequested, setDataExportRequested] = useState(false);
+  const [dataExportError, setDataExportError] = useState("");
+
+  async function requestDataExport() {
+    setDataExportLoading(true);
+    setDataExportError("");
+    try {
+      await api.post("/users/me/data-export-request");
+      setDataExportRequested(true);
+    } catch (err) {
+      setDataExportError(errorMessageOf(err, "Couldn't submit your request. Please try again."));
+    } finally {
+      setDataExportLoading(false);
+    }
+  }
 
   const [name, setName] = useState(user?.name || "");
   const [age, setAge] = useState(user ? String(user.age) : "");
@@ -157,6 +174,8 @@ export default function Preferences() {
         <p className="text-xs text-[var(--text-secondary)] text-center">Change these anytime — DIVVE adapts instantly.</p>
       </div>
 
+      <NotificationPrefsSection />
+
       <Section title="Reports" hint="Your full resilience score breakdown, as a downloadable one-pager.">
         <DownloadReportButton testId="prefs-download-report-btn" />
       </Section>
@@ -165,6 +184,13 @@ export default function Preferences() {
         <button data-testid="prefs-manage-holdings-btn" onClick={() => setScreen("myHoldings")}
           className="w-full md:max-w-xs md:mx-auto bg-[var(--surface-card)] border border-[var(--border)] rounded-full py-3.5 font-bold flex items-center justify-center gap-2 hover:bg-[var(--surface-card-hover)] transition-colors">
           <ListChecks size={18} className="text-[var(--dive-blue)]" /> Manage holdings
+        </button>
+      </div>
+
+      <div className="px-6 mt-3">
+        <button data-testid="prefs-manage-subscription-btn" onClick={() => setScreen("subscription")}
+          className="w-full md:max-w-xs md:mx-auto bg-[var(--surface-card)] border border-[var(--border)] rounded-full py-3.5 font-bold flex items-center justify-center gap-2 hover:bg-[var(--surface-card-hover)] transition-colors">
+          <Crown size={18} className="text-[var(--dive-blue)]" /> Manage subscription
         </button>
       </div>
 
@@ -197,6 +223,24 @@ export default function Preferences() {
       </Section>
 
       <div className="px-6 mt-8">
+        <h2 className="font-heading font-bold text-lg">Your data</h2>
+        <p className="text-xs text-[var(--text-secondary)] mb-3">Request a copy of everything Divve holds about you. We'll review and get back to you.</p>
+        {dataExportError && <p className="text-xs text-[var(--red)] font-semibold mb-3">{dataExportError}</p>}
+        {dataExportRequested ? (
+          <p className="text-xs text-[var(--dive-blue)] font-semibold" data-testid="data-export-requested-note">Request received — we'll email you once it's ready.</p>
+        ) : (
+          <button
+            data-testid="request-data-export-btn"
+            onClick={requestDataExport}
+            disabled={dataExportLoading}
+            className="block w-full md:max-w-xs rounded-full py-3.5 font-bold border border-[var(--border)] hover:bg-[var(--surface-card-hover)] transition-colors disabled:opacity-50"
+          >
+            {dataExportLoading ? "Requesting…" : "Request my data export"}
+          </button>
+        )}
+      </div>
+
+      <div className="px-6 mt-8">
         <h2 className="font-heading font-bold text-lg text-[var(--red)]">Danger zone</h2>
         <p className="text-xs text-[var(--text-secondary)] mb-3">Permanently deletes your account and every holding you've added. This can't be undone.</p>
         {error && <p className="text-xs text-[var(--red)] font-semibold mb-3">{error}</p>}
@@ -226,6 +270,72 @@ export default function Preferences() {
         )}
       </div>
     </div>
+  );
+}
+
+// Notification preferences (Phase 5 of docs/ADMIN_PANEL_PLAN.md §7) — a
+// category with userOptOutAllowed:false (account/subscription notices)
+// shows locked, always-on toggles rather than hiding the row entirely, so
+// it's clear those categories exist and why they can't be turned off.
+function NotificationPrefsSection() {
+  const [categories, setCategories] = useState(null);
+  const [error, setError] = useState("");
+
+  async function load() {
+    try {
+      const { data } = await api.get("/notifications/preferences");
+      setCategories(data.preferences);
+    } catch {
+      setError("Couldn't load notification preferences.");
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function toggle(categoryKey, channel, enabled) {
+    setCategories((list) =>
+      list.map((c) => (c.categoryKey === categoryKey ? { ...c, channels: c.channels.map((ch) => (ch.channel === channel ? { ...ch, enabled } : ch)) } : c))
+    );
+    try {
+      await api.patch("/notifications/preferences", { categoryKey, channel, enabled });
+    } catch {
+      setError("Couldn't save that change — check your connection and try again.");
+      await load(); // revert to the real server state
+    }
+  }
+
+  if (!categories) return null;
+
+  return (
+    <Section title="Notification preferences">
+      {error && <p className="text-xs text-[var(--red)] font-semibold mb-3" data-testid="notification-prefs-error">{error}</p>}
+      <div className="space-y-3">
+        {categories.map((c) => (
+          <div key={c.categoryKey} className="flex items-center justify-between rounded-xl border border-[var(--border)] bg-[var(--surface-card)] px-4 py-3" data-testid={`notification-pref-row-${c.categoryKey}`}>
+            <div className="flex items-center gap-2">
+              {!c.userOptOutAllowed && <Lock size={13} className="text-[var(--text-tertiary)]" />}
+              <span className="text-sm font-semibold">{c.label}</span>
+            </div>
+            <div className="flex items-center gap-4">
+              {c.channels.map((ch) => (
+                <label key={ch.channel} className="flex items-center gap-1.5 text-xs font-bold text-[var(--text-tertiary)] capitalize">
+                  <input
+                    type="checkbox"
+                    data-testid={`notification-pref-${c.categoryKey}-${ch.channel}`}
+                    checked={ch.enabled}
+                    disabled={!c.userOptOutAllowed}
+                    onChange={(e) => toggle(c.categoryKey, ch.channel, e.target.checked)}
+                  />
+                  {ch.channel === "in_app" ? "In-app" : ch.channel === "popup" ? "Pop-up" : "Email"}
+                </label>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Section>
   );
 }
 

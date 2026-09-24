@@ -5,6 +5,9 @@ import LandingPage from "./LandingPage";
 import { useDive } from "../context/DiveContext";
 
 jest.mock("../context/DiveContext", () => ({ useDive: jest.fn() }));
+// The landing page fetches public pop-ups on mount (LandingPopupCard.jsx) —
+// keep every test here off the network, with none active.
+jest.mock("../lib/api", () => ({ api: { get: jest.fn().mockResolvedValue({ data: { popups: [] } }), post: jest.fn() } }));
 
 // LandingPage renders FeatureShowcaseSections (see FeatureShowcase.test.jsx),
 // which needs both of these jsdom gaps stubbed or it throws — same setup
