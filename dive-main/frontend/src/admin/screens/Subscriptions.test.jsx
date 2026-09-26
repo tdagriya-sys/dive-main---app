@@ -762,9 +762,101 @@ describe("Coupons tab", () => {
     await waitFor(() => expect(api.post).toHaveBeenCalledWith("/admin/coupons", expect.objectContaining({ code: "renewers", eligibility: "renewal" })));
   });
 
+  // "Offer mode": a coupon can carry the id of a Razorpay-Dashboard Subscription
+  // Offer, so Razorpay applies the discount (no plan switch — which UPI refuses).
+  it("can create a coupon in offer mode (sends the offer id), and labels such rows", async () => {
+    mockLoadOk({
+      coupons: [{ id: "cp3", code: "OFFERED", type: "percent", value: 99, appliesToPlanKeys: [], eligibility: "any", discountDuration: "once", razorpayOfferId: "offer_ABC123", maxRedemptions: 5, redeemedCount: 0, expiresAt: null, isActive: true }],
+    });
+    api.post.mockResolvedValue({ data: { coupon: {} } });
+    render(<Subscriptions />);
+    await waitFor(() => expect(screen.getByTestId("admin-subscriptions-table")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("admin-subscriptions-tab-coupons"));
+    expect(screen.getByTestId("admin-coupons-duration-cp3")).toHaveTextContent("Razorpay offer (offer_ABC123) — discount cycles are set by the offer");
+
+    fireEvent.click(screen.getByTestId("admin-coupons-new-toggle-btn"));
+    fireEvent.change(screen.getByTestId("admin-coupons-new-code-input"), { target: { value: "offerdemo" } });
+    fireEvent.change(screen.getByTestId("admin-coupons-new-value-input"), { target: { value: "99" } });
+    fireEvent.change(screen.getByTestId("admin-coupons-new-duration-select"), { target: { value: "once" } });
+    expect(screen.getByTestId("admin-coupons-once-warning")).toBeInTheDocument(); // "first charge only" without an offer id: not allowed
+    expect(screen.getByTestId("admin-coupons-new-create-btn")).toBeDisabled();
+    fireEvent.change(screen.getByTestId("admin-coupons-new-offerid-input"), { target: { value: "  offer_XYZ789  " } });
+    expect(screen.queryByTestId("admin-coupons-once-warning")).not.toBeInTheDocument();
+    expect(screen.getByTestId("admin-coupons-new-create-btn")).not.toBeDisabled();
+    // With an offer id the number of discounted cycles belongs to the Razorpay offer, not to this screen.
+    expect(screen.getByTestId("admin-coupons-offer-cycles-note")).toHaveTextContent("Discount cycles are set by the Razorpay offer");
+    expect(screen.getByTestId("admin-coupons-new-duration-select")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("admin-coupons-new-create-btn"));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith("/admin/coupons", expect.objectContaining({ code: "offerdemo", razorpayOfferId: "offer_XYZ789" })));
+  });
+
+  it("after saving an offer coupon, shows Razorpay's verdict on the offer: problems in red, or an all-clear", async () => {
+    mockLoadOk({ coupons: [] });
+    api.post.mockResolvedValueOnce({ data: { coupon: {}, offerCheck: { found: true, notes: [], problems: ["The offer's MAXIMUM order amount is ₹100, but Premium (Monthly) costs ₹119 — Razorpay will NOT apply the offer."] } } });
+    render(<Subscriptions />);
+    await waitFor(() => expect(screen.getByTestId("admin-subscriptions-table")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("admin-subscriptions-tab-coupons"));
+    fireEvent.click(screen.getByTestId("admin-coupons-new-toggle-btn"));
+    fireEvent.change(screen.getByTestId("admin-coupons-new-code-input"), { target: { value: "badoffer" } });
+    fireEvent.change(screen.getByTestId("admin-coupons-new-offerid-input"), { target: { value: "offer_ABC123" } });
+    fireEvent.click(screen.getByTestId("admin-coupons-new-create-btn"));
+    await waitFor(() => expect(screen.getByTestId("admin-coupons-offer-problems")).toHaveTextContent("MAXIMUM order amount is ₹100"));
+    expect(screen.queryByTestId("admin-coupons-offer-ok")).not.toBeInTheDocument();
+
+    api.post.mockResolvedValueOnce({ data: { coupon: {}, offerCheck: { found: true, notes: [], problems: [] } } });
+    fireEvent.click(screen.getByTestId("admin-coupons-new-toggle-btn"));
+    fireEvent.change(screen.getByTestId("admin-coupons-new-code-input"), { target: { value: "goodoffer" } });
+    fireEvent.change(screen.getByTestId("admin-coupons-new-offerid-input"), { target: { value: "offer_DEF456" } });
+    fireEvent.click(screen.getByTestId("admin-coupons-new-create-btn"));
+    await waitFor(() => expect(screen.getByTestId("admin-coupons-offer-ok")).toBeInTheDocument());
+    expect(screen.queryByTestId("admin-coupons-offer-problems")).not.toBeInTheDocument();
+  });
+
+  it("shows no offer verdict for an ordinary coupon", async () => {
+    mockLoadOk({ coupons: [] });
+    api.post.mockResolvedValueOnce({ data: { coupon: {}, offerCheck: null } });
+    render(<Subscriptions />);
+    await waitFor(() => expect(screen.getByTestId("admin-subscriptions-table")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("admin-subscriptions-tab-coupons"));
+    fireEvent.click(screen.getByTestId("admin-coupons-new-toggle-btn"));
+    fireEvent.change(screen.getByTestId("admin-coupons-new-code-input"), { target: { value: "plain2" } });
+    fireEvent.click(screen.getByTestId("admin-coupons-new-create-btn"));
+    await waitFor(() => expect(api.post).toHaveBeenCalled());
+    expect(screen.queryByTestId("admin-coupons-offer-problems")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("admin-coupons-offer-ok")).not.toBeInTheDocument();
+  });
+
+  it("shows no 'cycles are set by the offer' note (and keeps the duration choice usable) without an offer id", async () => {
+    mockLoadOk({ coupons: [] });
+    render(<Subscriptions />);
+    await waitFor(() => expect(screen.getByTestId("admin-subscriptions-table")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("admin-subscriptions-tab-coupons"));
+    fireEvent.click(screen.getByTestId("admin-coupons-new-toggle-btn"));
+    expect(screen.queryByTestId("admin-coupons-offer-cycles-note")).not.toBeInTheDocument();
+    expect(screen.getByTestId("admin-coupons-new-duration-select")).not.toBeDisabled();
+    fireEvent.change(screen.getByTestId("admin-coupons-new-offerid-input"), { target: { value: "offer_A1" } });
+    expect(screen.getByTestId("admin-coupons-offer-cycles-note")).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("admin-coupons-new-offerid-input"), { target: { value: "" } });
+    expect(screen.queryByTestId("admin-coupons-offer-cycles-note")).not.toBeInTheDocument();
+    expect(screen.getByTestId("admin-coupons-new-duration-select")).not.toBeDisabled();
+  });
+
+  it("does not send an offer id when the field is left empty", async () => {
+    mockLoadOk({ coupons: [] });
+    api.post.mockResolvedValue({ data: { coupon: {} } });
+    render(<Subscriptions />);
+    await waitFor(() => expect(screen.getByTestId("admin-subscriptions-table")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("admin-subscriptions-tab-coupons"));
+    fireEvent.click(screen.getByTestId("admin-coupons-new-toggle-btn"));
+    fireEvent.change(screen.getByTestId("admin-coupons-new-code-input"), { target: { value: "plain" } });
+    fireEvent.click(screen.getByTestId("admin-coupons-new-create-btn"));
+    await waitFor(() => expect(api.post).toHaveBeenCalled());
+    expect(api.post.mock.calls[0][1]).not.toHaveProperty("razorpayOfferId");
+  });
+
   // Requirement: a coupon on a recurring plan can discount just the first
   // charge instead of every future auto-renewal.
-  it("defaults a new coupon to recurring, shows the duration on existing rows, and can create a one-time coupon", async () => {
+  it("defaults a new coupon to recurring, shows the duration on existing rows (flagging an old-style one), and requires an offer id for a first-charge-only coupon", async () => {
     mockLoadOk({
       coupons: [
         { id: "cp1", code: "SAVE20", type: "percent", value: 20, appliesToPlanKeys: [], eligibility: "any", discountDuration: "recurring", maxRedemptions: 100, redeemedCount: 3, expiresAt: null, isActive: true },
@@ -777,15 +869,28 @@ describe("Coupons tab", () => {
     fireEvent.click(screen.getByTestId("admin-subscriptions-tab-coupons"));
 
     expect(screen.getByTestId("admin-coupons-duration-cp1")).toHaveTextContent("Every renewal");
-    expect(screen.getByTestId("admin-coupons-duration-cp2")).toHaveTextContent("First charge only");
+    // cp2 is an old-style first-charge-only coupon with no Razorpay offer: shown as unsellable.
+    expect(screen.getByTestId("admin-coupons-duration-cp2")).toHaveTextContent("First charge only — needs an offer id (can't be redeemed)");
 
     fireEvent.click(screen.getByTestId("admin-coupons-new-toggle-btn"));
     expect(screen.getByTestId("admin-coupons-new-duration-select")).toHaveValue("recurring");
+    // The offer requirement is only raised when "First charge only" is actually chosen.
+    expect(screen.queryByTestId("admin-coupons-once-warning")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("admin-coupons-new-duration-select"), { target: { value: "once" } });
+    expect(screen.getByTestId("admin-coupons-once-warning")).toHaveTextContent("needs a Razorpay offer id");
+    fireEvent.change(screen.getByTestId("admin-coupons-new-duration-select"), { target: { value: "recurring" } });
+    expect(screen.queryByTestId("admin-coupons-once-warning")).not.toBeInTheDocument();
     fireEvent.change(screen.getByTestId("admin-coupons-new-code-input"), { target: { value: "onetime" } });
     fireEvent.change(screen.getByTestId("admin-coupons-new-value-input"), { target: { value: "50" } });
     fireEvent.change(screen.getByTestId("admin-coupons-new-duration-select"), { target: { value: "once" } });
+    // Without an offer id the coupon can't be created at all.
+    expect(screen.getByTestId("admin-coupons-new-create-btn")).toBeDisabled();
     fireEvent.click(screen.getByTestId("admin-coupons-new-create-btn"));
-    await waitFor(() => expect(api.post).toHaveBeenCalledWith("/admin/coupons", expect.objectContaining({ code: "onetime", discountDuration: "once" })));
+    expect(api.post).not.toHaveBeenCalled();
+    // With one it can.
+    fireEvent.change(screen.getByTestId("admin-coupons-new-offerid-input"), { target: { value: "offer_ABC123" } });
+    fireEvent.click(screen.getByTestId("admin-coupons-new-create-btn"));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith("/admin/coupons", expect.objectContaining({ code: "onetime", discountDuration: "once", razorpayOfferId: "offer_ABC123" })));
   });
 
   // Requirement: total and per-user max-use limits are both optional and

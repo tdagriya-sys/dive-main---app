@@ -118,7 +118,7 @@ describe("AdminShell", () => {
     expect(screen.getByTestId(expectedTestId)).toBeInTheDocument();
   });
 
-  it("renders all eighteen nav links for a superadmin", () => {
+  it("renders all nineteen nav links for a superadmin", () => {
     useAdminAuth.mockReturnValue({ staffUser: { email: "boss@divve.in", staffRole: "superadmin" }, logout: jest.fn() });
     renderAt("/admin");
     expect(screen.getByTestId("admin-nav-dashboard")).toBeInTheDocument();
@@ -137,6 +137,8 @@ describe("AdminShell", () => {
     expect(screen.getByTestId("admin-nav-roles")).toBeInTheDocument();
     expect(screen.getByTestId("admin-nav-feature-flags")).toBeInTheDocument();
     expect(screen.getByTestId("admin-nav-data-requests")).toBeInTheDocument();
+    // "User Activity" (what users did) sits right next to the staff-only "Audit Log".
+    expect(screen.getByTestId("admin-nav-user-activity")).toHaveAttribute("href", "/admin/user-activity");
     expect(screen.getByTestId("admin-nav-audit-log")).toBeInTheDocument();
     expect(screen.getByTestId("admin-nav-system")).toBeInTheDocument();
   });

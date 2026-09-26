@@ -40,13 +40,6 @@ export interface ISubscription extends Document {
   // invoice/revenue number derives from — this field is for admin visibility
   // and audit, never re-read to compute a price.
   couponCode?: string;
-  // Stamped once subscriptionService.ts::revertToFullPriceIfOneTimeCoupon has
-  // actually told Razorpay to switch this subscription back to the catalog
-  // plan's full price starting the next cycle — only relevant when
-  // `couponCode` redeemed a `discountDuration: "once"` coupon. Undefined
-  // means either no coupon, a "recurring" coupon (nothing to revert, ever),
-  // or a "once" coupon whose first charge hasn't been processed yet.
-  couponOnceRevertScheduledAt?: Date | null;
   // Set once at creation (upsertLocalSubscription) to the trial length this
   // SPECIFIC subscription instance actually granted, if any. A durable
   // per-instance record, deliberately independent of the plan's CURRENT
@@ -83,7 +76,6 @@ const subscriptionSchema = new Schema<ISubscription>(
     endedAt: { type: Date },
     lastPaymentId: { type: Schema.Types.ObjectId, ref: "Payment" },
     couponCode: { type: String },
-    couponOnceRevertScheduledAt: { type: Date },
     trialDaysGranted: { type: Number },
     renewalReminderPeriodEnd: { type: Date },
     renewalRemindersSentDays: { type: [Number] },

@@ -43,6 +43,8 @@ describe("admin UserDetail", () => {
     expect(screen.getByTestId("admin-user-detail-holdings-breakdown")).toHaveTextContent("GOLD");
     expect(screen.getByTestId("admin-user-detail-payments-card")).toHaveTextContent("SCORE_REPORT_PDF");
     expect(screen.getByTestId("admin-user-detail-activity-card")).toHaveTextContent("login");
+    // The card only shows the latest few events; the full, filterable history is one click away.
+    expect(screen.getByTestId("admin-user-detail-all-activity-link")).toHaveAttribute("href", "/admin/user-activity?user=u1");
   });
 
   it("shows a 404-specific message for an unknown user", async () => {

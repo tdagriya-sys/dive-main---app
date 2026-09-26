@@ -6,6 +6,7 @@ import { TicketMessage } from "../models/TicketMessage";
 import { User } from "../models/User";
 import { createTicketSchema, replyMessageSchema, csatSchema } from "../validators/ticket";
 import * as ticketService from "../services/ticketService";
+import { emitActivity } from "../services/activityLog";
 
 /**
  * The logged-in user's own ticket surface (Phase 4 of
@@ -42,6 +43,7 @@ export async function createTicket(req: AuthedRequest, res: Response) {
     callback: data.requestCallback && data.mobile ? { mobile: data.mobile, preferredWindow: data.preferredWindow } : undefined,
   });
 
+  emitActivity("ticket_created", { userId: req.userId, props: { categoryKey: data.categoryKey, source: "in_app", callbackRequested: Boolean(data.requestCallback) }, req });
   res.status(201).json({ ticket: { id: String(ticket._id), refNo: ticket.refNo, status: ticket.status } });
 }
 

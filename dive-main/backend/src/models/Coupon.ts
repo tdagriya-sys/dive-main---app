@@ -12,17 +12,17 @@ export type CouponType = "percent" | "flat";
 //   least one past Subscription row (a returning/renewing subscriber).
 export type CouponEligibility = "any" | "new_user" | "first_time" | "renewal";
 
-// "recurring" (default, and the ONLY behavior that existed before this
-// field) — the discounted Razorpay Plan created for this redemption
-// (subscriptionService.ts::startSubscription) stays the subscription's
-// plan for its entire life, so every future auto-renewal is charged the
-// discounted amount too. "once" — the subscription is switched back to the
-// catalog plan's full price starting the NEXT billing cycle, the moment its
-// first (already-discounted) charge succeeds — see subscriptionService.ts::
-// revertToFullPriceIfOneTimeCoupon. Purely about how many of THIS
-// subscription's own billing cycles get discounted; unrelated to
-// `maxRedemptions`/`maxRedemptionsPerUser`, which govern how many different
-// checkouts can use the code at all.
+// "recurring" (default) — the discounted Razorpay Plan created for this
+// redemption (subscriptionService.ts::startSubscription) stays the
+// subscription's plan for its entire life, so every future auto-renewal is
+// charged the discounted amount too. "once" — only the first charge is
+// discounted, and this is ONLY possible in offer mode: it REQUIRES
+// `razorpayOfferId` (a Razorpay-Dashboard Subscription Offer), because the old
+// approach — switch the subscription back to the full-price plan after the first
+// charge — was removed: Razorpay refuses plan changes on UPI subscriptions.
+// Purely about how many of THIS subscription's own billing cycles get
+// discounted; unrelated to `maxRedemptions`/`maxRedemptionsPerUser`, which govern
+// how many different checkouts can use the code at all.
 export type CouponDiscountDuration = "once" | "recurring";
 
 /**
@@ -46,6 +46,15 @@ export interface ICoupon extends Document {
   maxRedemptions?: number; // undefined = unlimited, total across every user
   maxRedemptionsPerUser?: number; // undefined = unlimited per user — independent of maxRedemptions; see models/CouponRedemption.ts for the per-user counter this is checked against
   discountDuration: CouponDiscountDuration;
+  // "Offer mode": the id (offer_xxx) of a Subscription Offer created in the
+  // Razorpay Dashboard (offers can't be created by API). When set, checkout
+  // subscribes to the normal catalog plan WITH this offer linked and Razorpay
+  // itself applies the discount for however many cycles the offer is
+  // configured for — no discounted one-off plan, and no plan switch after the
+  // first charge (which Razorpay refuses for UPI subscriptions). The offer's
+  // own settings (discount, cycles, validity) live in the Dashboard and must
+  // match this coupon's `type`/`value`, which is only used to show the price.
+  razorpayOfferId?: string;
   redeemedCount: number;
   expiresAt?: Date;
   isActive: boolean;
@@ -63,6 +72,7 @@ const couponSchema = new Schema<ICoupon>(
     maxRedemptions: { type: Number },
     maxRedemptionsPerUser: { type: Number },
     discountDuration: { type: String, enum: ["once", "recurring"], default: "recurring" },
+    razorpayOfferId: { type: String },
     redeemedCount: { type: Number, default: 0 },
     expiresAt: { type: Date },
     isActive: { type: Boolean, default: true },

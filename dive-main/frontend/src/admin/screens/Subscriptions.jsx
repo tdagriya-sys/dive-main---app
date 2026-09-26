@@ -25,7 +25,8 @@ const REMINDER_CATEGORIES = [
   { key: "renewal", label: "Renewal (auto-renew on)", hint: "Sent for a paying subscriber who will be charged again automatically." },
   { key: "accessEnding", label: "Access ending (auto-renew off)", hint: "Sent when auto-renew is off — self-cancelled, or the plan was archived." },
 ];
-const REMINDER_TOKENS = ["planName", "periodEnd", "price", "daysRemaining"];
+// price = what will actually be charged next (discounted while a coupon/offer applies); regularPrice = the plan's normal price.
+const REMINDER_TOKENS = ["planName", "periodEnd", "price", "regularPrice", "daysRemaining"];
 
 // How many days before currentPeriodEnd jobs/renewalReminder.cron.ts warns a
 // subscriber about an upcoming renewal charge, trial ending, or access
@@ -605,13 +606,14 @@ const COUPON_ELIGIBILITY_OPTIONS = [
   { value: "renewal", label: "Renewal/returning subscribers only" },
 ];
 
-// A recurring plan's coupon can discount just the first charge, or every
-// auto-renewal for the subscription's whole life — see backend's
-// Coupon.ts::CouponDiscountDuration. "recurring" is the default and matches
-// this feature's original (pre-toggle) behavior.
+// A recurring plan's coupon can discount every auto-renewal for the
+// subscription's whole life ("recurring", the default), or only the first
+// charge ("once") — see backend's Coupon.ts::CouponDiscountDuration. A
+// first-charge-only discount now REQUIRES a Razorpay offer (the old plan switch
+// after the first charge was removed: Razorpay refuses plan changes on UPI).
 const COUPON_DURATION_OPTIONS = [
   { value: "recurring", label: "Every renewal (recurring)" },
-  { value: "once", label: "First charge only (one-time)" },
+  { value: "once", label: "First charge only (needs a Razorpay offer)" },
 ];
 
 function NewCouponForm({ plans, onCreate }) {
@@ -622,6 +624,9 @@ function NewCouponForm({ plans, onCreate }) {
   const [planKey, setPlanKey] = useState("");
   const [eligibility, setEligibility] = useState("any");
   const [discountDuration, setDiscountDuration] = useState("recurring");
+  const [razorpayOfferId, setRazorpayOfferId] = useState("");
+  const hasOffer = Boolean(razorpayOfferId.trim());
+  const offerRequired = discountDuration === "once" && !hasOffer;
   const [maxRedemptions, setMaxRedemptions] = useState("");
   const [maxRedemptionsPerUser, setMaxRedemptionsPerUser] = useState("");
 
@@ -657,17 +662,31 @@ function NewCouponForm({ plans, onCreate }) {
           <option key={o.value} value={o.value}>{o.label}</option>
         ))}
       </select>
-      <select data-testid="admin-coupons-new-duration-select" value={discountDuration} onChange={(e) => setDiscountDuration(e.target.value)} className="w-full rounded-lg border border-[var(--border)] bg-transparent px-2 py-1.5 text-sm outline-none mb-2">
+      <select data-testid="admin-coupons-new-duration-select" value={discountDuration} onChange={(e) => setDiscountDuration(e.target.value)} disabled={hasOffer} className="w-full rounded-lg border border-[var(--border)] bg-transparent px-2 py-1.5 text-sm outline-none mb-2 disabled:opacity-50">
         {COUPON_DURATION_OPTIONS.map((o) => (
           <option key={o.value} value={o.value}>{o.label}</option>
         ))}
       </select>
+      <input data-testid="admin-coupons-new-offerid-input" value={razorpayOfferId} onChange={(e) => setRazorpayOfferId(e.target.value)} placeholder="Razorpay offer id (optional) — e.g. offer_ABC123" className="w-full rounded-lg border border-[var(--border)] bg-transparent px-2 py-1.5 text-sm outline-none mb-1" />
+      <p className="text-xs text-[var(--text-tertiary)] mb-2 leading-relaxed" data-testid="admin-coupons-offerid-help">
+        Optional "offer mode": create a matching Offer in the Razorpay Dashboard (Subscriptions → Offers), paste its id here, and Razorpay itself applies the discount for the cycles you set there — no plan switch, so UPI works. Make the % / amount above match that offer.
+      </p>
+      {hasOffer && (
+        <p className="text-xs text-[var(--text-secondary)] mb-2 leading-relaxed" data-testid="admin-coupons-offer-cycles-note">
+          Discount cycles are set by the Razorpay offer — e.g. "first cycle only" or "next 3 cycles" is chosen when you create the offer in the Razorpay Dashboard. The "Every renewal / First charge only" choice above doesn't apply in offer mode.
+        </p>
+      )}
+      {offerRequired && (
+        <p className="text-xs text-[var(--red)] mb-2 leading-relaxed" data-testid="admin-coupons-once-warning">
+          "First charge only" needs a Razorpay offer id: create an Offer in the Razorpay Dashboard (Subscriptions → Offers), then paste its id above. (Razorpay can't change a UPI subscription's plan after the first charge, so the discount has to be applied by a Razorpay offer.) Or choose "Every renewal".
+        </p>
+      )}
       <div className="flex justify-end gap-2">
         <button type="button" onClick={() => setOpen(false)} className="text-sm font-bold text-[var(--text-tertiary)]">Cancel</button>
         <button
           type="button"
           data-testid="admin-coupons-new-create-btn"
-          disabled={!code.trim() || !value}
+          disabled={!code.trim() || !value || offerRequired}
           onClick={async () => {
             await onCreate({
               code: code.trim(),
@@ -676,6 +695,7 @@ function NewCouponForm({ plans, onCreate }) {
               appliesToPlanKeys: planKey ? [planKey] : [],
               eligibility,
               discountDuration,
+              ...(razorpayOfferId.trim() ? { razorpayOfferId: razorpayOfferId.trim() } : {}),
               ...(maxRedemptions ? { maxRedemptions: Number(maxRedemptions) } : {}),
               ...(maxRedemptionsPerUser ? { maxRedemptionsPerUser: Number(maxRedemptionsPerUser) } : {}),
             });
@@ -684,6 +704,7 @@ function NewCouponForm({ plans, onCreate }) {
             setPlanKey("");
             setEligibility("any");
             setDiscountDuration("recurring");
+            setRazorpayOfferId("");
             setMaxRedemptions("");
             setMaxRedemptionsPerUser("");
             setOpen(false);
@@ -705,7 +726,7 @@ function CouponRow({ coupon, onToggleActive }) {
     <tr className="border-b border-[var(--border)] last:border-0" data-testid={`admin-coupons-row-${coupon.id}`}>
       <td className="px-4 py-3 font-bold">{coupon.code}</td>
       <td className="px-4 py-3 text-[var(--text-secondary)]">{discountLabel}</td>
-      <td className="px-4 py-3 text-[var(--text-tertiary)]" data-testid={`admin-coupons-duration-${coupon.id}`}>{isOneTime ? "First charge only" : "Every renewal"}</td>
+      <td className="px-4 py-3 text-[var(--text-tertiary)]" data-testid={`admin-coupons-duration-${coupon.id}`}>{coupon.razorpayOfferId ? `Razorpay offer (${coupon.razorpayOfferId}) — discount cycles are set by the offer` : isOneTime ? "First charge only — needs an offer id (can't be redeemed)" : "Every renewal"}</td>
       <td className="px-4 py-3 text-[var(--text-tertiary)]">{coupon.appliesToPlanKeys.length === 0 ? "All paid plans" : coupon.appliesToPlanKeys.join(", ")}</td>
       <td className="px-4 py-3 text-[var(--text-tertiary)]" data-testid={`admin-coupons-eligibility-${coupon.id}`}>{eligibilityLabel}</td>
       <td className="px-4 py-3">
@@ -862,6 +883,9 @@ export default function Subscriptions() {
   const [renewalReminderSaved, setRenewalReminderSaved] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  // What Razorpay says about a just-saved coupon's offer (offer mode): does its
+  // own rule set (amount range, validity, payment method) actually fit the plan?
+  const [offerCheck, setOfferCheck] = useState(null);
   const [loading, setLoading] = useState(true);
   const [stepUpRequest, setStepUpRequest] = useState(null);
   const [trials, setTrials] = useState(null);
@@ -1060,7 +1084,8 @@ export default function Subscriptions() {
   async function createCoupon(body) {
     setError("");
     try {
-      await api.post("/admin/coupons", body);
+      const { data } = await api.post("/admin/coupons", body);
+      setOfferCheck(data?.offerCheck ? { code: body.code, ...data.offerCheck } : null);
       await load();
     } catch (err) {
       setError(err?.response?.data?.message || "Couldn't create this coupon.");
@@ -1271,6 +1296,20 @@ export default function Subscriptions() {
       {tab === "coupons" && (
         <>
           <div className="flex justify-end mb-4"><NewCouponForm plans={plans} onCreate={createCoupon} /></div>
+          {offerCheck && offerCheck.problems?.length > 0 && (
+            <div className="rounded-xl border border-[var(--red)]/40 bg-[var(--red)]/5 p-3 mb-4 text-sm" data-testid="admin-coupons-offer-problems">
+              <p className="font-bold text-[var(--red)] mb-1">The Razorpay offer for {offerCheck.code} won't work as it is set up:</p>
+              <ul className="list-disc pl-5 space-y-1 text-[var(--text-secondary)]">
+                {offerCheck.problems.map((p) => <li key={p}>{p}</li>)}
+              </ul>
+              <p className="text-xs text-[var(--text-tertiary)] mt-2">Until this is fixed in the Razorpay Dashboard, customers using this code would be refused at checkout rather than charged the wrong amount.</p>
+            </div>
+          )}
+          {offerCheck && offerCheck.problems?.length === 0 && (
+            <p className="rounded-xl border border-[var(--green)]/40 bg-[var(--green)]/5 p-3 mb-4 text-sm text-[var(--green)]" data-testid="admin-coupons-offer-ok">
+              Checked with Razorpay: the offer for {offerCheck.code} is active and its rules fit your plan prices.
+            </p>
+          )}
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-card)] overflow-hidden">
             <table className="w-full text-sm" data-testid="admin-coupons-table">
               <thead>

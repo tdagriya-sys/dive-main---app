@@ -19,6 +19,7 @@ import { REFRESH_COOKIE_NAME as REFRESH_COOKIE } from "../config/constants";
 import { publicUser } from "../utils/publicUser";
 import { issueRefreshToken } from "../services/refreshTokenService";
 import { emitActivity } from "../services/activityLog";
+import { maskIdentifier } from "../lib/maskIdentifier";
 
 // The web SPA always uses the httpOnly cookie set above and never sees a
 // refresh token in JS. The Divve Bot browser extension (extension/) has no
@@ -87,6 +88,7 @@ export async function signupVerify(req: Request, res: Response) {
 
   const ok = await verifyOtp(mobile, "signup", data.otp);
   if (!ok) {
+    emitActivity("otp_failed", { props: { purpose: "signup", identifier: maskIdentifier(mobile) }, req });
     return res.status(400).json({ error: "INVALID_OTP", message: "That OTP is incorrect or has expired." });
   }
 
@@ -121,15 +123,19 @@ export async function login(req: Request, res: Response) {
 
   const user = await User.findOne(data.identifier.includes("@") ? { email: identifier } : { mobile: identifier });
   if (!user) {
+    // No account: record a masked hint only (never the full identifier).
+    emitActivity("login_failed", { props: { reason: "unknown_account", identifier: maskIdentifier(data.identifier) }, req });
     return res.status(404).json({ error: "USER_NOT_FOUND", message: "We couldn't find an account with these details — please sign up first." });
   }
 
   const matches = await bcrypt.compare(data.password, user.passwordHash);
   if (!matches) {
+    emitActivity("login_failed", { userId: user._id.toString(), props: { reason: "wrong_password" }, req });
     return res.status(401).json({ error: "INVALID_CREDENTIALS", message: "Incorrect email/mobile or password." });
   }
 
   if (user.status !== "active") {
+    emitActivity("login_failed", { userId: user._id.toString(), props: { reason: "account_not_active" }, req });
     return res.status(403).json({ error: "ACCOUNT_SUSPENDED", message: "This account isn't active. Contact support if you believe this is a mistake." });
   }
 
@@ -172,6 +178,7 @@ export async function forgotPasswordStart(req: Request, res: Response) {
 
   const user = await User.findOne(data.identifier.includes("@") ? { email: identifier } : { mobile: identifier });
   if (!user) {
+    emitActivity("password_reset_requested", { props: { result: "unknown_account", identifier: maskIdentifier(data.identifier) }, req });
     return res.status(404).json({ error: "USER_NOT_FOUND", message: "We couldn't find an account with these details." });
   }
 
@@ -187,6 +194,7 @@ export async function forgotPasswordStart(req: Request, res: Response) {
     });
   }
 
+  emitActivity("password_reset_requested", { userId: user._id.toString(), props: { result: "code_sent" }, req });
   return res.status(200).json({
     message: "OTP sent to your email address.",
     mobile: user.mobile,
@@ -204,6 +212,8 @@ export async function forgotPasswordVerify(req: Request, res: Response) {
 
   const ok = await verifyOtp(mobile, "password_reset", data.otp);
   if (!ok) {
+    const owner = await User.findOne({ mobile }).select("_id").lean();
+    emitActivity("otp_failed", { userId: owner ? String(owner._id) : undefined, props: { purpose: "password_reset", identifier: maskIdentifier(mobile) }, req });
     return res.status(400).json({ error: "INVALID_OTP", message: "That OTP is incorrect or has expired." });
   }
 
@@ -240,6 +250,7 @@ export async function resetPassword(req: Request, res: Response) {
   user.passwordHash = await bcrypt.hash(data.newPassword, 10);
   await user.save();
   await RefreshToken.updateMany({ userId: user._id, revokedAt: null }, { revokedAt: new Date() });
+  emitActivity("password_reset_completed", { userId: user._id.toString(), props: { sessionsRevoked: true }, req });
 
   return res.status(200).json({ message: "Password updated. Please log in with your new password." });
 }
@@ -279,6 +290,7 @@ export async function refresh(req: Request, res: Response) {
       // other still-live token for this user too, not just this one, so a
       // stolen token can't keep working via a delayed replay.
       await RefreshToken.updateMany({ userId: existing.userId, revokedAt: null }, { revokedAt: new Date() });
+      emitActivity("session_reuse_detected", { userId: String(existing.userId), props: { sessionsRevoked: true }, req });
       return res.status(401).json({ error: "REFRESH_TOKEN_REUSED", message: "This session was already used elsewhere. Please log in again." });
     }
     return res.status(401).json({ error: "INVALID_REFRESH_TOKEN", message: "Session expired. Please log in again." });

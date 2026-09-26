@@ -159,8 +159,16 @@ export async function startSubscription(userId: string, planKey: string, couponC
     throw new ApiError(400, "PLAN_NOT_PUBLISHED", "This plan hasn't been published to Razorpay yet. Ask an admin to publish it first.");
   }
 
+  // "Offer mode" (coupon.razorpayOfferId): subscribe to the NORMAL catalog plan
+  // with the Razorpay-Dashboard offer linked, and let Razorpay apply the
+  // discount for the offer's own number of cycles. No discounted one-off plan
+  // and no plan switch afterwards — Razorpay refuses plan changes on UPI
+  // subscriptions, which is why the old "first charge only" plan-switch
+  // approach was removed.
+  const offerId = coupon?.razorpayOfferId || undefined;
+
   let razorpayPlanId = plan.razorpayPlanId;
-  if (coupon && chargePricePaise !== plan.pricePaise) {
+  if (coupon && !offerId && chargePricePaise !== plan.pricePaise) {
     const discountedPlan = await getClient().plans.create({
       item: { name: `${plan.name} (${coupon.code})`, amount: chargePricePaise, currency: "INR" },
       period: razorpayPeriodFor(plan.interval),
@@ -174,8 +182,37 @@ export async function startSubscription(userId: string, planKey: string, couponC
     plan_id: razorpayPlanId,
     total_count: totalCountFor(plan.interval),
     customer_notify: 1,
+    ...(offerId ? { offer_id: offerId } : {}),
     notes: { userId, planKey: plan.key, ...(coupon ? { couponCode: coupon.code } : {}) },
   });
+
+  // Offer mode fails CLOSED. Razorpay silently ignores an offer whose rules don't
+  // fit the subscription (e.g. the offer's maximum order amount is below the plan
+  // price) — it accepts the subscription with `offer_id: null` and the customer
+  // would then be charged FULL price after being shown the discounted one. So
+  // confirm the offer really got linked; if not, drop this subscription and stop.
+  if (offerId) {
+    let linkedOfferId = (subscription as unknown as { offer_id?: string | null }).offer_id;
+    if (!linkedOfferId) {
+      try {
+        linkedOfferId = ((await getClient().subscriptions.fetch(subscription.id)) as unknown as { offer_id?: string | null }).offer_id;
+      } catch {
+        /* treated as not linked below */
+      }
+    }
+    if (!linkedOfferId) {
+      logger.error(
+        { subscriptionId: subscription.id, offerId, couponCode: coupon?.code, planKey: plan.key },
+        "[subscriptionService] Razorpay did not link the offer to the new subscription — refusing checkout so the customer is not charged full price after seeing a discount. Check the offer in the Razorpay Dashboard (active? valid dates? payment method? order amount range must include the plan price)."
+      );
+      try {
+        await getClient().subscriptions.cancel(subscription.id, false);
+      } catch {
+        /* an unpaid, never-authorised subscription just lapses */
+      }
+      throw new ApiError(400, "OFFER_NOT_APPLIED", "We couldn't apply this discount right now, so nothing has been charged. Please try again in a little while, or contact support.");
+    }
+  }
 
   return { subscriptionId: subscription.id, keyId: env.razorpay.keyId ?? null, amount: chargePricePaise, mock: false };
 }
@@ -268,6 +305,27 @@ async function upsertLocalSubscription(
   couponCode?: string,
   trialConsumption: TrialConsumption = "none"
 ) {
+  // ONE row per Razorpay subscription. The paid checkout's two confirmations
+  // — the browser's verify call and Razorpay's `subscription.charged` webhook
+  // — both end up here for the SAME Razorpay subscription id, in either order.
+  // Whichever arrives second must reuse the row the first one created, not
+  // "supersede" it with a duplicate: doing so left the ledger row on the
+  // cancelled first copy and the active copy with no charge recorded (and,
+  // when the webhook won, no coupon on the row at all — which is what stopped
+  // a "first charge only" coupon from ever scheduling its switch back to full
+  // price). Only a still-live row is reused; a plan SWITCH always has a new
+  // Razorpay id, so it is unaffected and still supersedes as before.
+  if (razorpaySubscriptionId) {
+    const sameRazorpaySub = await Subscription.findOne({ userId, razorpaySubscriptionId, status: { $in: ["trialing", "active", "past_due"] } }).sort({ createdAt: -1 });
+    if (sameRazorpaySub) {
+      if (couponCode && !sameRazorpaySub.couponCode) {
+        sameRazorpaySub.couponCode = couponCode;
+        await sameRazorpaySub.save();
+      }
+      return sameRazorpaySub;
+    }
+  }
+
   // A user should have at most one live (trialing/active/past_due)
   // subscription at a time — supersede rather than stack as separate rows,
   // same convention Phase 3's staff-invite service already uses for a
@@ -334,49 +392,29 @@ export interface VerifySubscriptionInput {
 // the user has already genuinely paid for. A failure here (e.g. a total-cap
 // race lost between validateCoupon at checkout-start and this call) just
 // means the count is slightly off; logged, not thrown.
-async function redeemCouponBestEffort(couponCode: string, userId: string): Promise<void> {
+// What Razorpay ACTUALLY charged for a payment — used for offer-mode coupons,
+// where the discount is applied by Razorpay (its offer settings), so the amount
+// we compute locally is only an expectation. null when it can't be read.
+async function actualChargedAmountPaise(paymentId: string, isMock: boolean): Promise<number | null> {
+  if (isMock || env.razorpay.isPlaceholder) return null;
   try {
-    const coupon = await Coupon.findOne({ code: couponCode.trim().toUpperCase() }).select("_id").lean();
-    if (coupon) await redeemCoupon(String(coupon._id), userId);
-  } catch (err) {
-    logger.error({ err, couponCode, userId }, "[subscriptionService] failed to record coupon redemption");
+    const payment = (await getClient().payments.fetch(paymentId)) as unknown as { amount?: number | string };
+    const amount = Number(payment.amount);
+    return Number.isFinite(amount) && amount > 0 ? amount : null;
+  } catch {
+    return null;
   }
 }
 
-// Resolves the catalog Razorpay plan id a subscription should revert to
-// after its first (already-discounted) charge, if its redeemed coupon is a
-// `discountDuration: "once"` discount — or null if there's nothing to
-// revert (no coupon redeemed, a "recurring" coupon whose discount is
-// supposed to last for the subscription's whole life, or the revert has
-// already been scheduled once). Deliberately touches only the DB, never
-// Razorpay, so it's unit-testable without a mock-mode guard getting in the
-// way — see couponService.ts's own comment for why "once" exists at all.
-export async function resolveOneTimeCouponRevertPlanId(subscription: Pick<ISubscription, "couponCode" | "planId" | "couponOnceRevertScheduledAt">): Promise<string | null> {
-  if (!subscription.couponCode || subscription.couponOnceRevertScheduledAt) return null;
-  const coupon = await Coupon.findOne({ code: subscription.couponCode }).lean();
-  if (!coupon || coupon.discountDuration !== "once") return null;
-  const plan = await SubscriptionPlan.findById(subscription.planId).lean();
-  return plan?.razorpayPlanId ?? null;
-}
-
-// Called after EVERY successful charge — the first one (verifySubscriptionPayment)
-// and every renewal (the `subscription.charged` webhook below) — so that
-// whichever of the two actually processes the FIRST charge is the one that
-// schedules the revert; the other call (whether the same charge processed
-// twice, or a later renewal) is a cheap no-op once
-// `couponOnceRevertScheduledAt` is set. `schedule_change_at: "cycle_end"`
-// (not `"now"`) keeps the cycle that was just paid for at its discounted
-// price — only the NEXT renewal bills full price.
-async function revertToFullPriceIfOneTimeCoupon(subscription: ISubscription): Promise<void> {
-  const revertPlanId = await resolveOneTimeCouponRevertPlanId(subscription);
-  if (!revertPlanId) return;
-  if (!subscription.razorpaySubscriptionId || subscription.razorpaySubscriptionId.startsWith("mock_sub_") || env.razorpay.isPlaceholder) return;
+async function redeemCouponBestEffort(couponCode: string, userId: string): Promise<void> {
   try {
-    await getClient().subscriptions.update(subscription.razorpaySubscriptionId, { plan_id: revertPlanId, schedule_change_at: "cycle_end" });
-    subscription.couponOnceRevertScheduledAt = new Date();
-    await subscription.save();
+    const coupon = await Coupon.findOne({ code: couponCode.trim().toUpperCase() }).select("_id code").lean();
+    if (coupon) {
+      await redeemCoupon(String(coupon._id), userId);
+      emitActivity("coupon_redeemed", { userId, props: { code: coupon.code } });
+    }
   } catch (err) {
-    logger.error({ err, subscriptionId: String(subscription._id) }, "[subscriptionService] failed to revert one-time-coupon subscription to full price — will retry on the next charge");
+    logger.error({ err, couponCode, userId }, "[subscriptionService] failed to record coupon redemption");
   }
 }
 
@@ -434,7 +472,8 @@ export async function verifySubscriptionPayment(userId: string, input: VerifySub
     // this is purely for computing the already-charged amount for the
     // ledger row, not a second eligibility check.
     const coupon = input.couponCode ? await Coupon.findOne({ code: input.couponCode.trim().toUpperCase() }).lean() : null;
-    const amount = coupon ? computeDiscountedPricePaise(plan.pricePaise, coupon as unknown as ICoupon) : plan.pricePaise;
+    const expected = coupon ? computeDiscountedPricePaise(plan.pricePaise, coupon as unknown as ICoupon) : plan.pricePaise;
+    const amount = coupon?.razorpayOfferId ? ((await actualChargedAmountPaise(input.razorpay_payment_id, isMock)) ?? expected) : expected;
 
     const payment = await Payment.create({
       userId,
@@ -452,7 +491,6 @@ export async function verifySubscriptionPayment(userId: string, input: VerifySub
     await generateInvoiceBestEffort(payment);
   }
 
-  await revertToFullPriceIfOneTimeCoupon(subscription);
   return subscription;
 }
 
@@ -608,11 +646,48 @@ export interface RenewalReminderSweepSummary {
 
 const REMINDER_TEMPLATE_TOKEN = /{{\s*(\w+)\s*}}/g;
 
+// What the customer's NEXT charge will actually be — what the reminder should
+// say, rather than always the plan's catalog price:
+//  - no coupon → the catalog price;
+//  - an "every renewal" coupon (no offer) → the subscription lives on a
+//    discounted Razorpay plan, so it's the discounted price, every cycle;
+//  - an offer-mode coupon → Razorpay applies the discount for the offer's own
+//    number of cycles (set in the Dashboard, invisible to us), so ask Razorpay:
+//    the offer stays linked to the subscription while discounted cycles remain
+//    and is dropped once they're used up. Anything we can't determine falls
+//    back to the catalog price (the old behaviour) — a reminder must never fail
+//    because Razorpay couldn't be reached.
+export async function expectedNextChargePaise(
+  subscription: Pick<ISubscription, "status" | "couponCode" | "razorpaySubscriptionId">,
+  plan: Pick<ISubscriptionPlan, "pricePaise">
+): Promise<number> {
+  if (subscription.status === "trialing" || !subscription.couponCode) return plan.pricePaise;
+  const coupon = await Coupon.findOne({ code: subscription.couponCode }).lean();
+  if (!coupon) return plan.pricePaise;
+  const discounted = computeDiscountedPricePaise(plan.pricePaise, coupon as unknown as ICoupon);
+  if (!coupon.razorpayOfferId) return discounted;
+
+  const rzId = subscription.razorpaySubscriptionId;
+  if (!rzId || rzId.startsWith("mock_sub_") || env.razorpay.isPlaceholder) return plan.pricePaise;
+  try {
+    const entity = (await getClient().subscriptions.fetch(rzId)) as unknown as { offer_id?: string | null };
+    return entity.offer_id ? discounted : plan.pricePaise;
+  } catch {
+    return plan.pricePaise;
+  }
+}
+
 // Admin-authored templates use plain {{token}} placeholders rather than a
-// templating engine — the only tokens ever substituted are the four below,
+// templating engine — the only tokens ever substituted are the five below,
 // so anything unrecognized (a typo, e.g.) is deliberately left as literal
 // text instead of throwing, so a bad edit degrades to "ugly" rather than
 // "the whole reminder sweep breaks".
+// 11900 -> "119", 119 -> "1.19", 5950 -> "59.50" (whole rupees have no decimals;
+// anything else always shows two, so a discounted price never reads "₹59.5").
+function formatRupees(paise: number): string {
+  return (paise / 100).toLocaleString("en-IN", { minimumFractionDigits: paise % 100 === 0 ? 0 : 2, maximumFractionDigits: 2 });
+}
+
 function renderReminderTemplate(template: string, tokens: Record<string, string>): string {
   return template.replace(REMINDER_TEMPLATE_TOKEN, (match, key: string) => (key in tokens ? tokens[key] : match));
 }
@@ -627,13 +702,18 @@ function buildRenewalReminderMessage(
   subscription: Pick<ISubscription, "currentPeriodEnd" | "status" | "cancelAtPeriodEnd">,
   plan: ISubscriptionPlan,
   messages: IRenewalReminderValue["messages"],
-  daysRemaining: number
+  daysRemaining: number,
+  // What will really be charged next (see expectedNextChargePaise); defaults to the catalog price.
+  chargePaise: number = plan.pricePaise
 ): { title: string; body: string; highlightStyle?: IRenewalReminderValue["messages"]["renewal"]["highlightStyle"] } {
   const template = subscription.status === "trialing" ? messages.trialEnding : subscription.cancelAtPeriodEnd ? messages.accessEnding : messages.renewal;
   const tokens = {
     planName: plan.name,
     periodEnd: subscription.currentPeriodEnd.toLocaleDateString("en-IN"),
-    price: (plan.pricePaise / 100).toLocaleString("en-IN"),
+    // The amount that will actually be charged — the DISCOUNTED amount while a coupon/offer still applies.
+    price: formatRupees(chargePaise),
+    // The plan's regular price, for wording like "then ₹{{regularPrice}}".
+    regularPrice: formatRupees(plan.pricePaise),
     daysRemaining: String(Math.max(daysRemaining, 0)),
   };
   return { title: renderReminderTemplate(template.title, tokens), body: renderReminderTemplate(template.body, tokens), highlightStyle: template.highlightStyle };
@@ -689,7 +769,8 @@ export async function runRenewalReminderSweep(): Promise<RenewalReminderSweepSum
     checked += 1;
 
     try {
-      const { title, body, highlightStyle } = buildRenewalReminderMessage(subscription, plan, messages, daysRemaining);
+      const chargePaise = await expectedNextChargePaise(subscription, plan);
+      const { title, body, highlightStyle } = buildRenewalReminderMessage(subscription, plan, messages, daysRemaining, chargePaise);
       await notifyUser(subscription.userId, title, body, { popup: enablePopup, highlightStyle });
       subscription.renewalRemindersSentDays = [...sentDays, ...dueThresholds];
       await subscription.save();
@@ -756,7 +837,12 @@ interface RazorpayPaymentEntity {
 }
 
 async function findOrCreateLocalSubscription(entity: RazorpaySubscriptionEntity): Promise<ISubscription | null> {
-  let subscription = await Subscription.findOne({ razorpaySubscriptionId: entity.id });
+  // Older data can hold more than one row for the same Razorpay id (the race
+  // upsertLocalSubscription no longer creates) — prefer the newest LIVE one so
+  // charges and status changes land on the row the user actually has.
+  let subscription =
+    (await Subscription.findOne({ razorpaySubscriptionId: entity.id, status: { $in: ["trialing", "active", "past_due"] } }).sort({ createdAt: -1 })) ??
+    (await Subscription.findOne({ razorpaySubscriptionId: entity.id }).sort({ createdAt: -1 }));
   if (subscription) return subscription;
 
   // Race: this webhook arrived before the frontend's own verify call. Notes
@@ -774,7 +860,11 @@ async function findOrCreateLocalSubscription(entity: RazorpaySubscriptionEntity)
   // (startSubscription never folds in a trial — see its own comment), so
   // this reliability-net path mirrors verifySubscriptionPayment exactly:
   // no trial, "forfeit" tagging.
-  subscription = await upsertLocalSubscription(String(userId), plan, entity.id, 0, undefined, "forfeit");
+  // The coupon rides along in the notes (set at subscriptions.create time) —
+  // without it, a webhook that wins the race against the browser's verify
+  // creates a coupon-less row and a "first charge only" coupon never reverts.
+  const couponCode = entity.notes?.couponCode ? String(entity.notes.couponCode).trim().toUpperCase() : undefined;
+  subscription = await upsertLocalSubscription(String(userId), plan, entity.id, 0, couponCode, "forfeit");
   return subscription;
 }
 
@@ -824,11 +914,6 @@ export async function handleSubscriptionWebhookEvent(event: string, payload: { s
       await generateInvoiceBestEffort(payment);
       if (!isFirst) emitActivity("subscription_renewed", { userId: String(subscription.userId), props: { planId: String(subscription.planId) } });
     }
-    // Outside the `!alreadyRecorded` guard above on purpose — this needs to
-    // run whichever charge event actually reaches here first (this one, or
-    // an already-recorded duplicate delivery), and is a safe no-op once
-    // already scheduled, so retrying costs nothing.
-    await revertToFullPriceIfOneTimeCoupon(subscription);
     return;
   }
 
@@ -882,6 +967,8 @@ export async function handleSubscriptionWebhookEvent(event: string, payload: { s
       subscriptionId: subscription._id,
       failureReason: paymentEntity.error_description,
     });
+    // The reason is Razorpay's own short text (e.g. "Card declined") — no card data.
+    emitActivity("payment_failed", { userId: String(subscription.userId), props: { reason: paymentEntity.error_description, purpose: subscription.lastPaymentId ? "renewal" : "initial" } });
     if (!alreadyPastDue && subscription.status === "past_due") {
       await sendPastDueNoticeBestEffort(subscription);
     }

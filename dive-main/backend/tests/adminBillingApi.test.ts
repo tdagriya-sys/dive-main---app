@@ -65,6 +65,42 @@ describe("coupons admin CRUD", () => {
     expect(update.body.coupon.isActive).toBe(false);
   });
 
+  // "Offer mode": a coupon can carry a Razorpay-Dashboard offer id.
+  it("stores, validates, changes and clears a coupon's Razorpay offer id", async () => {
+    const staff = await loginAsStaff(nextMobile(), "coupon-offer-admin@example.com", "superadmin");
+    const auth = { Authorization: `Bearer ${staff.accessToken}` };
+
+    const plain = await request(app).post("/api/admin/coupons").set(auth).send({ code: "noofferid", type: "percent", value: 10 });
+    expect(plain.body.coupon.razorpayOfferId).toBeNull();
+
+    const bad = await request(app).post("/api/admin/coupons").set(auth).send({ code: "badoffer", type: "percent", value: 10, razorpayOfferId: "not-an-offer" });
+    expect(bad.status).toBe(400);
+
+    const created = await request(app).post("/api/admin/coupons").set(auth).send({ code: "withoffer", type: "percent", value: 99, discountDuration: "once", razorpayOfferId: "  offer_JHD834hjbxzhd38d " });
+    expect(created.status).toBe(201);
+    expect(created.body.coupon.razorpayOfferId).toBe("offer_JHD834hjbxzhd38d");
+    expect(created.body).toHaveProperty("offerCheck", null); // Razorpay can't be asked in mock mode
+    const id = created.body.coupon.id;
+
+    const changed = await request(app).patch(`/api/admin/coupons/${id}`).set(auth).send({ razorpayOfferId: "offer_NEW123" });
+    expect(changed.body.coupon.razorpayOfferId).toBe("offer_NEW123");
+    expect((await request(app).patch(`/api/admin/coupons/${id}`).set(auth).send({ razorpayOfferId: "nope" })).status).toBe(400);
+
+    // A "first charge only" coupon can't lose its offer id (it would become unsellable)...
+    const refused = await request(app).patch(`/api/admin/coupons/${id}`).set(auth).send({ razorpayOfferId: null });
+    expect(refused.status).toBe(400);
+    expect(refused.body.error).toBe("OFFER_REQUIRED");
+    // ...unless it's switched to "every renewal" first.
+    await request(app).patch(`/api/admin/coupons/${id}`).set(auth).send({ discountDuration: "recurring" });
+    const cleared = await request(app).patch(`/api/admin/coupons/${id}`).set(auth).send({ razorpayOfferId: null });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.coupon.razorpayOfferId).toBeNull();
+    // Leaving the field out of an update never touches it.
+    await request(app).patch(`/api/admin/coupons/${id}`).set(auth).send({ razorpayOfferId: "offer_KEEP1" });
+    const untouched = await request(app).patch(`/api/admin/coupons/${id}`).set(auth).send({ isActive: false });
+    expect(untouched.body.coupon.razorpayOfferId).toBe("offer_KEEP1");
+  });
+
   // Requirement: eligibility sub-categories beyond plan targeting (all
   // paid/monthly/annual) — new users, first-time subscribers, renewals.
   it("creates and updates a coupon's eligibility category, defaulting to 'any'", async () => {
@@ -92,7 +128,14 @@ describe("coupons admin CRUD", () => {
     expect(defaulted.status).toBe(201);
     expect(defaulted.body.coupon.discountDuration).toBe("recurring");
 
-    const created = await request(app).post("/api/admin/coupons").set(auth).send({ code: "firstmonthonly", type: "percent", value: 50, discountDuration: "once" });
+    // "First charge only" needs a Razorpay offer id: the old plan switch was removed
+    // (Razorpay refuses plan changes on UPI subscriptions).
+    const noOffer = await request(app).post("/api/admin/coupons").set(auth).send({ code: "firstmonthonly", type: "percent", value: 50, discountDuration: "once" });
+    expect(noOffer.status).toBe(400);
+    expect(noOffer.body.error).toBe("OFFER_REQUIRED");
+    expect(noOffer.body.message).toContain("Razorpay offer id");
+
+    const created = await request(app).post("/api/admin/coupons").set(auth).send({ code: "firstmonthonly", type: "percent", value: 50, discountDuration: "once", razorpayOfferId: "offer_ABC123" });
     expect(created.status).toBe(201);
     expect(created.body.coupon.discountDuration).toBe("once");
 

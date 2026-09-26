@@ -34,9 +34,22 @@ describe("createCoupon", () => {
     expect(coupon.discountDuration).toBe("recurring");
   });
 
-  it("persists an explicit 'once' discountDuration", async () => {
-    const coupon = await couponService.createCoupon({ code: "FIRSTMONTHONLY", type: "percent", value: 50, discountDuration: "once" });
+  it("persists an explicit 'once' discountDuration — when it has a Razorpay offer", async () => {
+    const coupon = await couponService.createCoupon({ code: "FIRSTMONTHONLY", type: "percent", value: 50, discountDuration: "once", razorpayOfferId: "offer_ABC123" });
     expect(coupon.discountDuration).toBe("once");
+    expect(coupon.razorpayOfferId).toBe("offer_ABC123");
+  });
+
+  // The old way of a first-charge-only discount (switch plans after the first
+  // charge) was removed — Razorpay refuses plan changes on UPI subscriptions —
+  // so "once" is only possible in offer mode.
+  it("REFUSES a 'once' coupon with no Razorpay offer id, and creates nothing", async () => {
+    await expect(couponService.createCoupon({ code: "NOOFFER", type: "percent", value: 50, discountDuration: "once" })).rejects.toMatchObject({ status: 400, code: "OFFER_REQUIRED" });
+    expect(await Coupon.countDocuments({ code: "NOOFFER" })).toBe(0);
+  });
+
+  it("a 'recurring' coupon needs no offer id", async () => {
+    await expect(couponService.createCoupon({ code: "FOREVER1", type: "percent", value: 50, discountDuration: "recurring" })).resolves.toBeTruthy();
   });
 
   it("refuses a duplicate code", async () => {
@@ -220,10 +233,32 @@ describe("updateCoupon", () => {
     expect(updated.maxRedemptions).toBe(50);
   });
 
-  it("switches an existing coupon's discountDuration — only affects future redemptions, not ones already in flight", async () => {
+  it("switches a coupon to 'once' only together with (or after) an offer id", async () => {
     const coupon = await couponService.createCoupon({ code: "SWITCHME", type: "percent", value: 10, discountDuration: "recurring" });
-    const updated = await couponService.updateCoupon(String(coupon._id), { discountDuration: "once" });
+    await expect(couponService.updateCoupon(String(coupon._id), { discountDuration: "once" })).rejects.toMatchObject({ code: "OFFER_REQUIRED" });
+    expect((await Coupon.findById(coupon._id).lean())?.discountDuration).toBe("recurring"); // unchanged
+
+    const updated = await couponService.updateCoupon(String(coupon._id), { discountDuration: "once", razorpayOfferId: "offer_XYZ1" });
     expect(updated.discountDuration).toBe("once");
+    expect(updated.razorpayOfferId).toBe("offer_XYZ1");
+  });
+
+  it("clearing the offer id of a 'once' coupon is refused (it would become an unsellable legacy coupon)", async () => {
+    const coupon = await couponService.createCoupon({ code: "KEEPOFFER", type: "percent", value: 10, discountDuration: "once", razorpayOfferId: "offer_KEEP1" });
+    await expect(couponService.updateCoupon(String(coupon._id), { razorpayOfferId: null })).rejects.toMatchObject({ code: "OFFER_REQUIRED" });
+    expect((await Coupon.findById(coupon._id).lean())?.razorpayOfferId).toBe("offer_KEEP1");
+  });
+
+  it("the offer id of a 'recurring' coupon can be cleared freely", async () => {
+    const coupon = await couponService.createCoupon({ code: "FREEOFFER", type: "percent", value: 10, razorpayOfferId: "offer_FREE1" });
+    const updated = await couponService.updateCoupon(String(coupon._id), { razorpayOfferId: null });
+    expect(updated.razorpayOfferId).toBeUndefined();
+  });
+
+  it("an already-legacy 'once' coupon (no offer) can still be DEACTIVATED — that isn't re-checked", async () => {
+    const legacy = await Coupon.create({ code: "LEGACYONCE", type: "percent", value: 50, discountDuration: "once" });
+    const updated = await couponService.updateCoupon(String(legacy._id), { isActive: false });
+    expect(updated.isActive).toBe(false);
   });
 
   it("throws for an unknown id", async () => {

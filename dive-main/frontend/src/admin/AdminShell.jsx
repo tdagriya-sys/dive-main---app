@@ -1,11 +1,12 @@
 import React from "react";
 import { Routes, Route, NavLink } from "react-router-dom";
-import { LogOut, LayoutDashboard, Users, ScrollText, Activity, LineChart, IndianRupee, Boxes, Gauge, Compass, Sparkles, Network, UserCog, ShieldCheck, LifeBuoy, BellRing, CreditCard, Flag, FileLock2 } from "lucide-react";
+import { LogOut, LayoutDashboard, Users, ScrollText, Activity, LineChart, IndianRupee, Boxes, Gauge, Compass, Sparkles, Network, UserCog, ShieldCheck, LifeBuoy, BellRing, CreditCard, Flag, FileLock2, History } from "lucide-react";
 import { useAdminAuth } from "./AdminAuthContext";
 import Dashboard from "./screens/Dashboard";
 import UsersList from "./screens/UsersList";
 import UserDetail from "./screens/UserDetail";
 import AuditLog from "./screens/AuditLog";
+import UserActivity from "./screens/UserActivity";
 import SystemHealth from "./screens/SystemHealth";
 import Analytics from "./screens/Analytics";
 import Revenue from "./screens/Revenue";
@@ -45,6 +46,8 @@ const NAV = [
   { to: "/admin/roles", label: "Roles", Icon: ShieldCheck, superadminOnly: true },
   { to: "/admin/feature-flags", label: "Feature Flags", Icon: Flag },
   { to: "/admin/data-requests", label: "Data Requests", Icon: FileLock2 },
+  // What USERS did in the app; the Audit Log next to it is the staff-only trail.
+  { to: "/admin/user-activity", label: "User Activity", Icon: History },
   { to: "/admin/audit", label: "Audit Log", Icon: ScrollText },
   { to: "/admin/system", label: "System", Icon: Activity },
 ];
@@ -133,6 +136,7 @@ export default function AdminShell() {
           <Route path="notifications/campaigns/:id" element={<NotificationCampaignDetail />} />
           <Route path="feature-flags" element={<FeatureFlags />} />
           <Route path="data-requests" element={<DataRequests />} />
+          <Route path="user-activity" element={<UserActivity />} />
           <Route path="audit" element={<AuditLog />} />
           <Route path="system" element={<SystemHealth />} />
         </Routes>

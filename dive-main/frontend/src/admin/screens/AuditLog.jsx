@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useSearchParams, useNavigate } from "react-router-dom";
+import { useSearchParams, useNavigate, Link } from "react-router-dom";
 import { Loader2, X } from "lucide-react";
 import { api } from "../../lib/api";
 
@@ -34,7 +34,10 @@ export default function AuditLog() {
   return (
     <div className="p-8" data-testid="admin-audit-screen">
       <h1 className="font-heading font-black text-2xl mb-2">Audit Log</h1>
-      <p className="text-sm text-[var(--text-secondary)] mb-6">Every consequential staff action, append-only.</p>
+      <p className="text-sm text-[var(--text-secondary)] mb-1">Every consequential staff action, append-only.</p>
+      <p className="text-xs text-[var(--text-tertiary)] mb-6" data-testid="admin-audit-user-activity-pointer">
+        Looking for what users did in the app (logins, failed logins, password changes…)? That's on the <Link to="/admin/user-activity" className="font-bold text-[var(--dive-blue)] hover:underline">User Activity</Link> page.
+      </p>
 
       {actorId && (
         <div className="flex items-center gap-2 mb-5 text-sm" data-testid="admin-audit-actor-filter">

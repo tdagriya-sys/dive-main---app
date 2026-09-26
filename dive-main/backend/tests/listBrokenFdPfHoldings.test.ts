@@ -51,6 +51,7 @@ describe("findBrokenFdPfHoldings", () => {
     const byId = Object.fromEntries(broken.map((b) => [b.holdingId, b]));
     expect(byId[String(missingMonth._id)]).toMatchObject({ assetClass: "FD", userEmail: "owner-of-broken@example.com", userId: String(user._id) });
     expect(byId[String(missingMonth._id)].problems).toEqual(["startMonth is missing"]);
+    expect(byId[String(missingMonth._id)].source).toBe("MANUAL");
     expect(byId[String(badYear._id)].problems).toEqual(['startYear is not a valid number ("not-a-year")']);
     expect(byId[String(missingRate._id)].problems).toEqual(["interestRatePercent is missing"]);
   });
@@ -76,6 +77,15 @@ describe("findBrokenFdPfHoldings", () => {
     await makeFd(b._id, "Other FD broken", { interestRate: undefined });
     const { broken } = await findBrokenFdPfHoldings();
     expect(broken.map((x) => x.userEmail).sort()).toEqual(["free-user@example.com", "other-user@example.com"]);
+  });
+
+  it("reports where an imported holding came from (e.g. an account-linking FD with no tenure/dates)", async () => {
+    const user = await makeUser("imported@example.com");
+    await Holding.create({ userId: user._id, assetClass: "FD", name: "State Bank of India Fixed Deposit / RD", investedValue: 60000, currentValue: 63000, source: "AA", extraFields: { bank: "State Bank of India", interestRate: 6.8 } });
+    const { broken } = await findBrokenFdPfHoldings();
+    expect(broken).toHaveLength(1);
+    expect(broken[0].source).toBe("AA");
+    expect(broken[0].problems).toEqual(["tenureMonths is missing", "startMonth is missing", "startYear is missing"]);
   });
 
   it("ignores non-FD/PF holdings entirely", async () => {

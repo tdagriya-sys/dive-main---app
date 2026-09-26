@@ -3,6 +3,7 @@ import { CouponRedemption } from "../models/CouponRedemption";
 import { ApiError } from "../middleware/errorHandler";
 import { User } from "../models/User";
 import { Subscription } from "../models/Subscription";
+import { logger } from "../lib/logger";
 
 const NEW_USER_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -23,31 +24,53 @@ const NEW_USER_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
  * revertToFullPriceIfOneTimeCoupon. The local `Subscription.planId` always
  * points at the real catalog plan (premium_monthly/premium_annual) for
  * entitlements either way — only the Razorpay-side plan object differs.
+ *
+ * UPDATE (2026-09-26): that "once" plan switch was REMOVED — Razorpay refuses to
+ * change the plan of a subscription paid by UPI autopay ("subscriptions cannot
+ * be updated when payment mode is upi"), so a UPI customer stayed on the
+ * discounted price forever. A first-charge-only discount now REQUIRES a Razorpay
+ * Offer (`razorpayOfferId`, created in the Razorpay Dashboard): the subscription
+ * stays on the normal catalog plan and Razorpay itself applies the discount for
+ * the offer's cycles. `recurring` coupons (the discounted one-off plan for the
+ * subscription's whole life) are unchanged.
  */
 
-export async function createCoupon(input: { code: string; type: CouponType; value: number; appliesToPlanKeys?: string[]; eligibility?: CouponEligibility; discountDuration?: CouponDiscountDuration; maxRedemptions?: number; maxRedemptionsPerUser?: number; expiresAt?: Date }): Promise<ICoupon> {
+const OFFER_REQUIRED_MESSAGE =
+  'A "first charge only" coupon needs a Razorpay offer id. Create an Offer in the Razorpay Dashboard (Subscriptions → Offers), paste its id (offer_XXXX) here, or choose "Every renewal" instead.';
+
+function assertOnceHasOffer(duration: CouponDiscountDuration | undefined, offerId: string | undefined): void {
+  if (duration === "once" && !offerId) throw new ApiError(400, "OFFER_REQUIRED", OFFER_REQUIRED_MESSAGE);
+}
+
+export async function createCoupon(input: { code: string; type: CouponType; value: number; appliesToPlanKeys?: string[]; eligibility?: CouponEligibility; discountDuration?: CouponDiscountDuration; razorpayOfferId?: string; maxRedemptions?: number; maxRedemptionsPerUser?: number; expiresAt?: Date }): Promise<ICoupon> {
   const code = input.code.trim().toUpperCase();
   const existing = await Coupon.findOne({ code }).lean();
   if (existing) throw new ApiError(409, "COUPON_CODE_TAKEN", "A coupon with this code already exists.");
   if (input.type === "percent" && (input.value < 1 || input.value > 100)) {
     throw new ApiError(400, "INVALID_COUPON_VALUE", "A percent coupon must be between 1 and 100.");
   }
+  assertOnceHasOffer(input.discountDuration, input.razorpayOfferId);
   return Coupon.create({ ...input, code });
 }
 
 export async function updateCoupon(
   id: string,
-  input: { appliesToPlanKeys?: string[]; eligibility?: CouponEligibility; discountDuration?: CouponDiscountDuration; maxRedemptions?: number; maxRedemptionsPerUser?: number; expiresAt?: Date | null; isActive?: boolean }
+  input: { appliesToPlanKeys?: string[]; eligibility?: CouponEligibility; discountDuration?: CouponDiscountDuration; razorpayOfferId?: string | null; maxRedemptions?: number; maxRedemptionsPerUser?: number; expiresAt?: Date | null; isActive?: boolean }
 ): Promise<ICoupon> {
   const coupon = await Coupon.findById(id);
   if (!coupon) throw new ApiError(404, "COUPON_NOT_FOUND", "Coupon not found.");
   if (input.appliesToPlanKeys !== undefined) coupon.appliesToPlanKeys = input.appliesToPlanKeys;
   if (input.eligibility !== undefined) coupon.eligibility = input.eligibility;
   if (input.discountDuration !== undefined) coupon.discountDuration = input.discountDuration;
+  if (input.razorpayOfferId !== undefined) coupon.razorpayOfferId = input.razorpayOfferId ?? undefined;
   if (input.maxRedemptions !== undefined) coupon.maxRedemptions = input.maxRedemptions;
   if (input.maxRedemptionsPerUser !== undefined) coupon.maxRedemptionsPerUser = input.maxRedemptionsPerUser;
   if (input.expiresAt !== undefined) coupon.expiresAt = input.expiresAt ?? undefined;
   if (input.isActive !== undefined) coupon.isActive = input.isActive;
+  // Checked on the MERGED result, so neither switching to "first charge only"
+  // nor clearing the offer id can leave a "once" coupon with no offer. (An
+  // already-legacy coupon can still be deactivated — that's not re-checked.)
+  if (input.discountDuration !== undefined || input.razorpayOfferId !== undefined) assertOnceHasOffer(coupon.discountDuration, coupon.razorpayOfferId);
   await coupon.save();
   return coupon;
 }
@@ -64,6 +87,13 @@ export async function listCoupons(): Promise<ICoupon[]> {
 export async function validateCoupon(code: string, planKey: string, userId: string): Promise<ICoupon> {
   const coupon = await Coupon.findOne({ code: code.trim().toUpperCase() });
   if (!coupon || !coupon.isActive) throw new ApiError(404, "COUPON_INVALID", "This coupon code isn't valid.");
+  // A legacy "first charge only" coupon without a Razorpay offer can no longer be
+  // honoured (its plan switch was removed). Refuse it rather than silently leave
+  // a UPI customer on the discounted price for good. Customers just see "invalid".
+  if (coupon.discountDuration === "once" && !coupon.razorpayOfferId) {
+    logger.warn({ couponCode: coupon.code }, "[couponService] refusing a legacy first-charge-only coupon that has no Razorpay offer id — add an offer id or deactivate it");
+    throw new ApiError(404, "COUPON_INVALID", "This coupon code isn't valid.");
+  }
   if (coupon.expiresAt && coupon.expiresAt.getTime() < Date.now()) throw new ApiError(400, "COUPON_EXPIRED", "This coupon has expired.");
   if (coupon.maxRedemptions !== undefined && coupon.redeemedCount >= coupon.maxRedemptions) {
     throw new ApiError(400, "COUPON_LIMIT_REACHED", "This coupon has already been fully redeemed.");

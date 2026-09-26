@@ -107,11 +107,15 @@ export const usageGrantSchema = z.object({
 const COUPON_CODE_REGEX = /^[A-Z0-9_-]+$/;
 const couponEligibilitySchema = z.enum(["any", "new_user", "first_time", "renewal"]);
 // Forward-looking only — changing this after creation never touches a
-// subscription that already redeemed the code (its Razorpay-side plan and
-// revert decision were already locked in at redemption time — see
-// subscriptionService.ts::startSubscription/revertToFullPriceIfOneTimeCoupon),
-// it only affects the NEXT person who redeems it.
+// subscription that already redeemed the code (its Razorpay-side plan was
+// already locked in at redemption time — see
+// subscriptionService.ts::startSubscription), it only affects the NEXT person
+// who redeems it. "once" additionally requires a Razorpay offer id (enforced in
+// couponService.ts, which sees the merged state on update).
 const couponDiscountDurationSchema = z.enum(["once", "recurring"]);
+
+// Offers are made in the Razorpay Dashboard; their ids look like offer_JHD834hjbxzhd38d.
+const razorpayOfferIdSchema = z.string().trim().regex(/^offer_[A-Za-z0-9]+$/, "Must look like offer_XXXXXXXX — copy it from the Razorpay Dashboard");
 
 export const createCouponSchema = z.object({
   code: z.string().trim().toUpperCase().min(3).max(30).regex(COUPON_CODE_REGEX, "Letters, digits, hyphens and underscores only"),
@@ -120,6 +124,7 @@ export const createCouponSchema = z.object({
   appliesToPlanKeys: z.array(z.string().trim().toLowerCase()).optional().default([]),
   eligibility: couponEligibilitySchema.optional().default("any"),
   discountDuration: couponDiscountDurationSchema.optional().default("recurring"),
+  razorpayOfferId: razorpayOfferIdSchema.optional(),
   maxRedemptions: z.coerce.number().int().min(1).optional(),
   maxRedemptionsPerUser: z.coerce.number().int().min(1).optional(),
   expiresAt: z.coerce.date().optional(),
@@ -129,6 +134,7 @@ export const updateCouponSchema = z.object({
   appliesToPlanKeys: z.array(z.string().trim().toLowerCase()).optional(),
   eligibility: couponEligibilitySchema.optional(),
   discountDuration: couponDiscountDurationSchema.optional(),
+  razorpayOfferId: razorpayOfferIdSchema.nullable().optional(),
   maxRedemptions: z.coerce.number().int().min(1).optional(),
   maxRedemptionsPerUser: z.coerce.number().int().min(1).optional(),
   expiresAt: z.coerce.date().nullable().optional(),

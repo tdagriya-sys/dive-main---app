@@ -15,6 +15,7 @@ import { invalidateReportPurchase } from "../services/paymentService";
 import * as dataRequestService from "../services/dataRequestService";
 import { resolveAllFlagsFor } from "../services/featureFlagService";
 import { getPlan } from "../services/entitlementService";
+import { emitActivity } from "../services/activityLog";
 
 const preferencesSchema = z.object({
   risk: z.enum(["Conservative", "Balanced", "Aggressive"]).optional(),
@@ -44,6 +45,8 @@ export async function updatePreferences(req: AuthedRequest, res: Response) {
     user.preferences.excludedCategories = input.excluded || input.excludedCategories!;
   }
   await user.save();
+  // Which settings were touched — never the values.
+  emitActivity("preferences_updated", { userId: req.userId, props: { fields: Object.keys(input).filter((k) => (input as Record<string, unknown>)[k] !== undefined) }, req });
   res.json({ preferences: user.preferences });
 }
 
@@ -55,6 +58,7 @@ export async function updateProfile(req: AuthedRequest, res: Response) {
   if (input.name !== undefined) user.name = input.name;
   if (input.age !== undefined) user.age = input.age;
   await user.save();
+  emitActivity("profile_updated", { userId: req.userId, props: { fields: ["name", "age"].filter((f) => (input as Record<string, unknown>)[f] !== undefined) }, req });
   // Age drives the Context Engine's persona/corpus-tier bucketing
   // (contextEngine.ts), which feeds several DiveScoreBreakdown sub-scores —
   // a stale cached breakdown would keep showing the old persona otherwise.
@@ -115,11 +119,15 @@ export async function changePassword(req: AuthedRequest, res: Response) {
   if (!user) throw new ApiError(404, "USER_NOT_FOUND", "Account no longer exists.");
 
   const matches = await bcrypt.compare(input.currentPassword, user.passwordHash);
-  if (!matches) throw new ApiError(401, "INVALID_CURRENT_PASSWORD", "Current password is incorrect.");
+  if (!matches) {
+    emitActivity("password_change_failed", { userId: req.userId, props: { reason: "wrong_current_password" }, req });
+    throw new ApiError(401, "INVALID_CURRENT_PASSWORD", "Current password is incorrect.");
+  }
 
   user.passwordHash = await bcrypt.hash(input.newPassword, 10);
   await user.save();
   await RefreshToken.updateMany({ userId: user._id, revokedAt: null }, { revokedAt: new Date() });
+  emitActivity("password_changed", { userId: req.userId, props: { sessionsRevoked: true }, req });
 
   res.json({ message: "Password updated. For your security, every device (including this one) will need to log in again once the current session expires." });
 }
@@ -134,6 +142,7 @@ export async function deleteMe(req: AuthedRequest, res: Response) {
   // deletion itself if this somehow failed (it won't — same DB, same
   // transaction-free style every other multi-write here already uses).
   await dataRequestService.logSelfServeDeletion(req.userId!, user.email);
+  emitActivity("account_deleted", { userId: req.userId, req });
 
   await Promise.all([
     Holding.deleteMany({ userId: req.userId }),
@@ -154,6 +163,7 @@ export async function deleteMe(req: AuthedRequest, res: Response) {
 // human glance before it goes out, even to the data's own subject.
 export async function requestDataExport(req: AuthedRequest, res: Response) {
   const request = await dataRequestService.createExportRequest(req.userId!);
+  emitActivity("data_export_requested", { userId: req.userId, req });
   res.status(201).json({ id: String(request._id), status: request.status, requestedAt: request.requestedAt });
 }
 

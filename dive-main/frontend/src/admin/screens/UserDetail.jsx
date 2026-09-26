@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import { ChevronLeft, Loader2, Eye } from "lucide-react";
 import { api } from "../../lib/api";
 import { isStepUpRequiredError } from "../config/stepUp";
@@ -244,6 +244,9 @@ export default function UserDetail() {
               )}
             </Card>
             <Card title="Recent activity" testId="admin-user-detail-activity-card">
+              <Link to={`/admin/user-activity?user=${id}`} className="block text-xs font-bold text-[var(--dive-blue)] hover:underline mb-3" data-testid="admin-user-detail-all-activity-link">
+                View all activity →
+              </Link>
               {data.activity.length === 0 ? (
                 <p className="text-sm text-[var(--text-tertiary)]">No recorded activity yet.</p>
               ) : (

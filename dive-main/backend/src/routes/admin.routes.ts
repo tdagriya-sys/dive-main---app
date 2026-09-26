@@ -5,6 +5,7 @@ import * as dashboardController from "../controllers/admin/dashboardController";
 import * as usersController from "../controllers/admin/usersController";
 import * as systemController from "../controllers/admin/systemController";
 import * as auditController from "../controllers/admin/auditController";
+import * as userActivityController from "../controllers/admin/userActivityController";
 import * as analyticsController from "../controllers/admin/analyticsController";
 import * as revenueController from "../controllers/admin/revenueController";
 import * as instrumentsController from "../controllers/admin/instrumentsController";
@@ -67,6 +68,11 @@ router.post("/users/:id/force-logout", requirePermission("users.suspend"), requi
 router.post("/users/:id/trial/reset", requirePermission("subscriptions.manage"), requireStepUp, asyncHandler(usersController.resetUserTrial));
 
 router.get("/audit", requirePermission("audit.view"), asyncHandler(auditController.listAuditLogs));
+// What USERS did in the app (separate from the staff-only Audit Log above). Viewing
+// needs users.view; the CSV export needs users.export + step-up, and is itself audited.
+router.get("/user-activity", requirePermission("users.view"), asyncHandler(userActivityController.listActivity));
+router.get("/user-activity/types", requirePermission("users.view"), asyncHandler(userActivityController.getActivityTypes));
+router.get("/user-activity/export", requirePermission("users.export"), requireStepUp, asyncHandler(userActivityController.exportActivity));
 
 router.get("/system/health", requirePermission("system.view"), asyncHandler(systemController.getHealth));
 router.get("/system/integrations", requirePermission("system.view"), asyncHandler(systemController.getIntegrations));

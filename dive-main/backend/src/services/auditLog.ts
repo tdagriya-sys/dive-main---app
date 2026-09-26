@@ -5,8 +5,11 @@ import { reqInfo } from "../lib/reqInfo";
 
 /**
  * The one way to write an audit entry (Phase 0 of docs/ADMIN_PANEL_PLAN.md).
- * Called from every admin mutation and from sensitive user-facing events
- * (password change, account delete, payment state changes).
+ * Called from every admin/STAFF mutation — the Audit Log is deliberately the
+ * staff-only trail. What USERS do (logins, failed logins, password changes,
+ * account deletion, payment failures…) is recorded in the separate activity
+ * stream instead (services/activityLog.ts::emitActivity) and read on the admin
+ * "User Activity" page.
  *
  * Best-effort: a failed write is logged at `error` level (so it's alertable)
  * but never throws — an audit outage must not take down the action being

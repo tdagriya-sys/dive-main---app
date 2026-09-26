@@ -37,6 +37,17 @@ describe("admin AuditLog", () => {
     expect(screen.getByText("boss@divve.in")).toBeInTheDocument();
   });
 
+  it("points to the User Activity page for what users did — the audit log itself stays staff-only", async () => {
+    api.get.mockResolvedValue({ data: PAGE });
+    renderAt("/admin/audit");
+    await waitFor(() => expect(screen.getByTestId("admin-audit-table")).toBeInTheDocument());
+    expect(screen.getByTestId("admin-audit-user-activity-pointer")).toHaveTextContent("what users did in the app");
+    expect(screen.getByRole("link", { name: "User Activity" })).toHaveAttribute("href", "/admin/user-activity");
+    // and it still only ever asks the AUDIT endpoint
+    expect(api.get).toHaveBeenCalledWith("/admin/audit", expect.anything());
+    expect(api.get).not.toHaveBeenCalledWith("/admin/user-activity", expect.anything());
+  });
+
   it("shows an empty state with no entries", async () => {
     api.get.mockResolvedValue({ data: { entries: [], page: 1, limit: 50, total: 0, totalPages: 1 } });
     renderAt("/admin/audit");

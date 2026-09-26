@@ -983,15 +983,11 @@ describe("startSubscription / verifySubscriptionPayment with a coupon", () => {
     await expect(subscriptionService.startSubscription(String(user._id), "premium_annual", "MONTHLYONLY")).rejects.toMatchObject({ status: 400 });
   });
 
-  // env.razorpay.isPlaceholder is forced true for the whole test run, so the
-  // actual Razorpay revert call (subscriptions.update) is never reachable
-  // here — same "only mock mode is unit-tested" convention as every other
-  // Razorpay-touching branch in this file. What IS fully testable without
-  // Razorpay is the DECISION of whether a revert is due at all, which is
-  // exactly what verifySubscriptionPayment consults before ever reaching
-  // the (here, unreachable) Razorpay call.
-  it("never actually schedules a revert in mock mode, even for a 'once' coupon", async () => {
-    await couponService.createCoupon({ code: "FIRSTMONTHHALF", type: "percent", value: 50, discountDuration: "once" });
+  // A first-charge-only ("once") discount is now ONLY possible in offer mode —
+  // the old plan-switch after the first charge was removed (Razorpay refuses plan
+  // changes on UPI subscriptions).
+  it("a 'once' coupon WITH a Razorpay offer id checks out normally", async () => {
+    await couponService.createCoupon({ code: "FIRSTMONTHHALF", type: "percent", value: 50, discountDuration: "once", razorpayOfferId: "offer_ABC123" });
     const user = await makeUser({ hasUsedTrial: true });
     const started = await subscriptionService.startSubscription(String(user._id), "premium_monthly", "FIRSTMONTHHALF");
     const subscription = await subscriptionService.verifySubscriptionPayment(String(user._id), {
@@ -1001,58 +997,31 @@ describe("startSubscription / verifySubscriptionPayment with a coupon", () => {
       razorpay_signature: "mock",
       couponCode: "FIRSTMONTHHALF",
     });
-    expect(subscription.couponOnceRevertScheduledAt).toBeFalsy();
+    expect(subscription.status).toBe("active");
+    expect(subscription.couponCode).toBe("FIRSTMONTHHALF");
   });
 });
 
-describe("resolveOneTimeCouponRevertPlanId", () => {
-  async function makeSubscriptionWithCoupon(couponCode: string | undefined, opts: { couponOnceRevertScheduledAt?: Date } = {}) {
+describe("legacy first-charge-only coupons (no Razorpay offer) are refused at checkout", () => {
+  // Created directly in the database: the admin API no longer lets one be made,
+  // but ones made before that rule still exist.
+  it("startSubscription refuses one — as a plain 'invalid coupon', with nothing charged or created", async () => {
+    await Coupon.create({ code: "OLDONCE", type: "percent", value: 50, discountDuration: "once" });
+    const user = await makeUser({ hasUsedTrial: true });
+    await expect(subscriptionService.startSubscription(String(user._id), "premium_monthly", "OLDONCE")).rejects.toMatchObject({ status: 404, code: "COUPON_INVALID" });
+  });
+
+  it("validateCoupon (the preview a customer sees) refuses it the same way", async () => {
+    await Coupon.create({ code: "OLDONCE2", type: "percent", value: 50, discountDuration: "once" });
     const user = await makeUser();
-    const plan = await SubscriptionPlan.findOne({ key: "premium_monthly" }).lean();
-    const now = new Date();
-    return Subscription.create({
-      userId: user._id,
-      planId: plan!._id,
-      status: "active",
-      currentPeriodStart: now,
-      currentPeriodEnd: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
-      startedAt: now,
-      couponCode,
-      couponOnceRevertScheduledAt: opts.couponOnceRevertScheduledAt,
-    });
-  }
-
-  it("returns the catalog plan's razorpayPlanId for a subscription with an unspent 'once' coupon", async () => {
-    // Freshly seeded plans have no razorpayPlanId until published — set one
-    // directly rather than going through publishPlanToRazorpay, since mock
-    // mode's return value there is never persisted onto the plan document.
-    await SubscriptionPlan.updateOne({ key: "premium_monthly" }, { razorpayPlanId: "plan_catalog_monthly_real" });
-    await couponService.createCoupon({ code: "REVERTME", type: "percent", value: 50, discountDuration: "once" });
-    const subscription = await makeSubscriptionWithCoupon("REVERTME");
-
-    const revertPlanId = await subscriptionService.resolveOneTimeCouponRevertPlanId(subscription);
-    expect(revertPlanId).toBe("plan_catalog_monthly_real");
+    await expect(couponService.validateCoupon("OLDONCE2", "premium_monthly", String(user._id))).rejects.toMatchObject({ code: "COUPON_INVALID" });
   });
 
-  it("returns null for a 'recurring' coupon — the discount is meant to last the subscription's whole life", async () => {
-    await couponService.createCoupon({ code: "FOREVEROFF", type: "percent", value: 50, discountDuration: "recurring" });
-    const subscription = await makeSubscriptionWithCoupon("FOREVEROFF");
-    expect(await subscriptionService.resolveOneTimeCouponRevertPlanId(subscription)).toBeNull();
-  });
-
-  it("returns null when no coupon was ever redeemed", async () => {
-    const subscription = await makeSubscriptionWithCoupon(undefined);
-    expect(await subscriptionService.resolveOneTimeCouponRevertPlanId(subscription)).toBeNull();
-  });
-
-  it("returns null once the revert has already been scheduled — never re-schedules", async () => {
-    await couponService.createCoupon({ code: "ALREADYDONE", type: "percent", value: 50, discountDuration: "once" });
-    const subscription = await makeSubscriptionWithCoupon("ALREADYDONE", { couponOnceRevertScheduledAt: new Date() });
-    expect(await subscriptionService.resolveOneTimeCouponRevertPlanId(subscription)).toBeNull();
-  });
-
-  it("returns null if the coupon was since deleted", async () => {
-    const subscription = await makeSubscriptionWithCoupon("LONGGONE");
-    expect(await subscriptionService.resolveOneTimeCouponRevertPlanId(subscription)).toBeNull();
+  it("a 'once' coupon that has an offer id, and a 'recurring' coupon, are both accepted", async () => {
+    await Coupon.create({ code: "OKONCE", type: "percent", value: 50, discountDuration: "once", razorpayOfferId: "offer_OK1" });
+    await Coupon.create({ code: "OKFOREVER", type: "percent", value: 50, discountDuration: "recurring" });
+    const user = await makeUser();
+    await expect(couponService.validateCoupon("OKONCE", "premium_monthly", String(user._id))).resolves.toBeTruthy();
+    await expect(couponService.validateCoupon("OKFOREVER", "premium_monthly", String(user._id))).resolves.toBeTruthy();
   });
 });

@@ -27,12 +27,16 @@ export interface BrokenFdPfHolding {
   userEmail: string | null;
   assetClass: "FD" | "PF";
   name: string;
+  // Where the holding came from: MANUAL (typed in), AA (account linking), BOT
+  // (screen scan) or FILE_UPLOAD. Imported holdings usually carry no tenure/
+  // start date, so they show up here without anything being "corrupt".
+  source: string | null;
   problems: string[];
   extraFields: Record<string, unknown>;
 }
 
 export async function findBrokenFdPfHoldings(): Promise<{ scanned: number; broken: BrokenFdPfHolding[] }> {
-  const holdings = (await Holding.find({ assetClass: { $in: ["FD", "PF"] } }).lean()) as unknown as Array<FdPfHoldingLean & { name: string }>;
+  const holdings = (await Holding.find({ assetClass: { $in: ["FD", "PF"] } }).lean()) as unknown as Array<FdPfHoldingLean & { name: string; source?: string }>;
   const brokenHoldings = holdings.filter((h) => isFdPfHoldingBroken(h));
 
   const users = await User.find({ _id: { $in: brokenHoldings.map((h) => h.userId) } }).select("email").lean();
@@ -44,6 +48,7 @@ export async function findBrokenFdPfHoldings(): Promise<{ scanned: number; broke
     userEmail: emailById.get(String(h.userId)) ?? null,
     assetClass: h.assetClass,
     name: h.name,
+    source: h.source ?? null,
     problems: fdPfFieldProblems(h),
     extraFields: h.extraFields,
   }));
@@ -61,11 +66,15 @@ export function printReadable(scanned: number, broken: BrokenFdPfHolding[]): voi
     // eslint-disable-next-line no-console
     console.log(`   user       : ${b.userEmail ?? "(user not found)"} (${b.userId})`);
     // eslint-disable-next-line no-console
+    console.log(`   source     : ${b.source ?? "?"}${b.source && b.source !== "MANUAL" ? " (imported — not typed in by the user)" : ""}`);
+    // eslint-disable-next-line no-console
     console.log(`   problem    : ${b.problems.length ? b.problems.join("; ") : "value comes out as not-a-number (no single field identified)"}\n`);
   });
   if (broken.length) {
     // eslint-disable-next-line no-console
-    console.log("Fix: the user can re-save the holding from their own Holdings screen with the missing details (staff impersonation is read-only, so staff can't edit it for them), or the record can be deleted if it's junk.");
+    console.log("What this means: a MANUAL holding is one the user typed in and can re-save from their Holdings screen with the missing details (staff impersonation is read-only, so staff can't edit it for them).");
+    // eslint-disable-next-line no-console
+    console.log("An imported holding (AA / BOT / FILE_UPLOAD) usually just has no tenure or start date, so there is nothing to recompute — it's harmless, its value simply stays as imported. NOTE: if this server's account linking is still in demo mode, AA holdings are SAMPLE data, not the user's real accounts.");
     // eslint-disable-next-line no-console
     console.log("Until fixed, the daily job leaves that holding's value unchanged. Nothing was modified by this report.");
   }
