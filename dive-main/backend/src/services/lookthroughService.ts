@@ -23,7 +23,11 @@ export function normalizeIssuer(name: string): string {
 // Strips common fund-naming noise words so "HDFC Flexi Cap Fund",
 // "HDFC Flexi Cap Fund - Direct Plan - Growth", etc. all normalize to the
 // same key as the curated dataset's "hdfcflexicap".
-function normalizeFundKey(name: string): string {
+// Exported so services/instrumentUploadService.ts can key its own
+// mutualFundTopHoldings upserts identically — the two MUST use the exact same
+// normalization, or an uploaded fund's holdings would silently never match
+// the fund name a user's actual holding carries at scoring time.
+export function normalizeFundKey(name: string): string {
   return name
     .toLowerCase()
     .replace(/\b(fund|scheme|plan|direct|regular|growth|dividend|idcw)\b/g, "")

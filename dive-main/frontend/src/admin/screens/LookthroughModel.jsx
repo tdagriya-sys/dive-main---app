@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Loader2, Plus, X } from "lucide-react";
+import React, { useState, useMemo } from "react";
+import { Loader2, Plus, X, ChevronDown, ChevronRight, Search } from "lucide-react";
 import { useConfigDraft } from "../config/useConfigDraft";
 import { useSimulation } from "../config/useSimulation";
 import ConfigToolbar from "../config/ConfigToolbar";
@@ -227,21 +227,129 @@ function FundHoldingsCard({ fundKey, holdings, onKeyChange, onHoldingsChange, on
   );
 }
 
+// Same normalization instructionUploadService.ts::normalizeFundKey / lookthroughService.ts use for
+// the fund key itself, minus the fund-naming-noise-word stripping — here it's just for matching
+// whatever an admin types in the search box against keys/company names, so any punctuation or
+// casing difference doesn't matter.
+function normalizeForSearch(s) {
+  return (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+// With 8000+ funds possible (bulk CSV upload — see instrumentUploadService.ts), rendering every
+// entry as an always-expanded editable card is unusable. Below this count everything still just
+// renders (collapsed) so a small hand-curated list stays a one-glance browse; at or above it, a
+// search query is required so the DOM never has to hold thousands of rows at once.
+const BROWSE_WITHOUT_SEARCH_LIMIT = 25;
+const MAX_SEARCH_RESULTS = 50;
+
+function FundHoldingsRow({ fundKey, holdings, onKeyChange, onHoldingsChange, onRemove, index, expanded, onToggle }) {
+  if (!expanded) {
+    const preview = holdings.length ? holdings.slice(0, 2).map((h) => `${h.company || "(unnamed)"} (${h.weightPct}%)`).join(", ") : "no holdings yet";
+    return (
+      <button
+        type="button"
+        data-testid={`admin-lookthrough-fund-row-${index}`}
+        onClick={onToggle}
+        className="w-full flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] px-4 py-3 mb-2 text-left hover:bg-[var(--surface-card-hover)]"
+      >
+        <span className="flex items-center gap-2 min-w-0">
+          <ChevronRight size={14} className="shrink-0 text-[var(--text-tertiary)]" />
+          <span className="font-bold text-sm truncate">{fundKey || "(empty key)"}</span>
+        </span>
+        <span className="text-xs text-[var(--text-tertiary)] truncate">
+          {holdings.length} holding{holdings.length === 1 ? "" : "s"} — {preview}
+          {holdings.length > 2 ? "…" : ""}
+        </span>
+      </button>
+    );
+  }
+  return (
+    <div className="mb-2">
+      <button
+        type="button"
+        data-testid={`admin-lookthrough-fund-collapse-${index}`}
+        onClick={onToggle}
+        className="flex items-center gap-2 text-xs font-bold text-[var(--text-tertiary)] hover:text-[var(--text-primary)] mb-1"
+      >
+        <ChevronDown size={14} /> Collapse
+      </button>
+      <FundHoldingsCard fundKey={fundKey} holdings={holdings} onKeyChange={onKeyChange} onHoldingsChange={onHoldingsChange} onRemove={onRemove} index={index} />
+    </div>
+  );
+}
+
 function FundHoldingsSection({ record, onChange }) {
   const { entries, updateAt, removeAt, add } = useRecordEntries(record, onChange);
+  const [search, setSearch] = useState("");
+  const [expanded, setExpanded] = useState(() => new Set());
+
+  const normalizedQuery = normalizeForSearch(search);
+  const needsSearch = entries.length > BROWSE_WITHOUT_SEARCH_LIMIT;
+
+  const matches = useMemo(() => {
+    const withIndex = entries.map((entry, i) => ({ entry, i }));
+    if (!normalizedQuery) return needsSearch ? [] : withIndex;
+    return withIndex.filter(({ entry: [fundKey, holdings] }) => {
+      if (normalizeForSearch(fundKey).includes(normalizedQuery)) return true;
+      return holdings.some((h) => normalizeForSearch(h.company).includes(normalizedQuery));
+    });
+  }, [entries, normalizedQuery, needsSearch]);
+
+  const shown = matches.slice(0, MAX_SEARCH_RESULTS);
+
+  function toggle(i) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  }
+
   return (
     <>
-      {entries.map(([fundKey, holdings], i) => (
-        <FundHoldingsCard
+      <div className="flex items-center gap-2 mb-3 rounded-xl border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 max-w-md">
+        <Search size={14} className="text-[var(--text-tertiary)] shrink-0" />
+        <input
+          data-testid="admin-lookthrough-fund-search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder={`Search ${entries.length} fund${entries.length === 1 ? "" : "s"} by key or holding…`}
+          className="flex-1 outline-none bg-transparent text-sm"
+        />
+      </div>
+
+      {needsSearch && !normalizedQuery && (
+        <p className="text-xs text-[var(--text-tertiary)] mb-3" data-testid="admin-lookthrough-fund-search-hint">
+          {entries.length} funds — type at least one character to search (too many to browse at once).
+        </p>
+      )}
+
+      {shown.map(({ entry: [fundKey, holdings], i }) => (
+        <FundHoldingsRow
           key={i}
           index={i}
           fundKey={fundKey}
           holdings={holdings}
+          expanded={expanded.has(i)}
+          onToggle={() => toggle(i)}
           onKeyChange={(k) => updateAt(i, k, holdings)}
           onHoldingsChange={(h) => updateAt(i, fundKey, h)}
           onRemove={() => removeAt(i)}
         />
       ))}
+
+      {matches.length > MAX_SEARCH_RESULTS && (
+        <p className="text-xs text-[var(--text-tertiary)] mb-3" data-testid="admin-lookthrough-fund-more-hint">
+          Showing {MAX_SEARCH_RESULTS} of {matches.length} matches — refine your search to narrow this down.
+        </p>
+      )}
+      {normalizedQuery && matches.length === 0 && (
+        <p className="text-xs text-[var(--text-tertiary)] mb-3" data-testid="admin-lookthrough-fund-no-matches">
+          No fund matches "{search}".
+        </p>
+      )}
+
       <AddButton label="Add fund" testId="admin-lookthrough-fund-add" onClick={() => add(`newfund${entries.length + 1}`, [])} />
     </>
   );

@@ -158,10 +158,15 @@ describe("LookthroughModel", () => {
     });
   });
 
-  it("renders a fund's holdings and lets a holding's weight be edited", () => {
+  it("a fund's row starts collapsed with a preview, and expanding it reveals its editable holdings", () => {
     const hook = makeHookValue();
     useConfigDraft.mockReturnValue(hook);
     render(<LookthroughModel />);
+    expect(screen.queryByTestId("admin-lookthrough-fund-0-company-0")).not.toBeInTheDocument();
+    expect(screen.getByTestId("admin-lookthrough-fund-row-0")).toHaveTextContent("hdfcflexicap");
+    expect(screen.getByTestId("admin-lookthrough-fund-row-0")).toHaveTextContent("HDFC Bank (8.9%)");
+
+    fireEvent.click(screen.getByTestId("admin-lookthrough-fund-row-0"));
     expect(screen.getByTestId("admin-lookthrough-fund-0-company-0")).toHaveValue("HDFC Bank");
 
     fireEvent.change(screen.getByTestId("admin-lookthrough-fund-0-weight-0"), { target: { value: "9.5" } });
@@ -171,10 +176,11 @@ describe("LookthroughModel", () => {
     });
   });
 
-  it("adding a holding to a fund appends an empty row", () => {
+  it("adding a holding to an expanded fund appends an empty row", () => {
     const hook = makeHookValue();
     useConfigDraft.mockReturnValue(hook);
     render(<LookthroughModel />);
+    fireEvent.click(screen.getByTestId("admin-lookthrough-fund-row-0"));
     fireEvent.click(screen.getByTestId("admin-lookthrough-fund-0-add-holding"));
     expect(hook.setPayload).toHaveBeenCalledWith({
       ...PAYLOAD,
@@ -191,6 +197,44 @@ describe("LookthroughModel", () => {
       ...PAYLOAD,
       mutualFundTopHoldings: { ...PAYLOAD.mutualFundTopHoldings, newfund2: [] },
     });
+  });
+
+  it("searching filters funds by key or by a holding's company name (normalized, case/space-insensitive)", () => {
+    const hook = makeHookValue({
+      payload: {
+        ...PAYLOAD,
+        mutualFundTopHoldings: {
+          hdfcflexicap: [{ company: "HDFC Bank", weightPct: 8.9 }],
+          sbibluechip: [{ company: "Reliance Industries", weightPct: 7.1 }],
+        },
+      },
+    });
+    useConfigDraft.mockReturnValue(hook);
+    render(<LookthroughModel />);
+    expect(screen.getByTestId("admin-lookthrough-fund-row-0")).toBeInTheDocument();
+    expect(screen.getByTestId("admin-lookthrough-fund-row-1")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId("admin-lookthrough-fund-search"), { target: { value: "sbi" } });
+    expect(screen.queryByTestId("admin-lookthrough-fund-row-0")).not.toBeInTheDocument();
+    expect(screen.getByTestId("admin-lookthrough-fund-row-1")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId("admin-lookthrough-fund-search"), { target: { value: "Reliance" } });
+    expect(screen.getByTestId("admin-lookthrough-fund-row-1")).toBeInTheDocument();
+    expect(screen.queryByTestId("admin-lookthrough-fund-row-0")).not.toBeInTheDocument();
+  });
+
+  it("with more than 25 funds, nothing renders until a search query is typed", () => {
+    const many = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`fund${i}`, [{ company: `Company ${i}`, weightPct: 5 }]]));
+    const hook = makeHookValue({ payload: { ...PAYLOAD, mutualFundTopHoldings: many } });
+    useConfigDraft.mockReturnValue(hook);
+    render(<LookthroughModel />);
+    expect(screen.getByTestId("admin-lookthrough-fund-search-hint")).toHaveTextContent("30 funds");
+    expect(screen.queryByTestId("admin-lookthrough-fund-row-0")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId("admin-lookthrough-fund-search"), { target: { value: "fund1" } });
+    expect(screen.queryByTestId("admin-lookthrough-fund-search-hint")).not.toBeInTheDocument();
+    // fund1, fund10-19 all match "fund1"
+    expect(screen.getAllByTestId(/admin-lookthrough-fund-row-/).length).toBeGreaterThan(0);
   });
 
   it("publish flow calls publish with the change note", async () => {

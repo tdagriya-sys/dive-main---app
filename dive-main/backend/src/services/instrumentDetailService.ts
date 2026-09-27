@@ -10,6 +10,7 @@ export interface InstrumentLike {
   symbol: string;
   exchange?: string;
   metadata?: Record<string, unknown>;
+  source?: string;
 }
 
 /**
@@ -33,9 +34,17 @@ const cache = new Map<string, CacheEntry>();
 export interface InstrumentDetail {
   available: boolean;
   source?: string;
+  // "live" for a real fetched quote/NAV; "admin" for the fallback below —
+  // callers that need to tell the two apart (e.g. to avoid treating an
+  // admin-typed value as if it were a live AMFI category) can check this
+  // instead of parsing `source`'s human-readable text.
+  sourceKind?: "live" | "admin";
   asOf?: string;
   reason?: string;
   fields?: Record<string, number | string | null>;
+  // Only set for a MUTUAL_FUND's admin-provided Underlying Holdings — the
+  // live paths never populate this (no live source here returns holdings).
+  holdings?: Array<{ name: string; weightPct?: number | null }>;
 }
 
 const NOT_AVAILABLE_REASONS: Record<string, string> = {
@@ -182,6 +191,72 @@ async function fetchMfApiDetail(schemeCode: string): Promise<InstrumentDetail | 
 // since every REIT/InvIT in the seed data carries a real NSE symbol.
 const NSE_DETAIL_CLASSES = new Set(["EQUITY", "ETF", "REIT", "INVIT", "GOLD", "SILVER"]);
 
+function asDateString(v: unknown): string | undefined {
+  if (typeof v === "string" && v.trim()) return v;
+  if (v instanceof Date) return v.toISOString();
+  return undefined;
+}
+
+// Same as asDateString, but truncated to just the calendar date — used only
+// for the top-level "as of" fallback (the upload TIMESTAMP, not a field value
+// an admin actually typed), where a user-facing "as of 2026-09-27T21:57:03.573Z"
+// reads as a bug, not a date.
+function asDateOnlyString(v: unknown): string | undefined {
+  const s = asDateString(v);
+  return s ? s.slice(0, 10) : undefined;
+}
+
+interface UnderlyingHoldingLike {
+  name?: unknown;
+  weightPct?: unknown;
+}
+
+/**
+ * Fallback for an `ADMIN_UPLOAD`-sourced instrument when no live source
+ * resolves it — which, structurally, is EVERY manually-uploaded instrument
+ * today: its symbol is always namespaced (`UPLOAD_...`, see
+ * instrumentUploadService.ts's own top comment) specifically so a live
+ * refresh can never collide with it, but that same namespacing means Yahoo/
+ * MFAPI/CoinGecko can never resolve it either. Without this, an admin who
+ * carefully typed in a bond's credit rating and maturity date would see
+ * nothing but "not available" on Ask DIVE — the upload would be visible
+ * nowhere a user actually looks up an instrument. Shows exactly what was
+ * uploaded, clearly labeled as admin-provided rather than live (never
+ * fabricates a number the admin didn't actually enter).
+ */
+function buildAdminProvidedDetail(instrument: InstrumentLike): InstrumentDetail | null {
+  if (instrument.source !== "ADMIN_UPLOAD") return null;
+  const m = instrument.metadata || {};
+
+  const fields: Record<string, number | string | null> = {};
+  if (typeof m.price === "number") fields.uploadedPrice = m.price;
+  const priceAsOf = asDateString(m.priceAsOf);
+  if (priceAsOf) fields.uploadedPriceAsOf = priceAsOf;
+  if (typeof m.annualReturnPct === "number") fields.uploadedAnnualReturnPct = m.annualReturnPct;
+  if (typeof m.creditRating === "string" && m.creditRating.trim()) fields.uploadedCreditRating = m.creditRating;
+  const maturityDate = asDateString(m.maturityDate);
+  if (maturityDate) fields.uploadedMaturityDate = maturityDate;
+  if (typeof m.expenseRatioPct === "number") fields.uploadedExpenseRatioPct = m.expenseRatioPct;
+  if (typeof m.sector === "string" && m.sector.trim()) fields.uploadedSector = m.sector;
+  if (typeof m.category === "string" && m.category.trim()) fields.uploadedCategory = m.category;
+
+  const rawHoldings = Array.isArray(m.underlyingHoldings) ? (m.underlyingHoldings as UnderlyingHoldingLike[]) : [];
+  const holdings = rawHoldings
+    .filter((h) => typeof h?.name === "string" && (h.name as string).trim())
+    .map((h) => ({ name: h.name as string, weightPct: typeof h.weightPct === "number" ? (h.weightPct as number) : null }));
+
+  if (Object.keys(fields).length === 0 && holdings.length === 0) return null;
+
+  return {
+    available: true,
+    source: "Provided by admin (manually uploaded, not live-priced)",
+    sourceKind: "admin",
+    asOf: priceAsOf || asDateOnlyString(m.uploadedAt),
+    fields,
+    ...(holdings.length ? { holdings } : {}),
+  };
+}
+
 export async function fetchInstrumentDetail(instrument: InstrumentLike): Promise<InstrumentDetail> {
   const cacheKey = `${instrument.assetClass}:${instrument.symbol}`;
   const hit = cache.get(cacheKey);
@@ -190,28 +265,29 @@ export async function fetchInstrumentDetail(instrument: InstrumentLike): Promise
   let detail: InstrumentDetail | null = null;
 
   // Real-price network calls are skipped in the test environment (same
-  // policy as priceHistoryService.ts) so the test suite stays hermetic.
-  if (env.nodeEnv === "test") {
-    detail = { available: false, reason: "Live data is disabled in the test environment." };
-    cache.set(cacheKey, { detail, expiresAt: Date.now() + CACHE_TTL_MS });
-    return detail;
-  }
-
-  if (NSE_DETAIL_CLASSES.has(instrument.assetClass) && instrument.exchange === "NSE" && instrument.symbol) {
-    detail = await fetchYahooQuoteMeta(`${instrument.symbol}.NS`);
-  } else if (instrument.assetClass === "CRYPTO") {
-    const coingeckoId = (instrument.metadata?.coingeckoId as string | undefined) || instrument.symbol;
-    if (coingeckoId) detail = await fetchCoinGeckoDetail(coingeckoId);
-  } else if (instrument.assetClass === "MUTUAL_FUND" && instrument.symbol) {
-    detail = await fetchMfApiDetail(instrument.symbol);
+  // policy as priceHistoryService.ts) so the test suite stays hermetic. The
+  // admin-provided fallback below never touches the network, so it still
+  // runs in tests — it's the only way this whole fallback path gets covered.
+  if (env.nodeEnv !== "test") {
+    if (NSE_DETAIL_CLASSES.has(instrument.assetClass) && instrument.exchange === "NSE" && instrument.symbol) {
+      detail = await fetchYahooQuoteMeta(`${instrument.symbol}.NS`);
+    } else if (instrument.assetClass === "CRYPTO") {
+      const coingeckoId = (instrument.metadata?.coingeckoId as string | undefined) || instrument.symbol;
+      if (coingeckoId) detail = await fetchCoinGeckoDetail(coingeckoId);
+    } else if (instrument.assetClass === "MUTUAL_FUND" && instrument.symbol) {
+      detail = await fetchMfApiDetail(instrument.symbol);
+    }
+    if (detail) detail.sourceKind = "live";
   }
 
   if (!detail) {
-    detail = {
+    detail = buildAdminProvidedDetail(instrument) || {
       available: false,
       reason:
-        NOT_AVAILABLE_REASONS[instrument.assetClass] ||
-        "Live fundamental/technical data isn't available for this instrument right now.",
+        env.nodeEnv === "test"
+          ? "Live data is disabled in the test environment."
+          : NOT_AVAILABLE_REASONS[instrument.assetClass] ||
+            "Live fundamental/technical data isn't available for this instrument right now.",
     };
   }
 

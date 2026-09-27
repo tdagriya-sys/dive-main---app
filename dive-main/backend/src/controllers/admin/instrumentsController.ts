@@ -1,8 +1,11 @@
 import { Response } from "express";
 import { FilterQuery } from "mongoose";
-import { Instrument, IInstrument, ASSET_CLASSES } from "../../models/Instrument";
+import { Instrument, IInstrument, ASSET_CLASSES, AssetClass } from "../../models/Instrument";
 import { runInstrumentRefresh } from "../../services/instrumentService";
+import { applyInstrumentUpload } from "../../services/instrumentUploadService";
 import { StaffRequest } from "../../middleware/auth";
+import { ApiError } from "../../middleware/errorHandler";
+import { recordAudit } from "../../services/auditLog";
 
 /**
  * Instrument master browser + manual refresh trigger (Phase 1b of
@@ -53,4 +56,48 @@ export async function listInstruments(req: StaffRequest, res: Response) {
 export async function triggerRefresh(_req: StaffRequest, res: Response) {
   const summary = await runInstrumentRefresh();
   res.status(200).json({ message: "Instrument refresh complete.", summary });
+}
+
+// Manual data seeding for a single asset class from an uploaded CSV — see
+// services/instrumentUploadService.ts's own top comment for the full design
+// (only `name` required, missing/bad fields never drop a row, and this never
+// touches that class's live-sourced or static-seed rows, only its own prior
+// upload). Cap here (not in the service) mirrors botscan.routes.ts's own
+// convention of keeping the size limit next to where the file first lands.
+export async function uploadInstruments(req: StaffRequest, res: Response) {
+  const file = req.file;
+  if (!file) throw new ApiError(400, "NO_FILE", "No file was uploaded.");
+  const assetClass = String(req.body?.assetClass || "").toUpperCase();
+  if (!(ASSET_CLASSES as readonly string[]).includes(assetClass)) {
+    throw new ApiError(400, "INVALID_ASSET_CLASS", "Choose which asset class this file is for.");
+  }
+
+  const removeMissing = String(req.body?.removeMissing || "").toLowerCase() === "true";
+  const summary = await applyInstrumentUpload(assetClass as AssetClass, file.originalname, file.buffer, {
+    removeMissing,
+    actorId: req.staff!.userId,
+  });
+
+  await recordAudit(
+    {
+      action: "instrument.uploaded",
+      resourceType: "Instrument",
+      meta: {
+        assetClass: summary.assetClass,
+        fileName: summary.fileName,
+        inserted: summary.inserted,
+        updated: summary.updated,
+        removeMissingRequested: summary.removeMissingRequested,
+        deletedFromPrevious: summary.deletedFromPrevious,
+        retiredInsteadOfDeleted: summary.retiredInsteadOfDeleted,
+        skippedCount: summary.skipped.length,
+        warningCount: summary.warnings.length,
+        lookthroughFundsUpdated: summary.lookthrough?.fundsUpdated,
+      },
+    },
+    { actorId: req.staff!.userId, actorRole: req.staff!.staffRole, actorLabel: req.staff!.email },
+    req
+  );
+
+  res.status(200).json({ summary });
 }

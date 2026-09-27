@@ -1,4 +1,5 @@
 import { Router, Response } from "express";
+import multer from "multer";
 import { requireAuth, requireStaff, requirePermission, requireStepUp, requireAdminIpAllowlist, StaffRequest } from "../middleware/auth";
 import { asyncHandler } from "../utils/asyncHandler";
 import * as dashboardController from "../controllers/admin/dashboardController";
@@ -39,6 +40,20 @@ import * as dataRequestsController from "../controllers/admin/dataRequestsContro
  * Mounted at /api/admin — see app.ts.
  */
 const router = Router();
+
+// A CSV is plain text, so this is generous headroom, not an expectation of
+// actually needing it — same reasoning as botscan.routes.ts's own limit.
+const instrumentUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    if (!/\.csv$/i.test(file.originalname) && file.mimetype !== "text/csv" && file.mimetype !== "application/vnd.ms-excel") {
+      cb(new Error("Unsupported file type: please upload a .csv file"));
+      return;
+    }
+    cb(null, true);
+  },
+});
 
 // Optional IP allowlist (§12 decision #9) runs first and is a no-op unless
 // ADMIN_IP_ALLOWLIST is actually set — rejecting here means a disallowed
@@ -131,6 +146,14 @@ router.patch("/coupons/:id", requirePermission("plans.manage"), asyncHandler(cou
 
 router.get("/instruments", requirePermission("instruments.manage"), asyncHandler(instrumentsController.listInstruments));
 router.post("/instruments/refresh", requirePermission("instruments.manage"), asyncHandler(instrumentsController.triggerRefresh));
+// Manual per-asset-class CSV upload — see instrumentUploadService.ts's own top
+// comment. 10MB comfortably covers even a very large scheme list as CSV text.
+router.post(
+  "/instruments/upload",
+  requirePermission("instruments.manage"),
+  instrumentUpload.single("file"),
+  asyncHandler(instrumentsController.uploadInstruments)
+);
 
 // Phase 2 — the three admin-configurable models (Dive Score, Context Engine,
 // Suggestion layer) share one lifecycle (view active/draft -> edit draft ->

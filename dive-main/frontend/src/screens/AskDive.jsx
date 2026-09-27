@@ -32,6 +32,17 @@ const FIELD_META = {
   schemeCategory: { label: "Scheme category", fmt: "text" },
   fundHouse: { label: "Fund house", fmt: "text" },
   return1yPct: { label: "1-year return", fmt: "pct" },
+  // Admin-provided (manually uploaded) fields — see instrumentDetailService.ts's
+  // buildAdminProvidedDetail. Kept as distinct keys from the live ones above so
+  // the two are never confused with each other.
+  uploadedPrice: { label: "Price / NAV", fmt: "inr2" },
+  uploadedPriceAsOf: { label: "As of", fmt: "text" },
+  uploadedAnnualReturnPct: { label: "Annual return", fmt: "pct" },
+  uploadedCreditRating: { label: "Credit rating", fmt: "text" },
+  uploadedMaturityDate: { label: "Maturity date", fmt: "text" },
+  uploadedExpenseRatioPct: { label: "Expense ratio", fmt: "pct" },
+  uploadedSector: { label: "Sector / segment", fmt: "text" },
+  uploadedCategory: { label: "Category / class", fmt: "text" },
 };
 
 function fmtField(value, fmt) {
@@ -63,18 +74,35 @@ function LiveDataCard({ detailLoading, detail }) {
     );
   }
   const entries = Object.entries(detail.fields || {}).filter(([k]) => FIELD_META[k]);
+  const isAdminProvided = detail.sourceKind === "admin";
   return (
     <div className="bg-[var(--surface-card)] rounded-2xl p-5 border border-[var(--border)]" data-testid="ask-live-data-card">
       <div className="flex items-center justify-between mb-1">
         <p className="text-sm font-bold">Fundamental / technical data</p>
         <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-tertiary)]">{detail.source}</span>
       </div>
+      {isAdminProvided && (
+        <p className="text-xs text-[var(--text-tertiary)] mt-0.5" data-testid="ask-live-data-admin-note">
+          Not live-priced — this is what was last uploaded{detail.asOf ? `, as of ${detail.asOf}` : ""}.
+        </p>
+      )}
       {entries.map(([key, value], i) => (
         <div key={key} className={`flex items-center justify-between text-sm ${i === 0 ? "mt-3 pt-3 border-t border-[var(--border-light)]" : "mt-2"}`}>
           <span className="text-[var(--text-secondary)]">{FIELD_META[key].label}</span>
           <span className="font-bold">{fmtField(value, FIELD_META[key].fmt)}</span>
         </div>
       ))}
+      {detail.holdings && detail.holdings.length > 0 && (
+        <div className="mt-4 pt-3 border-t border-[var(--border-light)]" data-testid="ask-live-data-holdings">
+          <p className="text-xs font-bold text-[var(--text-secondary)] mb-2">Top holdings (as uploaded)</p>
+          {detail.holdings.map((h, i) => (
+            <div key={i} className="flex items-center justify-between text-sm mt-1">
+              <span>{h.name}</span>
+              {h.weightPct != null && <span className="font-bold">{Number(h.weightPct).toFixed(1)}%</span>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
