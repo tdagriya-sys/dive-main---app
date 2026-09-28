@@ -439,6 +439,10 @@ export interface LatestPriceInput {
   assetClass: AssetClass;
   symbol?: string;
   coingeckoId?: string;
+  // Only present for a manually-uploaded instrument (source: "ADMIN_UPLOAD")
+  // — see the admin-provided fallback at the end of resolveHoldingLatestPrice.
+  source?: string;
+  metadata?: Record<string, unknown>;
 }
 
 // backend/src/seed/staticInstruments.ts seeds GOLD/SILVER with a mix of two
@@ -475,29 +479,47 @@ const GOLD_SILVER_PROXY_SYMBOL: Partial<Record<AssetClass, string>> = { GOLD: "G
 // holding here returns null and is simply left untouched by the caller,
 // same as it is today (no worse off than before this job existed).
 export async function resolveHoldingLatestPrice(holding: LatestPriceInput): Promise<number | null> {
-  if (env.nodeEnv === "test") return null;
+  // Real-price network calls are skipped in the test environment (same
+  // policy as instrumentDetailService.ts) so the test suite stays hermetic.
+  // The admin-provided fallback below never touches the network, so it
+  // still runs in tests.
+  if (env.nodeEnv !== "test") {
+    if (NSE_PRICEABLE_CLASSES.includes(holding.assetClass) && holding.symbol) {
+      const price = await fetchYahooLatestClose(`${holding.symbol}.NS`);
+      if (price != null) return price;
+    }
+    const proxySymbol = GOLD_SILVER_PROXY_SYMBOL[holding.assetClass];
+    if (proxySymbol) {
+      const price = await fetchYahooLatestClose(`${proxySymbol}.NS`);
+      if (price != null) return price;
+    }
+    if (holding.assetClass === "MUTUAL_FUND" && holding.symbol) {
+      const nav = await fetchMfApiLatestNav(holding.symbol);
+      if (nav != null) return nav;
+    }
+    if (holding.assetClass === "CRYPTO" && holding.coingeckoId) {
+      // Reuses instrumentDetailService.ts's fetchInstrumentDetail — the exact
+      // same CoinGecko INR lookup (vs_currency: "inr") that powers Ask
+      // DIVVE's own crypto detail card — rather than a second, duplicate
+      // CoinGecko integration. Its own 15-minute cache applies here too.
+      const detail = await fetchInstrumentDetail({ assetClass: "CRYPTO", symbol: holding.coingeckoId });
+      const priceInr = detail.fields?.currentPriceInr;
+      if (typeof priceInr === "number") return priceInr;
+    }
+  }
 
-  if (NSE_PRICEABLE_CLASSES.includes(holding.assetClass) && holding.symbol) {
-    const price = await fetchYahooLatestClose(`${holding.symbol}.NS`);
-    if (price != null) return price;
-  }
-  const proxySymbol = GOLD_SILVER_PROXY_SYMBOL[holding.assetClass];
-  if (proxySymbol) {
-    const price = await fetchYahooLatestClose(`${proxySymbol}.NS`);
-    if (price != null) return price;
-  }
-  if (holding.assetClass === "MUTUAL_FUND" && holding.symbol) {
-    const nav = await fetchMfApiLatestNav(holding.symbol);
-    if (nav != null) return nav;
-  }
-  if (holding.assetClass === "CRYPTO" && holding.coingeckoId) {
-    // Reuses instrumentDetailService.ts's fetchInstrumentDetail — the exact
-    // same CoinGecko INR lookup (vs_currency: "inr") that powers Ask
-    // DIVVE's own crypto detail card — rather than a second, duplicate
-    // CoinGecko integration. Its own 15-minute cache applies here too.
-    const detail = await fetchInstrumentDetail({ assetClass: "CRYPTO", symbol: holding.coingeckoId });
-    const priceInr = detail.fields?.currentPriceInr;
-    if (typeof priceInr === "number") return priceInr;
+  // A manually-uploaded instrument's symbol is always namespaced
+  // (UPLOAD_..., see instrumentUploadService.ts) specifically so a live
+  // refresh can never collide with it — but that also means none of the
+  // live lookups above can ever resolve it, on any asset class. Without
+  // this, quantity could never auto-calculate on add, and currentValue
+  // would stay frozen forever on the daily revaluation job, for every
+  // admin-uploaded instrument a user holds. Falls back to exactly the price
+  // an admin actually typed in (never fabricated), same fields
+  // instrumentDetailService.ts's buildAdminProvidedDetail already surfaces
+  // on Ask DIVE.
+  if (holding.source === "ADMIN_UPLOAD" && typeof holding.metadata?.price === "number") {
+    return holding.metadata.price;
   }
 
   return null;

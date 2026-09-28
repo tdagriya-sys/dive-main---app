@@ -166,7 +166,7 @@ describe("holdings — quantity auto-derived from value ÷ instrument price when
     mockedResolvePrice.mockResolvedValue(null);
   });
 
-  async function createInstrument(overrides: Partial<{ assetClass: string; symbol: string; name: string; metadata: Record<string, unknown> }> = {}) {
+  async function createInstrument(overrides: Partial<{ assetClass: string; symbol: string; name: string; source: string; metadata: Record<string, unknown> }> = {}) {
     return Instrument.create({ assetClass: "EQUITY", symbol: "TESTCO", name: "Test Company Ltd", isActive: true, source: "SEED", ...overrides });
   }
 
@@ -187,7 +187,7 @@ describe("holdings — quantity auto-derived from value ÷ instrument price when
     expect(res.status).toBe(201);
     expect(res.body.holding.currentValue).toBe(10000); // unchanged existing default behavior
     expect(res.body.holding.quantity).toBe(20); // 10000 ÷ 500
-    expect(mockedResolvePrice).toHaveBeenCalledWith({ assetClass: "EQUITY", symbol: "TESTCO", coingeckoId: undefined });
+    expect(mockedResolvePrice).toHaveBeenCalledWith({ assetClass: "EQUITY", symbol: "TESTCO", coingeckoId: undefined, source: "SEED", metadata: undefined });
   });
 
   // Case 2: both investedValue and currentValue filled, quantity blank —
@@ -281,7 +281,62 @@ describe("holdings — quantity auto-derived from value ÷ instrument price when
 
     expect(res.status).toBe(201);
     expect(res.body.holding.quantity).toBeCloseTo(0.01);
-    expect(mockedResolvePrice).toHaveBeenCalledWith({ assetClass: "CRYPTO", symbol: "BTC", coingeckoId: "bitcoin" });
+    expect(mockedResolvePrice).toHaveBeenCalledWith({ assetClass: "CRYPTO", symbol: "BTC", coingeckoId: "bitcoin", source: "SEED", metadata: { coingeckoId: "bitcoin" } });
+  });
+
+  // instrument.source/instrument.metadata must reach resolveHoldingLatestPrice
+  // so it can fall back to an admin-uploaded price when no live source can
+  // ever resolve the namespaced UPLOAD_... symbol (see
+  // priceHistoryService.ts's own admin-provided fallback).
+  it("passes the instrument's source and metadata through to the price resolver", async () => {
+    const token = await signupAndLogin();
+    const instrument = await createInstrument({
+      assetClass: "MUTUAL_FUND",
+      symbol: "UPLOAD_ZEN99001",
+      name: "Zenith Momentum Flexi Cap Fund",
+      source: "ADMIN_UPLOAD",
+      metadata: { price: 112.75 },
+    });
+    mockedResolvePrice.mockResolvedValueOnce(112.75);
+
+    const res = await request(app)
+      .post("/api/holdings/manual")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ assetClass: "MUTUAL_FUND", instrumentId: String(instrument._id), name: "Zenith Momentum Flexi Cap Fund", investedValue: 1127.5 });
+
+    expect(res.status).toBe(201);
+    expect(res.body.holding.quantity).toBe(10); // 1127.5 ÷ 112.75
+    expect(mockedResolvePrice).toHaveBeenCalledWith({
+      assetClass: "MUTUAL_FUND",
+      symbol: "UPLOAD_ZEN99001",
+      coingeckoId: undefined,
+      source: "ADMIN_UPLOAD",
+      metadata: { price: 112.75 },
+    });
+  });
+
+  // End-to-end with the REAL (un-mocked) resolveHoldingLatestPrice, not the
+  // stub — proves the actual production code path (not just the wiring)
+  // auto-calculates quantity for a manually-uploaded instrument, since no
+  // live source can ever resolve its namespaced UPLOAD_... symbol.
+  it("auto-calculates quantity for an ADMIN_UPLOAD instrument using its uploaded price, via the real resolver", async () => {
+    mockedResolvePrice.mockImplementation(jest.requireActual("../src/services/priceHistoryService").resolveHoldingLatestPrice);
+    const token = await signupAndLogin();
+    const instrument = await createInstrument({
+      assetClass: "MUTUAL_FUND",
+      symbol: "UPLOAD_ZEN99001",
+      name: "Zenith Momentum Flexi Cap Fund",
+      source: "ADMIN_UPLOAD",
+      metadata: { price: 112.75 },
+    });
+
+    const res = await request(app)
+      .post("/api/holdings/manual")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ assetClass: "MUTUAL_FUND", instrumentId: String(instrument._id), name: "Zenith Momentum Flexi Cap Fund", investedValue: 1127.5 });
+
+    expect(res.status).toBe(201);
+    expect(res.body.holding.quantity).toBe(10); // 1127.5 ÷ 112.75, back-solved from the real admin-provided fallback
   });
 });
 

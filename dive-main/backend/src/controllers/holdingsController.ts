@@ -133,7 +133,7 @@ export async function createManualHolding(req: AuthedRequest, res: Response) {
   }
 
   let instrumentName = input.name;
-  let instrument: { name: string; symbol: string; metadata?: Record<string, unknown> } | null = null;
+  let instrument: { name: string; symbol: string; metadata?: Record<string, unknown>; source?: string } | null = null;
   if (input.instrumentId) {
     instrument = await Instrument.findById(input.instrumentId).lean();
     if (!instrument) throw new ApiError(404, "INSTRUMENT_NOT_FOUND", "Selected instrument was not found.");
@@ -160,6 +160,8 @@ export async function createManualHolding(req: AuthedRequest, res: Response) {
       assetClass: input.assetClass,
       symbol: instrument.symbol,
       coingeckoId: instrument.metadata?.coingeckoId as string | undefined,
+      source: instrument.source,
+      metadata: instrument.metadata,
     });
     // No real price resolvable right now (network down, unsupported
     // instrument, etc.) — leave quantity unset, exactly today's existing

@@ -188,13 +188,15 @@ interface MarketPricedHoldingLean {
   assetClass: AssetClass;
   quantity?: number;
   currentValue: number;
-  instrumentId?: { _id: unknown; symbol?: string; metadata?: Record<string, unknown> } | null;
+  instrumentId?: { _id: unknown; symbol?: string; metadata?: Record<string, unknown>; source?: string } | null;
 }
 
 interface InstrumentGroup {
   assetClass: AssetClass;
   symbol?: string;
   coingeckoId?: string;
+  source?: string;
+  metadata?: Record<string, unknown>;
   holdings: Array<{ _id: unknown; userId: unknown; quantity: number; currentValue: number }>;
 }
 
@@ -209,7 +211,7 @@ async function refreshMarketPricedValuations(
     quantity: { $gt: 0 },
     userId: { $in: premiumUserIds },
   })
-    .populate("instrumentId", "symbol metadata")
+    .populate("instrumentId", "symbol metadata source")
     .lean()) as unknown as MarketPricedHoldingLean[];
 
   // Group by (assetClass, resolveKey) so an instrument held by 500 users is
@@ -229,7 +231,7 @@ async function refreshMarketPricedValuations(
     const key = `${h.assetClass}:${resolveKey}`;
     let group = groups.get(key);
     if (!group) {
-      group = { assetClass: h.assetClass, symbol, coingeckoId, holdings: [] };
+      group = { assetClass: h.assetClass, symbol, coingeckoId, source: h.instrumentId?.source, metadata: h.instrumentId?.metadata, holdings: [] };
       groups.set(key, group);
     }
     group.holdings.push({ _id: h._id, userId: h.userId, quantity: h.quantity, currentValue: h.currentValue });
@@ -244,7 +246,7 @@ async function refreshMarketPricedValuations(
   // breaker if this ever grows large enough for external API rate limits
   // to matter here specifically.
   for (const group of groups.values()) {
-    const price = await priceResolver({ assetClass: group.assetClass, symbol: group.symbol, coingeckoId: group.coingeckoId });
+    const price = await priceResolver({ assetClass: group.assetClass, symbol: group.symbol, coingeckoId: group.coingeckoId, source: group.source, metadata: group.metadata });
     if (price == null) continue; // unresolvable today — every holding in this group is left exactly as it was
     for (const h of group.holdings) {
       const newValue = Math.round(price * h.quantity);

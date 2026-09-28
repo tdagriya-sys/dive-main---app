@@ -211,6 +211,28 @@ export function computeHoldingQuality(
           tier: "caution",
         };
       }
+      // Still nothing — fall back to the fund's own official AMFI category,
+      // if an admin uploaded one (instrumentUploadService.ts's Category
+      // column — see docs/INSTRUMENT_UPLOAD_FORMAT.md). This is deliberately
+      // a LOWER-priority fallback than a real sector/thematic tag above: a
+      // manually-uploaded instrument's symbol is always namespaced
+      // (UPLOAD_...) specifically so no live source can ever resolve it, so
+      // `category` here is the ONLY classification most bulk-uploaded funds
+      // will ever get. It's in exactly the same shape AMFI/MFAPI's own live
+      // schemeCategory uses ("Equity Scheme - Flexi Cap Fund", "Debt Scheme
+      // - ...", "Equity Scheme - Sectoral/ Thematic", etc.), so the same
+      // classifyMfCategory tiering (sectoral => caution, debt/liquid =>
+      // good, equity/hybrid => neutral, ...) applies correctly here too —
+      // never a blanket "caution" the way the sector branch above is.
+      const uploadedCategory = typeof instrumentMetadata?.category === "string" ? instrumentMetadata.category : undefined;
+      if (uploadedCategory) {
+        const { tier, note } = classifyMfCategory(uploadedCategory);
+        return {
+          label: uploadedCategory,
+          detail: `Classified by AMFI as a ${uploadedCategory} scheme. ${note} ${MF_RATINGS_UNAVAILABLE}`.replace(/\s+/g, " ").trim(),
+          tier,
+        };
+      }
       return { label: "Ratings not freely available", detail: MF_RATINGS_UNAVAILABLE, tier: "unknown" };
     }
 

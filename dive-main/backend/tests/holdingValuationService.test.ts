@@ -148,7 +148,7 @@ describe("holdingValuationService — market-priced holdings (EQUITY/ETF/GOLD/SI
 
     const after = await Holding.findById(holdingId).lean();
     expect(after?.currentValue).toBe(15000); // 100 × 150
-    expect(stubResolver).toHaveBeenCalledWith({ assetClass: "EQUITY", symbol: "TESTCO" });
+    expect(stubResolver).toHaveBeenCalledWith({ assetClass: "EQUITY", symbol: "TESTCO", coingeckoId: undefined, source: "SEED", metadata: undefined });
   });
 
   it("fetches the price for a given instrument only ONCE, even when multiple holdings across multiple users reference it", async () => {
@@ -193,7 +193,7 @@ describe("holdingValuationService — market-priced holdings (EQUITY/ETF/GOLD/SI
 
     const after = await Holding.findById(holdingId).lean();
     expect(after?.currentValue).toBe(60000); // 0.01 × 6,000,000
-    expect(stubResolver).toHaveBeenCalledWith({ assetClass: "CRYPTO", symbol: undefined, coingeckoId: "bitcoin" });
+    expect(stubResolver).toHaveBeenCalledWith({ assetClass: "CRYPTO", symbol: undefined, coingeckoId: "bitcoin", source: "SEED", metadata: { coingeckoId: "bitcoin" } });
   });
 
   it("leaves a holding untouched when it has no linked instrument (plain manual value entry)", async () => {
@@ -226,6 +226,56 @@ describe("holdingValuationService — market-priced holdings (EQUITY/ETF/GOLD/SI
 
     const after = await Holding.findById(holdingId).lean();
     expect(after?.currentValue).toBe(5000); // left exactly as it was, not zeroed or guessed
+  });
+
+  // A manually-uploaded instrument's symbol is always namespaced
+  // (UPLOAD_...), so no live source (MFAPI here) can ever resolve it — this
+  // exercises the REAL default resolveHoldingLatestPrice (no stub), which
+  // must fall back to the price an admin actually uploaded
+  // (Instrument.metadata.price) instead of leaving the holding frozen
+  // forever. See priceHistoryService.ts's own admin-provided fallback.
+  it("reprices an ADMIN_UPLOAD-sourced Mutual Fund holding using the admin-uploaded price, via the real (un-stubbed) resolver", async () => {
+    const { token } = await signupAndLogin();
+    const instrument = await Instrument.create({
+      assetClass: "MUTUAL_FUND",
+      symbol: "UPLOAD_ZEN99001",
+      name: "Zenith Momentum Flexi Cap Fund",
+      isActive: true,
+      source: "ADMIN_UPLOAD",
+      metadata: { price: 112.75 },
+    });
+    const create = await request(app)
+      .post("/api/holdings/manual")
+      .set(auth(token))
+      .send({ assetClass: "MUTUAL_FUND", instrumentId: String(instrument._id), name: "Zenith Momentum Flexi Cap Fund", investedValue: 1000, currentValue: 1000, quantity: 10 });
+    const holdingId = create.body.holding._id as string;
+
+    await runDailyValuationRefresh(); // no stub — the real resolver, network skipped in test env
+
+    const after = await Holding.findById(holdingId).lean();
+    expect(after?.currentValue).toBe(1128); // 10 × 112.75, rounded
+  });
+
+  it("leaves an ADMIN_UPLOAD instrument's holding untouched when it has no uploaded price at all (name-only upload)", async () => {
+    const { token } = await signupAndLogin();
+    const instrument = await Instrument.create({
+      assetClass: "MUTUAL_FUND",
+      symbol: "UPLOAD_BARE",
+      name: "Bare Uploaded Fund",
+      isActive: true,
+      source: "ADMIN_UPLOAD",
+      metadata: {},
+    });
+    const create = await request(app)
+      .post("/api/holdings/manual")
+      .set(auth(token))
+      .send({ assetClass: "MUTUAL_FUND", instrumentId: String(instrument._id), name: "Bare Uploaded Fund", investedValue: 1000, currentValue: 1000, quantity: 10 });
+    const holdingId = create.body.holding._id as string;
+
+    await runDailyValuationRefresh();
+
+    const after = await Holding.findById(holdingId).lean();
+    expect(after?.currentValue).toBe(1000); // no price anywhere — left exactly as it was
   });
 });
 

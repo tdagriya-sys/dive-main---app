@@ -635,7 +635,8 @@
       "Bash(cp \"C:\\\\Users\\\\DAGRIY~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\D--Dive-dive-main---app-dive-main\\\\4951815e-7e0d-44bd-bfa6-9da3325d5f6f\\\\scratchpad\\\\buildAmfiUploadCsv.js\" \"D:\\\\Dive\\\\dive-main - app\\\\dive-main\\\\backend\\\\scratch_buildAmfiUploadCsv.js\")",
       "Bash(mv \"D:\\\\Dive\\\\dive-main - app\\\\dive-main\\\\backend\\\\mutual_fund_upload.csv\" \"C:\\\\Users\\\\DAGRIY~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\D--Dive-dive-main---app-dive-main\\\\4951815e-7e0d-44bd-bfa6-9da3325d5f6f\\\\scratchpad\\\\mutual_fund_upload.csv\")",
       "Bash(rm -f \"D:\\\\Dive\\\\dive-main - app\\\\dive-main\\\\backend\\\\scratch_buildAmfiUploadCsv.js\")",
-      "Bash(grep -rho \"divve\\\\.[a-z]\\\\{2,4\\\\}\" \"D:\\\\Dive\\\\dive-main - app\\\\dive-main\\\\docs\")"
+      "Bash(grep -rho \"divve\\\\.[a-z]\\\\{2,4\\\\}\" \"D:\\\\Dive\\\\dive-main - app\\\\dive-main\\\\docs\")",
+      "Bash(grep -n \"Full backend suite, \\\\`tsc\\\\`, and the production build all re-run clean\" \"D:\\\\Dive\\\\dive-main - app\\\\dive-main\\\\docs\\\\ADMIN_PANEL_PLAN.md\")"
     ]
   }
 }
